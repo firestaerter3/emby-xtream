@@ -32,6 +32,7 @@ docs/
 
 # Screenshots (scratch reference images)
 *.png
+!Emby.Xtream.Plugin/thumb.png
 
 # OS files
 .DS_Store

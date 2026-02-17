@@ -1,16 +1,18 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Emby.Xtream.Plugin.Service;
 using MediaBrowser.Common;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
+using MediaBrowser.Model.Drawing;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 
 namespace Emby.Xtream.Plugin
 {
-    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
+    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages, IHasThumbImage
     {
         private static volatile Plugin _instance;
         private readonly IApplicationHost _applicationHost;
@@ -40,6 +42,13 @@ namespace Emby.Xtream.Plugin
         public LiveTvService LiveTvService => _liveTvService;
 
         public StrmSyncService StrmSyncService => _strmSyncService;
+
+        public Stream GetThumbImage()
+        {
+            return GetType().Assembly.GetManifestResourceStream("Emby.Xtream.Plugin.thumb.png");
+        }
+
+        public ImageFormat ThumbImageFormat => ImageFormat.Png;
 
         public IEnumerable<PluginPageInfo> GetPages()
         {
