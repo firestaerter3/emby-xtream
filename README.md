@@ -88,15 +88,18 @@ A configuration UI embedded in Emby's plugin settings with five tabs.
 
 ---
 
-## Deployment Guide
+## Installation
 
-### Prerequisites
+### Step 1: Download the Plugin
 
-- **Emby Server 4.8+** running (bare metal or Docker)
-- **.NET SDK 6.0+** installed on your build machine
-- An **Xtream-compatible IPTV provider** (or [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr))
+Download `Emby.Xtream.Plugin.dll` from the [latest release](../../releases/latest).
 
-### Step 1: Build the Plugin
+> Only the single DLL file is needed — no other dependencies.
+
+<details>
+<summary><strong>Build from source (alternative)</strong></summary>
+
+Requires .NET SDK 6.0+:
 
 ```bash
 git clone https://github.com/<your-username>/emby-xtream.git
@@ -104,31 +107,28 @@ cd emby-xtream/Emby.Xtream.Plugin
 bash build.sh
 ```
 
-The compiled DLL will be at:
-```
-Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll
-```
+The compiled DLL will be at `Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll`.
+
+</details>
 
 ### Step 2: Install the Plugin
 
-Copy the DLL to your Emby Server's plugins directory.
+Copy the DLL to your Emby Server's plugins directory and restart.
 
 **Docker (most common):**
 ```bash
-docker cp Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll emby:/config/plugins/
+docker cp Emby.Xtream.Plugin.dll emby:/config/plugins/
 docker restart emby
 ```
 
 **Bare metal (Linux):**
 ```bash
-cp Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll /var/lib/emby/plugins/
+cp Emby.Xtream.Plugin.dll /var/lib/emby/plugins/
 systemctl restart emby-server
 ```
 
 **Bare metal (macOS/Windows):**
 Copy `Emby.Xtream.Plugin.dll` to your Emby data directory under `plugins/`, then restart Emby Server.
-
-> Only the single `Emby.Xtream.Plugin.dll` file is needed. No other dependencies to copy.
 
 ### Step 3: Configure the Plugin
 
@@ -185,16 +185,7 @@ If you use [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) for stream 
 
 ### Updating the Plugin
 
-Build the new version and replace the DLL:
-
-```bash
-cd emby-xtream/Emby.Xtream.Plugin
-bash build.sh
-docker cp out/Emby.Xtream.Plugin.dll emby:/config/plugins/
-docker restart emby
-```
-
-Your configuration is preserved across updates.
+Download the latest DLL from [Releases](../../releases/latest), replace the file in your plugins directory, and restart Emby. Your configuration is preserved across updates.
 
 ---
 

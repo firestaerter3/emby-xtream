@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build plugin
+        run: |
+          cd Emby.Xtream.Plugin
+          dotnet publish -c Release -o out --no-self-contained
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll
+          generate_release_notes: true
