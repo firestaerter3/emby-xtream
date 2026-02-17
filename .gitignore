@@ -1,0 +1,38 @@
+# Build output
+bin/
+obj/
+out/
+
+# NuGet
+packages/
+*.nuget.props
+*.nuget.targets
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+
+# Local/sensitive config
+CLAUDE.local.md
+.claude/
+
+# Test artifacts
+.playwright-mcp/
+
+# Dev tools & scripts
+InspectSDK/
+benchmark_*.py
+benchmark_*.sh
+inspect_sdk.csx
+
+# Documentation (local working docs)
+docs/
+
+# Screenshots (scratch reference images)
+*.png
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,77 @@
+using System;
+using MediaBrowser.Model.Plugins;
+
+namespace Emby.Xtream.Plugin
+{
+    public class PluginConfiguration : BasePluginConfiguration
+    {
+        // Xtream connection
+        public string BaseUrl { get; set; } = string.Empty;
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+
+        // Live TV
+        public bool EnableLiveTv { get; set; } = true;
+        public string LiveTvOutputFormat { get; set; } = "ts";
+
+        // EPG / Guide Data
+        public bool EnableEpg { get; set; } = true;
+        public int EpgCacheMinutes { get; set; } = 30;
+        public int EpgDaysToFetch { get; set; } = 2;
+        public int M3UCacheMinutes { get; set; } = 15;
+
+        // Catch-up / Timeshift
+        public bool EnableCatchup { get; set; }
+        public int CatchupDays { get; set; } = 7;
+
+        // Category filtering
+        public int[] SelectedLiveCategoryIds { get; set; } = new int[0];
+        public bool IncludeAdultChannels { get; set; }
+
+        // Channel name cleaning
+        public string ChannelRemoveTerms { get; set; } = string.Empty;
+        public bool EnableChannelNameCleaning { get; set; } = true;
+
+        // Dispatcharr
+        public bool EnableDispatcharr { get; set; }
+        public string DispatcharrUrl { get; set; } = string.Empty;
+        public string DispatcharrUser { get; set; } = string.Empty;
+        public string DispatcharrPass { get; set; } = string.Empty;
+
+        // VOD Movies
+        public bool SyncMovies { get; set; }
+        public string StrmLibraryPath { get; set; } = "/config/xtream";
+        public int[] SelectedVodCategoryIds { get; set; } = new int[0];
+        public string MovieFolderMode { get; set; } = "single";
+        public string MovieFolderMappings { get; set; } = string.Empty;
+
+        // Series / TV Shows
+        public bool SyncSeries { get; set; }
+        public int[] SelectedSeriesCategoryIds { get; set; } = new int[0];
+        public string SeriesFolderMode { get; set; } = "single";
+        public string SeriesFolderMappings { get; set; } = string.Empty;
+
+        // Content name cleaning
+        public bool EnableContentNameCleaning { get; set; }
+        public string ContentRemoveTerms { get; set; } = string.Empty;
+
+        // TMDB folder naming
+        public bool EnableTmdbFolderNaming { get; set; }
+        public bool EnableTmdbFallbackLookup { get; set; }
+
+        // Series metadata matching
+        public bool EnableSeriesIdFolderNaming { get; set; }
+        public bool EnableSeriesMetadataLookup { get; set; }
+        public string TvdbFolderIdOverrides { get; set; } = string.Empty;
+
+        // Cached categories (JSON arrays, populated on refresh)
+        public string CachedVodCategories { get; set; } = string.Empty;
+        public string CachedSeriesCategories { get; set; } = string.Empty;
+        public string CachedLiveCategories { get; set; } = string.Empty;
+
+        // Sync settings
+        public bool SmartSkipExisting { get; set; } = true;
+        public int SyncParallelism { get; set; } = 3;
+        public bool CleanupOrphans { get; set; }
+    }
+}

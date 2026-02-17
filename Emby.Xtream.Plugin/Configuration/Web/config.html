@@ -1,0 +1,743 @@
+<div is="emby-scroller"
+     class="view flex flex-direction-column scrollFrameY flex-grow"
+     data-horizontal="false"
+     data-forcescrollbar="true"
+     data-centerfocus="true"
+     data-bindheader="true"
+     data-controller="__plugin/xtreamconfigjs"
+     data-title="Xtream Tuner">
+
+  <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page">
+    <form class="xtreamConfigForm auto-center">
+
+                <style>
+                    .dashboard-grid {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 1.2em;
+                        margin-bottom: 1.5em;
+                    }
+                    @media (max-width: 700px) {
+                        .dashboard-grid { grid-template-columns: 1fr; }
+                    }
+                    .dashboard-card {
+                        background: rgba(255,255,255,0.04);
+                        border: 1px solid rgba(255,255,255,0.1);
+                        border-radius: 8px;
+                        padding: 1.2em;
+                    }
+                    .dashboard-card h3 {
+                        margin: 0 0 0.8em 0;
+                        font-size: 1em;
+                        opacity: 0.8;
+                        font-weight: 600;
+                    }
+                    .status-badge {
+                        display: inline-block;
+                        padding: 0.2em 0.7em;
+                        border-radius: 4px;
+                        font-size: 0.85em;
+                        font-weight: 600;
+                    }
+                    .status-badge.success {
+                        background: rgba(82,181,75,0.2);
+                        color: #52B54B;
+                    }
+                    .status-badge.failed {
+                        background: rgba(204,0,0,0.2);
+                        color: #cc0000;
+                    }
+                    .status-badge.running {
+                        background: rgba(52,152,219,0.2);
+                        color: #3498db;
+                    }
+                    .status-badge.idle {
+                        background: rgba(255,255,255,0.1);
+                        color: rgba(255,255,255,0.5);
+                    }
+                    .dashboard-stats {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+                        gap: 0.8em;
+                        margin-top: 0.8em;
+                    }
+                    .dashboard-stat {
+                        text-align: center;
+                        padding: 0.6em;
+                        background: rgba(255,255,255,0.03);
+                        border-radius: 6px;
+                    }
+                    .dashboard-stat .stat-value {
+                        font-size: 1.5em;
+                        font-weight: 700;
+                        color: #52B54B;
+                    }
+                    .dashboard-stat .stat-label {
+                        font-size: 0.8em;
+                        opacity: 0.6;
+                        margin-top: 0.2em;
+                    }
+                    .library-stat-bar {
+                        display: flex;
+                        align-items: center;
+                        gap: 0.8em;
+                        padding: 0.6em 0;
+                    }
+                    .library-stat-bar .stat-count {
+                        font-size: 1.3em;
+                        font-weight: 700;
+                        color: #52B54B;
+                        min-width: 3em;
+                    }
+                    .library-stat-bar .stat-type {
+                        opacity: 0.7;
+                    }
+                    .dashboard-history-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        font-size: 0.9em;
+                    }
+                    .dashboard-history-table th {
+                        text-align: left;
+                        padding: 0.5em 0.6em;
+                        border-bottom: 1px solid rgba(255,255,255,0.15);
+                        opacity: 0.6;
+                        font-weight: 600;
+                        font-size: 0.85em;
+                    }
+                    .dashboard-history-table td {
+                        padding: 0.5em 0.6em;
+                        border-bottom: 1px solid rgba(255,255,255,0.06);
+                    }
+                    .dashboard-progress-card {
+                        background: rgba(52,152,219,0.08);
+                        border: 1px solid rgba(52,152,219,0.3);
+                        border-radius: 8px;
+                        padding: 1.2em;
+                        margin-bottom: 1.2em;
+                    }
+                    .dashboard-progress-bar-track {
+                        background: rgba(255,255,255,0.15);
+                        border-radius: 4px;
+                        height: 20px;
+                        overflow: hidden;
+                        margin-top: 0.5em;
+                    }
+                    .dashboard-progress-bar-fill {
+                        background: #52B54B;
+                        height: 100%;
+                        border-radius: 4px;
+                        transition: width 0.3s ease;
+                    }
+                    .button-secondary {
+                        background: transparent !important;
+                        border: 1px solid rgba(255,255,255,0.3) !important;
+                        color: inherit !important;
+                    }
+                    .button-secondary:hover {
+                        border-color: rgba(255,255,255,0.5) !important;
+                    }
+                    .danger-zone {
+                        border: 1px solid rgba(192,57,43,0.3);
+                        border-radius: 6px;
+                        margin-top: 1.5em;
+                    }
+                    .danger-zone-header {
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        padding: 0.8em 1em;
+                        cursor: pointer;
+                        color: #c0392b;
+                        font-weight: 600;
+                        font-size: 0.9em;
+                    }
+                    .danger-zone-content {
+                        display: none;
+                        padding: 0 1em 1em 1em;
+                    }
+                    .danger-zone.open .danger-zone-content {
+                        display: block;
+                    }
+                    .categorySearchInput {
+                        width: 100%;
+                        padding: 0.5em 0.8em;
+                        background: transparent;
+                        border: 1px solid rgba(255,255,255,0.2);
+                        border-radius: 4px;
+                        color: inherit;
+                        font-size: 0.9em;
+                        margin-bottom: 0.5em;
+                        box-sizing: border-box;
+                    }
+                    .categorySearchInput::placeholder {
+                        color: rgba(255,255,255,0.35);
+                    }
+                    .stickyFooter {
+                        position: sticky;
+                        bottom: 0;
+                        padding: 1em 0 0.5em 0;
+                        background: linear-gradient(to bottom, transparent, rgba(20,20,20,0.95) 30%);
+                        z-index: 10;
+                        margin-top: 1em;
+                    }
+                </style>
+
+                <div class="configTabs" style="display:flex; gap:0; margin-bottom:1.5em; border-bottom:2px solid rgba(255,255,255,0.1);">
+                    <button type="button" class="tabBtn tabBtnDashboard" data-tab="dashboard" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabDashboard').style.display='block';this.style.opacity='1';this.style.borderBottomColor='#52B54B';"
+                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                        Dashboard
+                    </button>
+                    <button type="button" class="tabBtn tabBtnGeneric" data-tab="generic" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabGeneric').style.display='block';this.style.opacity='1';this.style.borderBottomColor='#52B54B';"
+                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                        Settings
+                    </button>
+                    <button type="button" class="tabBtn tabBtnMovies" data-tab="movies" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabMovies').style.display='block';this.style.opacity='1';this.style.borderBottomColor='#52B54B';"
+                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                        Movies
+                    </button>
+                    <button type="button" class="tabBtn tabBtnSeries" data-tab="series" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabSeries').style.display='block';this.style.opacity='1';this.style.borderBottomColor='#52B54B';"
+                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                        Series
+                    </button>
+                    <button type="button" class="tabBtn tabBtnLiveTv" data-tab="liveTv" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabLiveTv').style.display='block';this.style.opacity='1';this.style.borderBottomColor='#52B54B';"
+                            style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
+                        Live TV
+                    </button>
+                </div>
+
+                <!-- ===== Dashboard ===== -->
+                <div class="tabPanel tabDashboard">
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Dashboard</h2>
+
+                    <!-- Live Progress (hidden when not syncing) -->
+                    <div class="dashboardLiveProgress" style="display:none;">
+                        <div class="dashboard-progress-card">
+                            <h3>Sync In Progress</h3>
+                            <div class="dashboardProgressPhase" style="color:#3498db; font-weight:600;"></div>
+                            <div class="dashboard-progress-bar-track">
+                                <div class="dashboardProgressBarFill dashboard-progress-bar-fill" style="width:0%;"></div>
+                            </div>
+                            <div class="dashboardProgressDetail" style="color:#ccc; margin-top:0.4em; font-size:0.9em;"></div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-grid">
+                        <!-- Sync Status -->
+                        <div class="dashboard-card">
+                            <h3>Last Sync</h3>
+                            <div class="dashboardStatusContent">
+                                <span class="status-badge idle">No syncs yet</span>
+                            </div>
+                            <div class="dashboardStatusStats dashboard-stats" style="display:none;"></div>
+                        </div>
+
+                        <!-- Library Stats -->
+                        <div class="dashboard-card">
+                            <h3>Library</h3>
+                            <div class="dashboardLibraryContent">
+                                <div style="color:rgba(255,255,255,0.5);">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div class="dashboard-card" style="margin-bottom:1.2em;">
+                        <h3>Quick Actions</h3>
+                        <button class="btnDashboardSyncAll raised button-submit" is="emby-button" type="button">
+                            <span>Sync Movies &amp; Series</span>
+                        </button>
+                        <div class="dashboardSyncAllResult" style="margin-top:0.5em;"></div>
+                    </div>
+
+                    <!-- Sync History -->
+                    <div class="dashboard-card">
+                        <h3>Sync History</h3>
+                        <div class="dashboardHistoryContent">
+                            <div style="color:rgba(255,255,255,0.5);">No sync history yet</div>
+                        </div>
+                    </div>
+                </div>
+
+                </div><!-- end tabDashboard -->
+
+                <!-- ===== Settings ===== -->
+                <div class="tabPanel tabGeneric" style="display:none;">
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Xtream Connection</h2>
+                    <div class="inputContainer">
+                        <input class="txtBaseUrl" type="text" is="emby-input"
+                               label="Server URL (e.g. http://example.com:8080)" />
+                        <div class="fieldDescription">
+                            Base URL of your Xtream-compatible server, without trailing slash.
+                        </div>
+                    </div>
+                    <div class="inputContainer">
+                        <input class="txtUsername" type="text" is="emby-input" label="Username" />
+                    </div>
+                    <div class="inputContainer">
+                        <input class="txtPassword" type="password" is="emby-input" label="Password" />
+                    </div>
+                    <button class="btnTestConnection raised button-secondary" is="emby-button" type="button">
+                        <span>Test Connection</span>
+                    </button>
+                    <div class="connectionTestResult" style="margin-top:0.5em;"></div>
+                </div>
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">STRM Sync Settings</h2>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkSmartSkipExisting" type="checkbox" is="emby-checkbox" />
+                            <span>Smart Skip Existing</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Skip STRM files that already exist. Speeds up re-syncs significantly.
+                        </div>
+                    </div>
+                    <div class="inputContainer">
+                        <input class="txtSyncParallelism" type="number" is="emby-input"
+                               label="Sync Parallelism" min="1" max="10" step="1" />
+                        <div class="fieldDescription">
+                            Number of parallel operations during sync (default: 3). Higher = faster but more server load.
+                        </div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkCleanupOrphans" type="checkbox" is="emby-checkbox" />
+                            <span>Cleanup Orphaned Files</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Remove STRM files that are no longer present in the source after sync.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Name Cleaning</h2>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkEnableNameCleaning" type="checkbox" is="emby-checkbox" />
+                            <span>Enable Name Cleaning</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Clean movie, series, and channel names by removing country-code
+                            prefix tags (e.g. ┃UK┃, │EN│, |FR|) and custom terms.
+                        </div>
+                    </div>
+                    <div class="nameCleaningSettings">
+                        <div class="inputContainer">
+                            <textarea class="txtRemoveTerms" is="emby-input"
+                                      label="Additional Terms to Remove (one per line)"
+                                      rows="4" style="resize:vertical;"></textarea>
+                            <div class="fieldDescription">
+                                Extra terms to strip from movie, series, and channel names, one per line.
+                                The built-in pattern automatically removes ┃XX┃ style tags.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">TMDB / TVDb Matching</h2>
+                    <div class="fieldDescription" style="margin-bottom:1em;">
+                        Append metadata IDs to folder names for automatic matching in Emby.
+                        Enabling will re-create folders on next sync.
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkEnableTmdbFolderNaming" type="checkbox" is="emby-checkbox" onchange="var s=this.closest('.verticalSection').querySelector('.tmdbSettings');if(s){var inp=s.querySelectorAll('input,textarea');for(var i=0;i<inp.length;i++)inp[i].disabled=!this.checked;s.style.opacity=this.checked?'1':'0.5';}" />
+                            <span>Enable Metadata ID in Folder Names</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Appends [tmdbid=X] or [tvdbid=X] to movie and series folder names
+                            using IDs from the Xtream provider.
+                        </div>
+                    </div>
+                    <!-- Hidden stub: old cached JS expects this element -->
+                    <input class="chkEnableSeriesIdFolderNaming" type="checkbox" style="display:none" />
+                    <div class="seriesIdSettings" style="display:none;"></div>
+                    <div class="tmdbSettings">
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label>
+                                <input class="chkEnableTmdbFallbackLookup chkEnableSeriesMetadataLookup" type="checkbox" is="emby-checkbox" />
+                                <span>Enable Fallback Lookup</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">
+                                For content without a provider ID, search via Emby's metadata providers.
+                                Rate-limited to 2 concurrent lookups.
+                            </div>
+                        </div>
+                        <div class="inputContainer">
+                            <textarea class="txtTvdbFolderIdOverrides" is="emby-input"
+                                      label="Manual ID Overrides (one per line)"
+                                      rows="4" style="resize:vertical;"></textarea>
+                            <div class="fieldDescription">
+                                Override IDs for specific series. Format: FolderName=TvdbID, one per line.
+                                Example: Breaking Bad (2008)=81189. Overrides take highest priority.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                </div><!-- end tabGeneric -->
+
+                <!-- ===== Movies ===== -->
+                <div class="tabPanel tabMovies" style="display:none;">
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">VOD Movies</h2>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkSyncMovies" type="checkbox" is="emby-checkbox" />
+                            <span>Enable VOD Movies</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Generate STRM files for VOD movies from the Xtream server.
+                        </div>
+                    </div>
+                    <div class="vodMovieSettings">
+                        <div class="selectContainer">
+                            <select class="selMovieFolderMode" is="emby-select" label="Movie Folder Organization">
+                                <option value="single">Single Folder</option>
+                                <option value="custom">Multiple Folders</option>
+                            </select>
+                            <div class="fieldDescription">
+                                Single Folder puts all movies in one library. Multiple Folders lets you organize by category.
+                            </div>
+                        </div>
+
+                        <!-- Single folder mode: flat category selection -->
+                        <div class="movieSingleContainer">
+                            <div class="fieldDescription" style="margin-bottom:0.5em;">
+                                Select which VOD categories to sync. Leave all unchecked to include all movies.
+                            </div>
+                            <div style="margin-bottom:0.5em;">
+                                <button class="btnLoadVodCategories raised button-secondary" is="emby-button" type="button">
+                                    <span>Refresh Categories</span>
+                                </button>
+                                <span class="vodCategoriesStatus" style="margin-left:0.5em; color:#52B54B;"></span>
+                                <button class="btnSelectAllVodCategories raised button-secondary" is="emby-button" type="button"
+                                        style="margin-left:0.5em;" disabled>
+                                    <span>Select All</span>
+                                </button>
+                                <button class="btnDeselectAllVodCategories raised button-secondary" is="emby-button" type="button"
+                                        style="margin-left:0.5em;" disabled>
+                                    <span>Deselect All</span>
+                                </button>
+                            </div>
+                            <input type="text" class="categorySearchInput vodCategorySearch" placeholder="Filter categories..." oninput="var f=this.value.toLowerCase();var items=this.nextElementSibling.querySelectorAll('.checkboxContainer');for(var i=0;i<items.length;i++){items[i].style.display=items[i].textContent.toLowerCase().indexOf(f)>=0?'':'none';}" />
+                            <div class="vodCategoriesContainer" style="max-height:450px; overflow-y:auto; border:1px solid rgba(255,255,255,0.1); border-radius:4px; padding:0.5em;">
+                                <div class="vodCategoriesLoading" style="display:none; color:#999;">Loading categories...</div>
+                                <div class="vodCategoriesList"></div>
+                            </div>
+                        </div>
+
+                        <!-- Multiple folders mode: folder-based category assignment -->
+                        <div class="movieFoldersContainer" style="display:none;">
+                            <div class="fieldDescription" style="margin-bottom:0.5em;">
+                                Create folders and assign categories to each. Categories can be in multiple folders.
+                            </div>
+                            <div style="margin-bottom:1em;">
+                                <button class="btnLoadVodCategoriesMulti raised button-secondary" is="emby-button" type="button" style="background:#333; border:1px solid rgba(255,255,255,0.2);">
+                                    <span>&#x21bb; Refresh Categories</span>
+                                </button>
+                                <span class="vodCategoriesMultiStatus" style="margin-left:0.5em; color:#52B54B;"></span>
+                            </div>
+                            <div class="movieFoldersList"></div>
+                            <button class="btnAddMovieFolder raised button-secondary" is="emby-button" type="button" style="margin-top:0.5em;">
+                                <span>+ Add Folder</span>
+                            </button>
+                        </div>
+
+                        <div style="margin-top:1em;">
+                            <button class="btnSyncMovies raised button-submit block" is="emby-button" type="button">
+                                <span>Sync Movies Now</span>
+                            </button>
+                            <div class="syncMoviesResult" style="margin-top:0.5em;"></div>
+                        </div>
+
+                        <div class="danger-zone">
+                            <div class="danger-zone-header" onclick="var z=this.parentNode;z.classList.toggle('open');var a=this.querySelector('.danger-zone-arrow');if(a)a.textContent=z.classList.contains('open')?'\u25BC':'\u25B6';">
+                                <span>Danger Zone</span>
+                                <span class="danger-zone-arrow">&#9654;</span>
+                            </div>
+                            <div class="danger-zone-content">
+                                <button class="btnDeleteMovies raised block" is="emby-button" type="button"
+                                        style="background:#c0392b;">
+                                    <span>Delete All Movies</span>
+                                </button>
+                                <div class="deleteMoviesResult" style="margin-top:0.5em;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                </div><!-- end tabMovies -->
+
+                <!-- ===== Series ===== -->
+                <div class="tabPanel tabSeries" style="display:none;">
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Series / TV Shows</h2>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkSyncSeries" type="checkbox" is="emby-checkbox" />
+                            <span>Enable Series / TV Shows</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Generate STRM files for series/TV shows with season and episode structure.
+                        </div>
+                    </div>
+                    <div class="seriesSettings">
+                        <div class="selectContainer">
+                            <select class="selSeriesFolderMode" is="emby-select" label="Series Folder Organization">
+                                <option value="single">Single Folder</option>
+                                <option value="custom">Multiple Folders</option>
+                            </select>
+                            <div class="fieldDescription">
+                                Single Folder puts all series in one library. Multiple Folders lets you organize by category.
+                            </div>
+                        </div>
+
+                        <!-- Single folder mode: flat category selection -->
+                        <div class="seriesSingleContainer">
+                            <div class="fieldDescription" style="margin-bottom:0.5em;">
+                                Select which series categories to sync. Leave all unchecked to include all series.
+                            </div>
+                            <div style="margin-bottom:0.5em;">
+                                <button class="btnLoadSeriesCategories raised button-secondary" is="emby-button" type="button">
+                                    <span>Refresh Categories</span>
+                                </button>
+                                <span class="seriesCategoriesStatus" style="margin-left:0.5em; color:#52B54B;"></span>
+                                <button class="btnSelectAllSeriesCategories raised button-secondary" is="emby-button" type="button"
+                                        style="margin-left:0.5em;" disabled>
+                                    <span>Select All</span>
+                                </button>
+                                <button class="btnDeselectAllSeriesCategories raised button-secondary" is="emby-button" type="button"
+                                        style="margin-left:0.5em;" disabled>
+                                    <span>Deselect All</span>
+                                </button>
+                            </div>
+                            <input type="text" class="categorySearchInput seriesCategorySearch" placeholder="Filter categories..." oninput="var f=this.value.toLowerCase();var items=this.nextElementSibling.querySelectorAll('.checkboxContainer');for(var i=0;i<items.length;i++){items[i].style.display=items[i].textContent.toLowerCase().indexOf(f)>=0?'':'none';}" />
+                            <div class="seriesCategoriesContainer" style="max-height:450px; overflow-y:auto; border:1px solid rgba(255,255,255,0.1); border-radius:4px; padding:0.5em;">
+                                <div class="seriesCategoriesLoading" style="display:none; color:#999;">Loading categories...</div>
+                                <div class="seriesCategoriesList"></div>
+                            </div>
+                        </div>
+
+                        <!-- Multiple folders mode: folder-based category assignment -->
+                        <div class="seriesFoldersContainer" style="display:none;">
+                            <div class="fieldDescription" style="margin-bottom:0.5em;">
+                                Create folders and assign categories to each. Categories can be in multiple folders.
+                            </div>
+                            <div style="margin-bottom:1em;">
+                                <button class="btnLoadSeriesCategoriesMulti raised button-secondary" is="emby-button" type="button" style="background:#333; border:1px solid rgba(255,255,255,0.2);">
+                                    <span>&#x21bb; Refresh Categories</span>
+                                </button>
+                                <span class="seriesCategoriesMultiStatus" style="margin-left:0.5em; color:#52B54B;"></span>
+                            </div>
+                            <div class="seriesFoldersList"></div>
+                            <button class="btnAddSeriesFolder raised button-secondary" is="emby-button" type="button" style="margin-top:0.5em;">
+                                <span>+ Add Folder</span>
+                            </button>
+                        </div>
+
+                        <div style="margin-top:1em;">
+                            <button class="btnSyncSeries raised button-submit block" is="emby-button" type="button">
+                                <span>Sync Series Now</span>
+                            </button>
+                            <div class="syncSeriesResult" style="margin-top:0.5em;"></div>
+                        </div>
+
+                        <div class="danger-zone">
+                            <div class="danger-zone-header" onclick="var z=this.parentNode;z.classList.toggle('open');var a=this.querySelector('.danger-zone-arrow');if(a)a.textContent=z.classList.contains('open')?'\u25BC':'\u25B6';">
+                                <span>Danger Zone</span>
+                                <span class="danger-zone-arrow">&#9654;</span>
+                            </div>
+                            <div class="danger-zone-content">
+                                <button class="btnDeleteSeries raised block" is="emby-button" type="button"
+                                        style="background:#c0392b;">
+                                    <span>Delete All Series</span>
+                                </button>
+                                <div class="deleteSeriesResult" style="margin-top:0.5em;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                </div><!-- end tabSeries -->
+
+                <!-- ===== Live TV ===== -->
+                <div class="tabPanel tabLiveTv" style="display:none;">
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Live TV</h2>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkEnableLiveTv" type="checkbox" is="emby-checkbox" />
+                            <span>Enable Live TV</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            When enabled, live TV channels from the Xtream server will be available.
+                        </div>
+                    </div>
+                    <div class="selectContainer">
+                        <select class="selOutputFormat" is="emby-select" label="Stream Format">
+                            <option value="ts">MPEG-TS (.ts)</option>
+                            <option value="m3u8">HLS (.m3u8)</option>
+                        </select>
+                        <div class="fieldDescription">
+                            Stream container format. MPEG-TS is recommended for lower latency.
+                        </div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkIncludeAdult" type="checkbox" is="emby-checkbox" />
+                            <span>Include Adult Channels</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            When enabled, adult-flagged channels will be included in the channel list.
+                        </div>
+                    </div>
+                    <button class="btnRefreshCache raised button-secondary" is="emby-button" type="button" style="margin-top:0.5em;">
+                        <span>Refresh Channel &amp; EPG Cache</span>
+                    </button>
+                    <div class="refreshCacheResult" style="margin-top:0.5em;"></div>
+                </div>
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Dispatcharr Integration</h2>
+                    <div class="fieldDescription" style="margin-bottom:0.8em;">
+                        <a href="https://github.com/Dispatcharr/Dispatcharr" target="_blank" rel="noopener" style="color:#52B54B;">Dispatcharr</a>
+                        is an open-source IPTV stream proxy. It provides faster channel switching by supplying
+                        codec/resolution data upfront (skipping FFprobe), and handles stream proxying and reconnects.
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkEnableDispatcharr" type="checkbox" is="emby-checkbox" />
+                            <span>Enable Dispatcharr</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Fetch stream stats (codec, resolution, FPS) from Dispatcharr to skip FFprobe
+                            and speed up channel switching.
+                        </div>
+                    </div>
+                    <div class="dispatcharrSettings">
+                        <div class="inputContainer">
+                            <input class="txtDispatcharrUrl" type="text" is="emby-input"
+                                   label="Dispatcharr URL (e.g. http://example.com:5656)" />
+                        </div>
+                        <div class="inputContainer">
+                            <input class="txtDispatcharrUser" type="text" is="emby-input"
+                                   label="Dispatcharr Username" />
+                        </div>
+                        <div class="inputContainer">
+                            <input class="txtDispatcharrPass" type="password" is="emby-input"
+                                   label="Dispatcharr Password" />
+                        </div>
+                        <button class="btnTestDispatcharr raised button-secondary" is="emby-button" type="button">
+                            <span>Test Dispatcharr Connection</span>
+                        </button>
+                        <div class="dispatcharrTestResult" style="margin-top:0.5em;"></div>
+                    </div>
+                </div>
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">EPG / Guide Data</h2>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkEnableEpg" type="checkbox" is="emby-checkbox" />
+                            <span>Enable EPG Data</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Fetch program guide data from the Xtream server and include it in the XMLTV output.
+                        </div>
+                    </div>
+                    <div class="epgSettings">
+                        <div class="inputContainer">
+                            <input class="txtEpgCacheMinutes" type="number" is="emby-input"
+                                   label="EPG Cache Duration (minutes)" min="5" max="1440" step="5" />
+                            <div class="fieldDescription">
+                                How long to cache EPG data before re-fetching (default: 30 minutes).
+                            </div>
+                        </div>
+                        <div class="inputContainer">
+                            <input class="txtEpgDaysToFetch" type="number" is="emby-input"
+                                   label="EPG Days to Fetch" min="1" max="14" step="1" />
+                            <div class="fieldDescription">
+                                Number of days of EPG data to include (default: 2).
+                            </div>
+                        </div>
+                        <div class="inputContainer">
+                            <input class="txtM3UCacheMinutes" type="number" is="emby-input"
+                                   label="M3U Cache Duration (minutes)" min="1" max="1440" step="1" />
+                            <div class="fieldDescription">
+                                How long to cache the M3U playlist (default: 15 minutes).
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Catch-up / Timeshift</h2>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkEnableCatchup" type="checkbox" is="emby-checkbox" />
+                            <span>Enable Catch-up</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Add catch-up/timeshift attributes to M3U entries for channels that support it.
+                        </div>
+                    </div>
+                    <div class="catchupSettings">
+                        <div class="inputContainer">
+                            <input class="txtCatchupDays" type="number" is="emby-input"
+                                   label="Catch-up Days" min="1" max="30" step="1" />
+                            <div class="fieldDescription">
+                                Maximum number of days to look back for catch-up (default: 7).
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Live TV Categories</h2>
+                    <div class="fieldDescription" style="margin-bottom:0.5em;">
+                        Select which Live TV categories to include. Leave all unchecked to include all channels.
+                    </div>
+                    <div style="margin-bottom:0.5em;">
+                        <button class="btnLoadCategories raised button-secondary" is="emby-button" type="button">
+                            <span>Refresh Categories</span>
+                        </button>
+                        <button class="btnSelectAllCategories raised button-secondary" is="emby-button" type="button"
+                                style="margin-left:0.5em;" disabled>
+                            <span>Select All</span>
+                        </button>
+                        <button class="btnDeselectAllCategories raised button-secondary" is="emby-button" type="button"
+                                style="margin-left:0.5em;" disabled>
+                            <span>Deselect All</span>
+                        </button>
+                    </div>
+                    <input type="text" class="categorySearchInput liveCategorySearch" placeholder="Filter categories..." oninput="var f=this.value.toLowerCase();var items=this.nextElementSibling.querySelectorAll('.checkboxContainer');for(var i=0;i<items.length;i++){items[i].style.display=items[i].textContent.toLowerCase().indexOf(f)>=0?'':'none';}" />
+                    <div class="categoriesContainer" style="max-height:450px; overflow-y:auto; border:1px solid rgba(255,255,255,0.1); border-radius:4px; padding:0.5em;">
+                        <div class="categoriesLoading" style="display:none; color:#999;">Loading categories...</div>
+                        <div class="categoriesList"></div>
+                    </div>
+                </div>
+
+                </div><!-- end tabLiveTv -->
+
+                <!-- Sticky Save -->
+                <div class="stickyFooter">
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                        <span>Save</span>
+                    </button>
+                </div>
+
+    </form>
+  </div>
+</div>
