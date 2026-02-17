@@ -105,17 +105,8 @@ namespace Emby.Xtream.Plugin.Service
                 channels = await FetchAllChannelsDirectAsync(config).ConfigureAwait(false);
             }
 
-            // Collect stats from Xtream API response
+            // Fetch stream stats from Dispatcharr REST API
             var newStats = new Dictionary<int, StreamStatsInfo>();
-            foreach (var channel in channels)
-            {
-                if (channel.StreamStats != null && channel.StreamStats.VideoCodec != null)
-                {
-                    newStats[channel.StreamId] = channel.StreamStats;
-                }
-            }
-
-            // Optionally supplement with Dispatcharr REST API stats and fetch UUID mapping
             if (config.EnableDispatcharr && !string.IsNullOrEmpty(config.DispatcharrUrl))
             {
                 try
@@ -123,15 +114,11 @@ namespace Emby.Xtream.Plugin.Service
                     _dispatcharrClient.Configure(config.DispatcharrUser, config.DispatcharrPass);
                     var dispatcharrStats = await _dispatcharrClient.GetStreamStatsAsync(
                         config.DispatcharrUrl, cancellationToken).ConfigureAwait(false);
-
-                    foreach (var kvp in dispatcharrStats)
-                    {
-                        newStats[kvp.Key] = kvp.Value;
-                    }
+                    newStats = dispatcharrStats;
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warn("Failed to fetch Dispatcharr stats, using Xtream API stats only: {0}", ex.Message);
+                    Logger.Warn("Failed to fetch Dispatcharr stream stats: {0}", ex.Message);
                 }
 
                 // Fetch channel UUID mapping for proxy stream URLs

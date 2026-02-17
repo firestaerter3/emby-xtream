@@ -43,9 +43,6 @@ namespace Emby.Xtream.Plugin.Client.Models
         [JsonPropertyName("is_adult")]
         public int IsAdult { get; set; }
 
-        [JsonPropertyName("stream_stats")]
-        public StreamStatsInfo StreamStats { get; set; }
-
         public bool HasTvArchive => TvArchive != 0;
         public bool IsAdultChannel => IsAdult != 0;
     }

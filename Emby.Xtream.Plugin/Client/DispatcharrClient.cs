@@ -48,8 +48,9 @@ namespace Emby.Xtream.Plugin.Client
 
         /// <summary>
         /// Fetches stream stats from Dispatcharr and maps them by Xtream channel ID.
-        /// Dispatcharr channels (keyed by Xtream emulation stream_id) each have multiple
-        /// underlying stream sources. We pick the first source that has valid stats.
+        /// Each channel may have multiple underlying stream sources (failover). We use
+        /// the first source with valid stats (primary/highest-priority stream), since
+        /// that's what Dispatcharr will serve under normal conditions.
         /// </summary>
         public async Task<Dictionary<int, StreamStatsInfo>> GetStreamStatsAsync(
             string baseUrl, CancellationToken cancellationToken)
@@ -84,7 +85,7 @@ namespace Emby.Xtream.Plugin.Client
                 var page = JsonSerializer.Deserialize<PaginatedResponse<DispatcharrChannel>>(streamJson, JsonOptions);
                 if (page?.Results == null) return result;
 
-                // Map each stream source's stats to its parent channel ID
+                // Use the first source with stats per channel (primary stream)
                 foreach (var stream in page.Results)
                 {
                     if (stream.StreamStats?.VideoCodec == null) continue;
