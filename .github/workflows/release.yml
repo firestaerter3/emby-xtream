@@ -22,8 +22,9 @@ jobs:
 
       - name: Build plugin
         run: |
+          VERSION=${GITHUB_REF_NAME#v}
           cd Emby.Xtream.Plugin
-          dotnet publish -c Release -o out --no-self-contained
+          dotnet publish -c Release -o out --no-self-contained -p:Version=$VERSION
 
       - name: Create release
         uses: softprops/action-gh-release@v2
