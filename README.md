@@ -102,7 +102,7 @@ Download `Emby.Xtream.Plugin.dll` from the [latest release](../../releases/lates
 Requires .NET SDK 6.0+:
 
 ```bash
-git clone https://github.com/<your-username>/emby-xtream.git
+git clone https://github.com/firestaerter3/emby-xtream.git
 cd emby-xtream/Emby.Xtream.Plugin
 bash build.sh
 ```
