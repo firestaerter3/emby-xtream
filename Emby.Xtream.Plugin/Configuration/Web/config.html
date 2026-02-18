@@ -21,8 +21,8 @@
                         .dashboard-grid { grid-template-columns: 1fr; }
                     }
                     .dashboard-card {
-                        background: rgba(255,255,255,0.04);
-                        border: 1px solid rgba(255,255,255,0.1);
+                        background: rgba(128,128,128,0.08);
+                        border: 1px solid rgba(128,128,128,0.15);
                         border-radius: 8px;
                         padding: 1.2em;
                     }
@@ -52,8 +52,8 @@
                         color: #3498db;
                     }
                     .status-badge.idle {
-                        background: rgba(255,255,255,0.1);
-                        color: rgba(255,255,255,0.5);
+                        background: rgba(128,128,128,0.15);
+                        opacity: 0.6;
                     }
                     .dashboard-stats {
                         display: grid;
@@ -64,7 +64,7 @@
                     .dashboard-stat {
                         text-align: center;
                         padding: 0.6em;
-                        background: rgba(255,255,255,0.03);
+                        background: rgba(128,128,128,0.06);
                         border-radius: 6px;
                     }
                     .dashboard-stat .stat-value {
@@ -100,14 +100,14 @@
                     .dashboard-history-table th {
                         text-align: left;
                         padding: 0.5em 0.6em;
-                        border-bottom: 1px solid rgba(255,255,255,0.15);
+                        border-bottom: 1px solid rgba(128,128,128,0.2);
                         opacity: 0.6;
                         font-weight: 600;
                         font-size: 0.85em;
                     }
                     .dashboard-history-table td {
                         padding: 0.5em 0.6em;
-                        border-bottom: 1px solid rgba(255,255,255,0.06);
+                        border-bottom: 1px solid rgba(128,128,128,0.1);
                     }
                     .dashboard-progress-card {
                         background: rgba(52,152,219,0.08);
@@ -117,7 +117,7 @@
                         margin-bottom: 1.2em;
                     }
                     .dashboard-progress-bar-track {
-                        background: rgba(255,255,255,0.15);
+                        background: rgba(128,128,128,0.2);
                         border-radius: 4px;
                         height: 20px;
                         overflow: hidden;
@@ -131,11 +131,11 @@
                     }
                     .button-secondary {
                         background: transparent !important;
-                        border: 1px solid rgba(255,255,255,0.3) !important;
+                        border: 1px solid rgba(128,128,128,0.35) !important;
                         color: inherit !important;
                     }
                     .button-secondary:hover {
-                        border-color: rgba(255,255,255,0.5) !important;
+                        border-color: rgba(128,128,128,0.5) !important;
                     }
                     .danger-zone {
                         border: 1px solid rgba(192,57,43,0.3);
@@ -163,7 +163,7 @@
                         width: 100%;
                         padding: 0.5em 0.8em;
                         background: transparent;
-                        border: 1px solid rgba(255,255,255,0.2);
+                        border: 1px solid rgba(128,128,128,0.25);
                         border-radius: 4px;
                         color: inherit;
                         font-size: 0.9em;
@@ -171,19 +171,19 @@
                         box-sizing: border-box;
                     }
                     .categorySearchInput::placeholder {
-                        color: rgba(255,255,255,0.35);
+                        opacity: 0.4;
                     }
                     .stickyFooter {
                         position: sticky;
                         bottom: 0;
                         padding: 1em 0 0.5em 0;
-                        background: linear-gradient(to bottom, transparent, rgba(20,20,20,0.95) 30%);
+                        background: linear-gradient(to bottom, transparent, var(--background, inherit) 30%);
                         z-index: 10;
                         margin-top: 1em;
                     }
                 </style>
 
-                <div class="configTabs" style="display:flex; gap:0; margin-bottom:1.5em; border-bottom:2px solid rgba(255,255,255,0.1);">
+                <div class="configTabs" style="display:flex; gap:0; margin-bottom:1.5em; border-bottom:2px solid rgba(128,128,128,0.15);">
                     <button type="button" class="tabBtn tabBtnDashboard" data-tab="dashboard" onclick="var f=this.closest('.xtreamConfigForm'),p=f.querySelectorAll('.tabPanel'),b=f.querySelectorAll('.tabBtn'),i;for(i=0;i<p.length;i++)p[i].style.display='none';for(i=0;i<b.length;i++){b[i].style.opacity='0.7';b[i].style.borderBottomColor='transparent';}f.querySelector('.tabDashboard').style.display='block';this.style.opacity='1';this.style.borderBottomColor='#52B54B';"
                             style="padding:0.6em 1.5em; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; color:inherit; font-size:1em; opacity:0.7;">
                         Dashboard
@@ -222,7 +222,7 @@
                             <button type="button" class="btnRestartEmby"
                                     style="display:none; background:#e67e22; color:#fff; border:none; border-radius:4px; padding:0.3em 0.8em; font-size:0.9em; font-weight:600; cursor:pointer;">Restart Emby</button>
                             <button type="button" class="updateBannerDismiss"
-                                    style="background:none; border:none; color:rgba(255,255,255,0.5); cursor:pointer; font-size:1.2em; padding:0.2em 0.4em; line-height:1;">&#10005;</button>
+                                    style="background:none; border:none; cursor:pointer; font-size:1.2em; padding:0.2em 0.4em; line-height:1; opacity:0.5;">&#10005;</button>
                         </div>
                     </div>
                     <div class="updateStatus" style="margin-top:0.5em; font-size:0.9em; display:none;"></div>
@@ -240,7 +240,7 @@
                             <div class="dashboard-progress-bar-track">
                                 <div class="dashboardProgressBarFill dashboard-progress-bar-fill" style="width:0%;"></div>
                             </div>
-                            <div class="dashboardProgressDetail" style="color:#ccc; margin-top:0.4em; font-size:0.9em;"></div>
+                            <div class="dashboardProgressDetail" style="opacity:0.7; margin-top:0.4em; font-size:0.9em;"></div>
                         </div>
                     </div>
 
@@ -258,7 +258,7 @@
                         <div class="dashboard-card">
                             <h3>Library</h3>
                             <div class="dashboardLibraryContent">
-                                <div style="color:rgba(255,255,255,0.5);">Loading...</div>
+                                <div style="opacity:0.5;">Loading...</div>
                             </div>
                         </div>
                     </div>
@@ -279,7 +279,7 @@
                     <div class="dashboard-card">
                         <h3>Sync History</h3>
                         <div class="dashboardHistoryContent">
-                            <div style="color:rgba(255,255,255,0.5);">No sync history yet</div>
+                            <div style="opacity:0.5;">No sync history yet</div>
                         </div>
                     </div>
                 </div>
@@ -453,8 +453,8 @@
                                 </button>
                             </div>
                             <input type="text" class="categorySearchInput vodCategorySearch" placeholder="Filter categories..." oninput="var f=this.value.toLowerCase();var items=this.nextElementSibling.querySelectorAll('.checkboxContainer');for(var i=0;i<items.length;i++){items[i].style.display=items[i].textContent.toLowerCase().indexOf(f)>=0?'':'none';}" />
-                            <div class="vodCategoriesContainer" style="max-height:450px; overflow-y:auto; border:1px solid rgba(255,255,255,0.1); border-radius:4px; padding:0.5em;">
-                                <div class="vodCategoriesLoading" style="display:none; color:#999;">Loading categories...</div>
+                            <div class="vodCategoriesContainer" style="max-height:450px; overflow-y:auto; border:1px solid rgba(128,128,128,0.15); border-radius:4px; padding:0.5em;">
+                                <div class="vodCategoriesLoading" style="display:none; opacity:0.5;">Loading categories...</div>
                                 <div class="vodCategoriesList"></div>
                             </div>
                         </div>
@@ -465,7 +465,7 @@
                                 Create folders and assign categories to each. Categories can be in multiple folders.
                             </div>
                             <div style="margin-bottom:1em;">
-                                <button class="btnLoadVodCategoriesMulti raised button-secondary" is="emby-button" type="button" style="background:#333; border:1px solid rgba(255,255,255,0.2);">
+                                <button class="btnLoadVodCategoriesMulti raised button-secondary" is="emby-button" type="button" style="border:1px solid rgba(128,128,128,0.25);">
                                     <span>&#x21bb; Refresh Categories</span>
                                 </button>
                                 <span class="vodCategoriesMultiStatus" style="margin-left:0.5em; color:#52B54B;"></span>
@@ -546,8 +546,8 @@
                                 </button>
                             </div>
                             <input type="text" class="categorySearchInput seriesCategorySearch" placeholder="Filter categories..." oninput="var f=this.value.toLowerCase();var items=this.nextElementSibling.querySelectorAll('.checkboxContainer');for(var i=0;i<items.length;i++){items[i].style.display=items[i].textContent.toLowerCase().indexOf(f)>=0?'':'none';}" />
-                            <div class="seriesCategoriesContainer" style="max-height:450px; overflow-y:auto; border:1px solid rgba(255,255,255,0.1); border-radius:4px; padding:0.5em;">
-                                <div class="seriesCategoriesLoading" style="display:none; color:#999;">Loading categories...</div>
+                            <div class="seriesCategoriesContainer" style="max-height:450px; overflow-y:auto; border:1px solid rgba(128,128,128,0.15); border-radius:4px; padding:0.5em;">
+                                <div class="seriesCategoriesLoading" style="display:none; opacity:0.5;">Loading categories...</div>
                                 <div class="seriesCategoriesList"></div>
                             </div>
                         </div>
@@ -558,7 +558,7 @@
                                 Create folders and assign categories to each. Categories can be in multiple folders.
                             </div>
                             <div style="margin-bottom:1em;">
-                                <button class="btnLoadSeriesCategoriesMulti raised button-secondary" is="emby-button" type="button" style="background:#333; border:1px solid rgba(255,255,255,0.2);">
+                                <button class="btnLoadSeriesCategoriesMulti raised button-secondary" is="emby-button" type="button" style="border:1px solid rgba(128,128,128,0.25);">
                                     <span>&#x21bb; Refresh Categories</span>
                                 </button>
                                 <span class="seriesCategoriesMultiStatus" style="margin-left:0.5em; color:#52B54B;"></span>
@@ -755,8 +755,8 @@
                         </button>
                     </div>
                     <input type="text" class="categorySearchInput liveCategorySearch" placeholder="Filter categories..." oninput="var f=this.value.toLowerCase();var items=this.nextElementSibling.querySelectorAll('.checkboxContainer');for(var i=0;i<items.length;i++){items[i].style.display=items[i].textContent.toLowerCase().indexOf(f)>=0?'':'none';}" />
-                    <div class="categoriesContainer" style="max-height:450px; overflow-y:auto; border:1px solid rgba(255,255,255,0.1); border-radius:4px; padding:0.5em;">
-                        <div class="categoriesLoading" style="display:none; color:#999;">Loading categories...</div>
+                    <div class="categoriesContainer" style="max-height:450px; overflow-y:auto; border:1px solid rgba(128,128,128,0.15); border-radius:4px; padding:0.5em;">
+                        <div class="categoriesLoading" style="display:none; opacity:0.5;">Loading categories...</div>
                         <div class="categoriesList"></div>
                     </div>
                 </div>

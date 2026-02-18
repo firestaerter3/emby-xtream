@@ -150,7 +150,7 @@ function (BaseView, loading) {
 
         // Download sanitized log button
         view.querySelector('.btnDownloadLog').addEventListener('click', function () {
-            window.open(ApiClient.getUrl('XtreamTuner/Logs') + '&api_key=' + ApiClient.accessToken(), '_blank');
+            window.open(ApiClient.getUrl('XtreamTuner/Logs') + '?api_key=' + ApiClient.accessToken(), '_blank');
         });
 
         // Dismiss update banner
@@ -508,7 +508,7 @@ function (BaseView, loading) {
         var card = document.createElement('div');
         card.className = 'folderCard';
         card.setAttribute('data-checked-ids', checkedIdsStr || '');
-        card.style.cssText = 'border:1px solid rgba(255,255,255,0.15); border-radius:6px; padding:1em; margin-bottom:1em;';
+        card.style.cssText = 'border:1px solid rgba(128,128,128,0.2); border-radius:6px; padding:1em; margin-bottom:1em;';
 
         // Header: name input + remove button
         var header = document.createElement('div');
@@ -519,7 +519,7 @@ function (BaseView, loading) {
         nameInput.className = 'folderCardName';
         nameInput.placeholder = 'Folder name';
         nameInput.value = name;
-        nameInput.style.cssText = 'flex:1; padding:0.5em 0.8em; background:transparent; border:1px solid rgba(255,255,255,0.2); border-radius:4px; color:inherit; font-size:1em;';
+        nameInput.style.cssText = 'flex:1; padding:0.5em 0.8em; background:transparent; border:1px solid rgba(128,128,128,0.25); border-radius:4px; color:inherit; font-size:1em;';
 
         var removeBtn = document.createElement('button');
         removeBtn.type = 'button';
@@ -536,14 +536,14 @@ function (BaseView, loading) {
         // Category checkboxes container
         var catContainer = document.createElement('div');
         catContainer.className = 'folderCardCategories';
-        catContainer.style.cssText = 'max-height:300px; overflow-y:auto; border:1px solid rgba(255,255,255,0.1); border-radius:4px; padding:0.5em;';
+        catContainer.style.cssText = 'max-height:300px; overflow-y:auto; border:1px solid rgba(128,128,128,0.15); border-radius:4px; padding:0.5em;';
 
         if (categories && categories.length > 0) {
             renderFolderCardCategories(catContainer, categories, checkedIdsStr);
         } else if (categories !== null && categories !== undefined) {
-            catContainer.innerHTML = '<div style="color:#999; padding:0.5em;">No categories available from server. Click Refresh Categories to try again.</div>';
+            catContainer.innerHTML = '<div style="opacity:0.5; padding:0.5em;">No categories available from server. Click Refresh Categories to try again.</div>';
         } else {
-            catContainer.innerHTML = '<div style="color:#999; padding:0.5em;">Loading categories...</div>';
+            catContainer.innerHTML = '<div style="opacity:0.5; padding:0.5em;">Loading categories...</div>';
         }
 
         card.appendChild(catContainer);
@@ -567,7 +567,7 @@ function (BaseView, loading) {
             html += '<div class="checkboxContainer" style="margin:0.3em 0; padding:0.2em 0.5em;">';
             html += '<label style="display:flex; align-items:center; cursor:pointer;">';
             html += '<input type="checkbox" class="folderCategoryCheckbox" data-category-id="' + cat.CategoryId + '"' + checked + ' style="margin-right:0.5em;" />';
-            html += '<span>' + escapeHtml(cat.CategoryName) + ' <span style="color:#999;">(ID: ' + cat.CategoryId + ')</span></span>';
+            html += '<span>' + escapeHtml(cat.CategoryName) + ' <span style="opacity:0.5;">(ID: ' + cat.CategoryId + ')</span></span>';
             html += '</label>';
             html += '</div>';
         }
@@ -579,7 +579,7 @@ function (BaseView, loading) {
         var cards = view.querySelectorAll(listClass + ' .folderCard');
         for (var i = 0; i < cards.length; i++) {
             var catContainer = cards[i].querySelector('.folderCardCategories');
-            catContainer.innerHTML = '<div style="color:#999; padding:0.5em;">No categories available from server.</div>';
+            catContainer.innerHTML = '<div style="opacity:0.5; padding:0.5em;">No categories available from server.</div>';
         }
     }
 
@@ -650,7 +650,7 @@ function (BaseView, loading) {
 
     function testXtreamConnection(view) {
         var resultEl = view.querySelector('.connectionTestResult');
-        resultEl.innerHTML = '<span style="color:#999;">Testing connection...</span>';
+        resultEl.innerHTML = '<span style="opacity:0.5;">Testing connection...</span>';
 
         var url = view.querySelector('.txtBaseUrl').value.replace(/\/+$/, '');
         var user = view.querySelector('.txtUsername').value;
@@ -705,7 +705,7 @@ function (BaseView, loading) {
     function testDispatcharrConnection(instance) {
         var view = instance.view;
         var resultEl = view.querySelector('.dispatcharrTestResult');
-        resultEl.innerHTML = '<span style="color:#999;">Saving config &amp; testing connection...</span>';
+        resultEl.innerHTML = '<span style="opacity:0.5;">Saving config &amp; testing connection...</span>';
 
         // Save config first so the server reads the latest Dispatcharr credentials
         saveConfig(instance, function () {
@@ -748,7 +748,7 @@ function (BaseView, loading) {
             clearFolderCardCategories(view, 'movie');
             var vodListEl = view.querySelector('.vodCategoriesList');
             if (vodListEl && !vodListEl.innerHTML.trim()) {
-                vodListEl.innerHTML = '<div style="color:#999;">Click "Refresh Categories" to load.</div>';
+                vodListEl.innerHTML = '<div style="opacity:0.5;">Click "Refresh Categories" to load.</div>';
             }
         }
 
@@ -773,7 +773,7 @@ function (BaseView, loading) {
             clearFolderCardCategories(view, 'series');
             var seriesListEl = view.querySelector('.seriesCategoriesList');
             if (seriesListEl && !seriesListEl.innerHTML.trim()) {
-                seriesListEl.innerHTML = '<div style="color:#999;">Click "Refresh Categories" to load.</div>';
+                seriesListEl.innerHTML = '<div style="opacity:0.5;">Click "Refresh Categories" to load.</div>';
             }
         }
 
@@ -825,7 +825,7 @@ function (BaseView, loading) {
             instance.loadedCategories = categories;
 
             if (!categories || categories.length === 0) {
-                listEl.innerHTML = '<div style="color:#999;">No categories found. Check your Xtream connection settings.</div>';
+                listEl.innerHTML = '<div style="opacity:0.5;">No categories found. Check your Xtream connection settings.</div>';
                 return;
             }
 
@@ -890,7 +890,7 @@ function (BaseView, loading) {
             instance.loadedVodCategories = categories;
 
             if (!categories || categories.length === 0) {
-                listEl.innerHTML = '<div style="color:#999;">No VOD categories found. Check your Xtream connection settings.</div>';
+                listEl.innerHTML = '<div style="opacity:0.5;">No VOD categories found. Check your Xtream connection settings.</div>';
                 return;
             }
 
@@ -930,7 +930,7 @@ function (BaseView, loading) {
         var view = instance.view;
         var statusEl = view.querySelector('.vodCategoriesMultiStatus');
         statusEl.textContent = 'Loading...';
-        statusEl.style.color = '#999';
+        statusEl.style.opacity = '0.5';
 
         var apiUrl = ApiClient.getUrl('XtreamTuner/Categories/Vod');
 
@@ -939,17 +939,17 @@ function (BaseView, loading) {
 
             if (!categories || categories.length === 0) {
                 statusEl.textContent = 'No VOD categories found.';
-                statusEl.style.color = '#cc0000';
+                statusEl.style.color = '#cc0000'; statusEl.style.opacity = '1';
                 clearFolderCardCategories(view, 'movie');
                 return;
             }
 
             statusEl.textContent = 'Loaded ' + categories.length + ' categories';
-            statusEl.style.color = '#52B54B';
+            statusEl.style.color = '#52B54B'; statusEl.style.opacity = '1';
             populateFolderCheckboxes(view, 'movie', categories);
         }).catch(function () {
             statusEl.textContent = 'Failed to load categories. Save connection settings first.';
-            statusEl.style.color = '#cc0000';
+            statusEl.style.color = '#cc0000'; statusEl.style.opacity = '1';
         });
     }
 
@@ -1009,7 +1009,7 @@ function (BaseView, loading) {
             instance.loadedSeriesCategories = categories;
 
             if (!categories || categories.length === 0) {
-                listEl.innerHTML = '<div style="color:#999;">No series categories found. Check your Xtream connection settings.</div>';
+                listEl.innerHTML = '<div style="opacity:0.5;">No series categories found. Check your Xtream connection settings.</div>';
                 return;
             }
 
@@ -1049,7 +1049,7 @@ function (BaseView, loading) {
         var view = instance.view;
         var statusEl = view.querySelector('.seriesCategoriesMultiStatus');
         statusEl.textContent = 'Loading...';
-        statusEl.style.color = '#999';
+        statusEl.style.opacity = '0.5';
 
         var apiUrl = ApiClient.getUrl('XtreamTuner/Categories/Series');
 
@@ -1058,17 +1058,17 @@ function (BaseView, loading) {
 
             if (!categories || categories.length === 0) {
                 statusEl.textContent = 'No series categories found.';
-                statusEl.style.color = '#cc0000';
+                statusEl.style.color = '#cc0000'; statusEl.style.opacity = '1';
                 clearFolderCardCategories(view, 'series');
                 return;
             }
 
             statusEl.textContent = 'Loaded ' + categories.length + ' categories';
-            statusEl.style.color = '#52B54B';
+            statusEl.style.color = '#52B54B'; statusEl.style.opacity = '1';
             populateFolderCheckboxes(view, 'series', categories);
         }).catch(function () {
             statusEl.textContent = 'Failed to load categories. Save connection settings first.';
-            statusEl.style.color = '#cc0000';
+            statusEl.style.color = '#cc0000'; statusEl.style.opacity = '1';
         });
     }
 
@@ -1120,10 +1120,10 @@ function (BaseView, loading) {
 
         resultEl.innerHTML =
             '<div style="margin:0.5em 0;">' +
-                '<div style="background:rgba(255,255,255,0.15); border-radius:4px; height:20px; overflow:hidden;">' +
+                '<div style="background:rgba(128,128,128,0.2); border-radius:4px; height:20px; overflow:hidden;">' +
                     '<div style="background:#52B54B; height:100%; width:' + pct + '%; transition:width 0.3s ease; border-radius:4px;"></div>' +
                 '</div>' +
-                '<div style="color:#ccc; margin-top:0.4em; font-size:0.9em;">' +
+                '<div style="opacity:0.7; margin-top:0.4em; font-size:0.9em;">' +
                     escapeHtml(phase) + ' \u2014 ' + completed + ' / ' + total +
                     ' (' + skipped + ' skipped, ' + failed + ' failed) \u2014 ' + pct + '%' +
                 '</div>' +
@@ -1154,7 +1154,7 @@ function (BaseView, loading) {
         var resultEl = view.querySelector('.syncMoviesResult');
         var btn = view.querySelector('.btnSyncMovies');
         btn.disabled = true;
-        resultEl.innerHTML = '<span style="color:#999;">Starting movie sync...</span>';
+        resultEl.innerHTML = '<span style="opacity:0.5;">Starting movie sync...</span>';
 
         var pollId = pollSyncProgress(view, 'Movies');
         var apiUrl = ApiClient.getUrl('XtreamTuner/Sync/Movies');
@@ -1183,7 +1183,7 @@ function (BaseView, loading) {
         var resultEl = view.querySelector('.syncSeriesResult');
         var btn = view.querySelector('.btnSyncSeries');
         btn.disabled = true;
-        resultEl.innerHTML = '<span style="color:#999;">Starting series sync...</span>';
+        resultEl.innerHTML = '<span style="opacity:0.5;">Starting series sync...</span>';
 
         var pollId = pollSyncProgress(view, 'Series');
         var apiUrl = ApiClient.getUrl('XtreamTuner/Sync/Series');
@@ -1220,7 +1220,7 @@ function (BaseView, loading) {
         }
 
         btn.disabled = true;
-        resultEl.innerHTML = '<span style="color:#999;">Deleting ' + label + '...</span>';
+        resultEl.innerHTML = '<span style="opacity:0.5;">Deleting ' + label + '...</span>';
 
         var apiUrl = ApiClient.getUrl('XtreamTuner/Content/' + type);
 
@@ -1243,7 +1243,7 @@ function (BaseView, loading) {
 
     function refreshCache(view) {
         var resultEl = view.querySelector('.refreshCacheResult');
-        resultEl.innerHTML = '<span style="color:#999;">Refreshing cache...</span>';
+        resultEl.innerHTML = '<span style="opacity:0.5;">Refreshing cache...</span>';
 
         var apiUrl = ApiClient.getUrl('XtreamTuner/RefreshCache');
 
@@ -1358,7 +1358,7 @@ function (BaseView, loading) {
         btn.disabled = true;
         btn.textContent = 'Installing...';
         statusEl.style.display = 'block';
-        statusEl.innerHTML = '<span style="color:#999;">Downloading and installing update...</span>';
+        statusEl.innerHTML = '<span style="opacity:0.5;">Downloading and installing update...</span>';
 
         ApiClient.ajax({
             type: 'POST',
@@ -1396,17 +1396,17 @@ function (BaseView, loading) {
         btn.disabled = true;
         btn.textContent = 'Restarting...';
         statusEl.style.display = 'block';
-        statusEl.innerHTML = '<span style="color:#999;">Restarting Emby server...</span>';
+        statusEl.innerHTML = '<span style="opacity:0.5;">Restarting Emby server...</span>';
 
         ApiClient.ajax({
             type: 'POST',
             url: ApiClient.getUrl('XtreamTuner/RestartEmby')
         }).then(function () {
-            statusEl.innerHTML = '<span style="color:#999;">Waiting for server to come back...</span>';
+            statusEl.innerHTML = '<span style="opacity:0.5;">Waiting for server to come back...</span>';
             pollServerReady(view);
         }).catch(function () {
             // Server may have already restarted and dropped the connection
-            statusEl.innerHTML = '<span style="color:#999;">Waiting for server to come back...</span>';
+            statusEl.innerHTML = '<span style="opacity:0.5;">Waiting for server to come back...</span>';
             pollServerReady(view);
         });
     }
@@ -1506,7 +1506,7 @@ function (BaseView, loading) {
         var container = view.querySelector('.dashboardHistoryContent');
 
         if (!data.History || data.History.length === 0) {
-            container.innerHTML = '<div style="color:rgba(255,255,255,0.5);">No sync history yet</div>';
+            container.innerHTML = '<div style="opacity:0.5;">No sync history yet</div>';
             return;
         }
 
@@ -1591,7 +1591,7 @@ function (BaseView, loading) {
         var btn = view.querySelector('.btnDashboardSyncAll');
         var resultEl = view.querySelector('.dashboardSyncAllResult');
         btn.disabled = true;
-        resultEl.innerHTML = '<span style="color:#999;">Starting sync...</span>';
+        resultEl.innerHTML = '<span style="opacity:0.5;">Starting sync...</span>';
 
         ApiClient.getPluginConfiguration(pluginId).then(function (config) {
             var doMovies = config.SyncMovies;
@@ -1622,7 +1622,7 @@ function (BaseView, loading) {
 
                 if (doSeries) {
                     var prefix = movieMsg ? escapeHtml(movieMsg) + ' \u2014 ' : '';
-                    resultEl.innerHTML = '<span style="color:#999;">' + prefix + 'Starting series sync...</span>';
+                    resultEl.innerHTML = '<span style="opacity:0.5;">' + prefix + 'Starting series sync...</span>';
 
                     return ApiClient.ajax({ type: 'POST', url: seriesUrl, dataType: 'json' }).then(function (seriesResult) {
                         stopDashboardProgressPolling();
