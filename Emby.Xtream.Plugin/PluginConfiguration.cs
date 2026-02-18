@@ -70,6 +70,9 @@ namespace Emby.Xtream.Plugin
         public string CachedSeriesCategories { get; set; } = string.Empty;
         public string CachedLiveCategories { get; set; } = string.Empty;
 
+        // Update tracking
+        public string LastInstalledVersion { get; set; } = string.Empty;
+
         // Sync settings
         public bool SmartSkipExisting { get; set; } = true;
         public int SyncParallelism { get; set; } = 3;

@@ -21,6 +21,7 @@ namespace Emby.Xtream.Plugin.Client
         };
 
         private readonly ILogger _logger;
+        private readonly HttpMessageHandler _handler;
 
         private string _username = string.Empty;
         private string _password = string.Empty;
@@ -28,9 +29,10 @@ namespace Emby.Xtream.Plugin.Client
         private string _refreshToken;
         private DateTime _tokenExpiry = DateTime.MinValue;
 
-        public DispatcharrClient(ILogger logger)
+        public DispatcharrClient(ILogger logger, HttpMessageHandler handler = null)
         {
             _logger = logger;
+            _handler = handler;
         }
 
         public void Configure(string username, string password)
@@ -178,7 +180,7 @@ namespace Emby.Xtream.Plugin.Client
             // Step 2: Login to get JWT token
             try
             {
-                using (var httpClient = new HttpClient())
+                using (var httpClient = CreateHttpClient())
                 {
                     httpClient.Timeout = TimeSpan.FromSeconds(10);
                     var payload = JsonSerializer.Serialize(new { username = username, password = password });
@@ -260,7 +262,7 @@ namespace Emby.Xtream.Plugin.Client
 
             while (true)
             {
-                using (var httpClient = new HttpClient())
+                using (var httpClient = CreateHttpClient())
                 {
                     try
                     {
@@ -326,7 +328,7 @@ namespace Emby.Xtream.Plugin.Client
         {
             try
             {
-                using (var httpClient = new HttpClient())
+                using (var httpClient = CreateHttpClient())
                 {
                     var payload = JsonSerializer.Serialize(new { username = _username, password = _password });
                     using (var content = new StringContent(payload, Encoding.UTF8, "application/json"))
@@ -371,7 +373,7 @@ namespace Emby.Xtream.Plugin.Client
 
             try
             {
-                using (var httpClient = new HttpClient())
+                using (var httpClient = CreateHttpClient())
                 {
                     var payload = JsonSerializer.Serialize(new { refresh = _refreshToken });
                     using (var content = new StringContent(payload, Encoding.UTF8, "application/json"))
@@ -406,6 +408,11 @@ namespace Emby.Xtream.Plugin.Client
                 _refreshToken = null;
                 return false;
             }
+        }
+
+        private HttpClient CreateHttpClient()
+        {
+            return _handler != null ? new HttpClient(_handler, disposeHandler: false) : new HttpClient();
         }
     }
 }

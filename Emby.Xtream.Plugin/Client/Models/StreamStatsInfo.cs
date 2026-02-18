@@ -17,6 +17,6 @@ namespace Emby.Xtream.Plugin.Client.Models
         public double? SourceFps { get; set; }
 
         [JsonPropertyName("ffmpeg_output_bitrate")]
-        public int? Bitrate { get; set; }
+        public double? Bitrate { get; set; }
     }
 }

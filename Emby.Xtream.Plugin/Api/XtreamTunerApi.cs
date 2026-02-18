@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Emby.Xtream.Plugin.Client;
@@ -91,8 +90,23 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    [Route("/XtreamTuner/CheckUpdate", "GET", Summary = "Checks GitHub for a newer plugin release")]
+    public class CheckForUpdate : IReturn<UpdateCheckResult>
+    {
+    }
+
     [Route("/XtreamTuner/Logs", "GET", Summary = "Downloads sanitized plugin logs")]
     public class GetSanitizedLogs : IReturnVoid
+    {
+    }
+
+    [Route("/XtreamTuner/InstallUpdate", "POST", Summary = "Downloads and installs the latest plugin update")]
+    public class InstallUpdate : IReturn<InstallUpdateResult>
+    {
+    }
+
+    [Route("/XtreamTuner/RestartEmby", "POST", Summary = "Restarts the Emby server")]
+    public class RestartEmby : IReturnVoid
     {
     }
 
@@ -104,6 +118,12 @@ namespace Emby.Xtream.Plugin.Api
     }
 
     public class TestConnectionResult
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; }
+    }
+
+    public class InstallUpdateResult
     {
         public bool Success { get; set; }
         public string Message { get; set; }
@@ -669,6 +689,147 @@ namespace Emby.Xtream.Plugin.Api
             return result;
         }
 
+        public async Task<object> Get(CheckForUpdate request)
+        {
+            return await UpdateChecker.CheckForUpdateAsync().ConfigureAwait(false);
+        }
+
+        public async Task<object> Post(InstallUpdate request)
+        {
+            var result = new InstallUpdateResult();
+
+            try
+            {
+                var checkResult = await UpdateChecker.CheckForUpdateAsync().ConfigureAwait(false);
+
+                if (!checkResult.UpdateAvailable)
+                {
+                    result.Message = "No update available.";
+                    return result;
+                }
+
+                if (string.IsNullOrEmpty(checkResult.DownloadUrl))
+                {
+                    result.Message = "No DLL download URL found in the release.";
+                    return result;
+                }
+
+                // Determine current plugin DLL path
+                var currentDll = typeof(Plugin).Assembly.Location;
+                if (string.IsNullOrEmpty(currentDll) || !File.Exists(currentDll))
+                {
+                    // Fallback for Docker/single-file: use Emby's PluginsPath
+                    var pluginsDir = Plugin.Instance.ApplicationPaths.PluginsPath;
+                    if (!string.IsNullOrEmpty(pluginsDir))
+                    {
+                        currentDll = Path.Combine(pluginsDir, "Emby.Xtream.Plugin.dll");
+                    }
+                }
+
+                if (string.IsNullOrEmpty(currentDll) || !File.Exists(currentDll))
+                {
+                    result.Message = "Could not determine plugin DLL path.";
+                    return result;
+                }
+
+                var tempPath = currentDll + ".temp";
+                var bakPath = currentDll + ".bak";
+
+                // Download the new DLL
+                byte[] dllBytes;
+                using (var httpClient = new System.Net.Http.HttpClient())
+                {
+                    httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Emby-Xtream-Plugin/1.0");
+                    httpClient.Timeout = TimeSpan.FromSeconds(60);
+                    dllBytes = await httpClient.GetByteArrayAsync(checkResult.DownloadUrl).ConfigureAwait(false);
+                }
+
+                if (dllBytes.Length < 1024)
+                {
+                    result.Message = "Downloaded file is too small (" + dllBytes.Length + " bytes). Aborting.";
+                    return result;
+                }
+
+                // Atomic replacement with backup
+                File.WriteAllBytes(tempPath, dllBytes);
+
+                try
+                {
+                    // Back up current DLL
+                    if (File.Exists(bakPath))
+                        File.Delete(bakPath);
+                    File.Move(currentDll, bakPath);
+
+                    // Move new DLL into place
+                    File.Move(tempPath, currentDll);
+
+                    // Clean up backup on success
+                    try { File.Delete(bakPath); } catch { }
+                }
+                catch
+                {
+                    // Restore backup on failure
+                    try
+                    {
+                        if (File.Exists(bakPath) && !File.Exists(currentDll))
+                            File.Move(bakPath, currentDll);
+                    }
+                    catch { }
+
+                    try { File.Delete(tempPath); } catch { }
+                    throw;
+                }
+
+                UpdateChecker.UpdateInstalled = true;
+                UpdateChecker.InvalidateCache();
+
+                // Persist installed version so banner stays hidden after restart
+                try
+                {
+                    var config = Plugin.Instance.Configuration;
+                    config.LastInstalledVersion = checkResult.LatestVersion;
+                    Plugin.Instance.SaveConfiguration();
+                }
+                catch { }
+
+                // Notify Emby that a restart is needed
+                try
+                {
+                    var appHost = Plugin.Instance.ApplicationHost;
+                    var notifyMethod = appHost.GetType().GetMethod("NotifyPendingRestart",
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                    if (notifyMethod != null)
+                        notifyMethod.Invoke(appHost, null);
+                }
+                catch { }
+
+                result.Success = true;
+                result.Message = "Update installed successfully (" + dllBytes.Length + " bytes). Restart Emby to apply.";
+            }
+            catch (Exception ex)
+            {
+                result.Message = "Install failed: " + ex.Message;
+            }
+
+            return result;
+        }
+
+        public void Post(RestartEmby request)
+        {
+            try
+            {
+                var appHost = Plugin.Instance.ApplicationHost;
+                var restartMethod = appHost.GetType().GetMethod("Restart",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance,
+                    null, Type.EmptyTypes, null);
+                if (restartMethod != null)
+                {
+                    restartMethod.Invoke(appHost, null);
+                }
+            }
+            catch { }
+        }
+
         public object Get(GetSanitizedLogs request)
         {
             var config = Plugin.Instance.Configuration;
@@ -714,31 +875,9 @@ namespace Emby.Xtream.Plugin.Api
             var sanitized = new StringBuilder();
             foreach (var line in lines)
             {
-                var s = line;
-
-                // Redact specific config values if non-empty
-                if (!string.IsNullOrEmpty(config.Username))
-                    s = s.Replace(config.Username, "<redacted>");
-                if (!string.IsNullOrEmpty(config.Password))
-                    s = s.Replace(config.Password, "<redacted>");
-                if (!string.IsNullOrEmpty(config.DispatcharrUser))
-                    s = s.Replace(config.DispatcharrUser, "<redacted>");
-                if (!string.IsNullOrEmpty(config.DispatcharrPass))
-                    s = s.Replace(config.DispatcharrPass, "<redacted>");
-
-                // Redact IP addresses
-                s = Regex.Replace(s, @"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", "<ip-redacted>");
-
-                // Redact Xtream credentials in URLs: /live/user/pass/
-                s = Regex.Replace(s, @"/live/[^/]+/[^/]+/", "/live/<user>/<pass>/");
-
-                // Redact email patterns
-                s = Regex.Replace(s, @"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", "<email-redacted>");
-
-                // Redact hostnames in stream URLs (http(s)://host:port patterns, keep path)
-                s = Regex.Replace(s, @"(https?://)([^/:]+)(:\d+)?(/player_api\.php|/live/|/movie/|/series/)",
-                    "$1<provider-host>$3$4");
-
+                var s = LogSanitizer.SanitizeLine(line,
+                    config.Username, config.Password,
+                    config.DispatcharrUser, config.DispatcharrPass);
                 sanitized.AppendLine(s);
             }
 

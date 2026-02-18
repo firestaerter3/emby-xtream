@@ -395,7 +395,7 @@ namespace Emby.Xtream.Plugin.Service
                     videoStream.RealFrameRate = (float)stats.SourceFps.Value;
                     videoStream.AverageFrameRate = (float)stats.SourceFps.Value;
                 }
-                if (stats.Bitrate.HasValue) videoStream.BitRate = stats.Bitrate.Value * 1000;
+                if (stats.Bitrate.HasValue) videoStream.BitRate = (int)(stats.Bitrate.Value * 1000);
 
                 mediaStreams.Add(videoStream);
 

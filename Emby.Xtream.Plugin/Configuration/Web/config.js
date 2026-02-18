@@ -153,6 +153,21 @@ function (BaseView, loading) {
             window.open(ApiClient.getUrl('XtreamTuner/Logs') + '&api_key=' + ApiClient.accessToken(), '_blank');
         });
 
+        // Dismiss update banner
+        view.querySelector('.updateBannerDismiss').addEventListener('click', function () {
+            view.querySelector('.updateBanner').style.display = 'none';
+        });
+
+        // Install update button
+        view.querySelector('.btnInstallUpdate').addEventListener('click', function () {
+            installUpdate(view);
+        });
+
+        // Restart Emby button
+        view.querySelector('.btnRestartEmby').addEventListener('click', function () {
+            restartEmby(view);
+        });
+
         // Danger zone toggles (event delegation on form)
         view.querySelector('.xtreamConfigForm').addEventListener('click', function (e) {
             var header = e.target.closest('.danger-zone-header');
@@ -1263,6 +1278,166 @@ function (BaseView, loading) {
         }).catch(function () {
             // Dashboard load failed silently
         });
+
+        checkForUpdate(view);
+    }
+
+    function checkForUpdate(view) {
+        var apiUrl = ApiClient.getUrl('XtreamTuner/CheckUpdate');
+
+        ApiClient.getJSON(apiUrl).then(function (data) {
+            var banner = view.querySelector('.updateBanner');
+            if (!banner) return;
+
+            // Always show current version on Dashboard
+            var versionEl = view.querySelector('.pluginVersion');
+            if (versionEl && data.CurrentVersion) {
+                if (data.UpdateInstalled) {
+                    versionEl.innerHTML = 'v' + escapeHtml(data.CurrentVersion) +
+                        ' <span style="color:#e67e22;">\u2192 v' + escapeHtml(data.LatestVersion) + ' (restart needed)</span>';
+                } else if (data.UpdateAvailable) {
+                    versionEl.innerHTML = 'v' + escapeHtml(data.CurrentVersion) +
+                        ' <span style="color:#e67e22;">— update available</span>';
+                } else {
+                    versionEl.innerHTML = 'v' + escapeHtml(data.CurrentVersion) +
+                        ' <span style="color:#52B54B;">— latest</span>';
+                }
+            }
+
+            if (data.UpdateInstalled) {
+                // Update already installed, show restart banner
+                banner.style.background = 'rgba(230,126,34,0.15)';
+                banner.style.borderColor = 'rgba(230,126,34,0.4)';
+                view.querySelector('.updateBannerTitle').textContent = 'Update Installed:';
+                view.querySelector('.updateBannerText').textContent =
+                    'v' + data.LatestVersion + ' has been installed. Restart Emby to apply.';
+                view.querySelector('.btnInstallUpdate').style.display = 'none';
+                view.querySelector('.btnRestartEmby').style.display = '';
+                var link = view.querySelector('.updateBannerLink');
+                if (data.ReleaseUrl) {
+                    link.href = data.ReleaseUrl;
+                    link.style.display = '';
+                } else {
+                    link.style.display = 'none';
+                }
+                view.querySelector('.updateStatus').style.display = 'none';
+                banner.style.display = 'block';
+            } else if (data.UpdateAvailable) {
+                banner.style.background = 'rgba(82,181,75,0.15)';
+                banner.style.borderColor = 'rgba(82,181,75,0.4)';
+                view.querySelector('.updateBannerTitle').textContent = 'Update Available:';
+                view.querySelector('.updateBannerText').textContent =
+                    'v' + data.LatestVersion + ' is available (you have v' + data.CurrentVersion + ')';
+                view.querySelector('.btnInstallUpdate').style.display = '';
+                view.querySelector('.btnInstallUpdate').disabled = false;
+                view.querySelector('.btnRestartEmby').style.display = 'none';
+                var link = view.querySelector('.updateBannerLink');
+                if (data.ReleaseUrl) {
+                    link.href = data.ReleaseUrl;
+                    link.style.display = '';
+                } else {
+                    link.style.display = 'none';
+                }
+                // Hide install button if no download URL
+                if (!data.DownloadUrl) {
+                    view.querySelector('.btnInstallUpdate').style.display = 'none';
+                }
+                view.querySelector('.updateStatus').style.display = 'none';
+                banner.style.display = 'block';
+            } else {
+                banner.style.display = 'none';
+            }
+        }).catch(function () {
+            // Update check failed silently
+        });
+    }
+
+    function installUpdate(view) {
+        var btn = view.querySelector('.btnInstallUpdate');
+        var statusEl = view.querySelector('.updateStatus');
+        btn.disabled = true;
+        btn.textContent = 'Installing...';
+        statusEl.style.display = 'block';
+        statusEl.innerHTML = '<span style="color:#999;">Downloading and installing update...</span>';
+
+        ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('XtreamTuner/InstallUpdate'),
+            dataType: 'json'
+        }).then(function (result) {
+            if (result.Success) {
+                statusEl.innerHTML = '<span style="color:#52B54B;">' + escapeHtml(result.Message) + '</span>';
+                // Switch banner to restart state
+                var banner = view.querySelector('.updateBanner');
+                banner.style.background = 'rgba(230,126,34,0.15)';
+                banner.style.borderColor = 'rgba(230,126,34,0.4)';
+                view.querySelector('.updateBannerTitle').textContent = 'Update Installed:';
+                btn.style.display = 'none';
+                view.querySelector('.btnRestartEmby').style.display = '';
+            } else {
+                statusEl.innerHTML = '<span style="color:#cc0000;">' + escapeHtml(result.Message) + '</span>';
+                btn.disabled = false;
+                btn.textContent = 'Update Now';
+            }
+        }).catch(function () {
+            statusEl.innerHTML = '<span style="color:#cc0000;">Install request failed. Check server logs.</span>';
+            btn.disabled = false;
+            btn.textContent = 'Update Now';
+        });
+    }
+
+    function restartEmby(view) {
+        if (!confirm('Are you sure you want to restart Emby? All active streams will be interrupted.')) {
+            return;
+        }
+
+        var btn = view.querySelector('.btnRestartEmby');
+        var statusEl = view.querySelector('.updateStatus');
+        btn.disabled = true;
+        btn.textContent = 'Restarting...';
+        statusEl.style.display = 'block';
+        statusEl.innerHTML = '<span style="color:#999;">Restarting Emby server...</span>';
+
+        ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('XtreamTuner/RestartEmby')
+        }).then(function () {
+            statusEl.innerHTML = '<span style="color:#999;">Waiting for server to come back...</span>';
+            pollServerReady(view);
+        }).catch(function () {
+            // Server may have already restarted and dropped the connection
+            statusEl.innerHTML = '<span style="color:#999;">Waiting for server to come back...</span>';
+            pollServerReady(view);
+        });
+    }
+
+    function pollServerReady(view) {
+        var statusEl = view.querySelector('.updateStatus');
+        var attempts = 0;
+        var maxAttempts = 60; // 60 * 2s = 2 minutes
+
+        var pollId = setInterval(function () {
+            attempts++;
+            if (attempts > maxAttempts) {
+                clearInterval(pollId);
+                statusEl.innerHTML = '<span style="color:#cc0000;">Server did not come back within 2 minutes. Try reloading manually.</span>';
+                return;
+            }
+
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', ApiClient.getUrl('System/Info/Public'), true);
+            xhr.timeout = 3000;
+            xhr.onload = function () {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    clearInterval(pollId);
+                    statusEl.innerHTML = '<span style="color:#52B54B;">Server is back! Reloading...</span>';
+                    setTimeout(function () { window.location.reload(); }, 1000);
+                }
+            };
+            xhr.onerror = function () { };
+            xhr.ontimeout = function () { };
+            xhr.send();
+        }, 2000);
     }
 
     function renderDashboardStatus(view, data) {
