@@ -70,7 +70,7 @@ function (BaseView, loading) {
         });
 
         view.querySelector('.btnTestDispatcharr').addEventListener('click', function () {
-            testDispatcharrConnection(view);
+            testDispatcharrConnection(self);
         });
 
         view.querySelector('.btnLoadCategories').addEventListener('click', function () {
@@ -146,6 +146,11 @@ function (BaseView, loading) {
         // Dashboard sync all button
         view.querySelector('.btnDashboardSyncAll').addEventListener('click', function () {
             dashboardSyncAll(self);
+        });
+
+        // Download sanitized log button
+        view.querySelector('.btnDownloadLog').addEventListener('click', function () {
+            window.open(ApiClient.getUrl('XtreamTuner/Logs') + '&api_key=' + ApiClient.accessToken(), '_blank');
         });
 
         // Danger zone toggles (event delegation on form)
@@ -233,6 +238,7 @@ function (BaseView, loading) {
             view.querySelector('.txtDispatcharrUrl').value = config.DispatcharrUrl || '';
             view.querySelector('.txtDispatcharrUser').value = config.DispatcharrUser || '';
             view.querySelector('.txtDispatcharrPass').value = config.DispatcharrPass || '';
+            view.querySelector('.chkDispatcharrFallback').checked = config.DispatcharrFallbackToXtream !== false;
 
             // Pre-parse cached categories so folder cards render correctly from the start
             var cachedVodCats = null;
@@ -292,7 +298,7 @@ function (BaseView, loading) {
         });
     }
 
-    function saveConfig(instance) {
+    function saveConfig(instance, callback) {
         loading.show();
         ApiClient.getPluginConfiguration(pluginId).then(function (config) {
             var view = instance.view;
@@ -327,6 +333,7 @@ function (BaseView, loading) {
             config.DispatcharrUrl = view.querySelector('.txtDispatcharrUrl').value.replace(/\/+$/, '');
             config.DispatcharrUser = view.querySelector('.txtDispatcharrUser').value;
             config.DispatcharrPass = view.querySelector('.txtDispatcharrPass').value;
+            config.DispatcharrFallbackToXtream = view.querySelector('.chkDispatcharrFallback').checked;
 
             // VOD Movies
             config.SyncMovies = view.querySelector('.chkSyncMovies').checked;
@@ -356,6 +363,7 @@ function (BaseView, loading) {
 
             ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
                 Dashboard.processPluginConfigurationUpdateResult();
+                if (typeof callback === 'function') callback();
             });
         }).catch(function () {
             loading.hide();
@@ -679,51 +687,24 @@ function (BaseView, loading) {
         xhr.send();
     }
 
-    function testDispatcharrConnection(view) {
+    function testDispatcharrConnection(instance) {
+        var view = instance.view;
         var resultEl = view.querySelector('.dispatcharrTestResult');
-        resultEl.innerHTML = '<span style="color:#999;">Testing connection...</span>';
+        resultEl.innerHTML = '<span style="color:#999;">Saving config &amp; testing connection...</span>';
 
-        var url = view.querySelector('.txtDispatcharrUrl').value.replace(/\/+$/, '');
-        var user = view.querySelector('.txtDispatcharrUser').value;
-        var pass = view.querySelector('.txtDispatcharrPass').value;
-
-        if (!url) {
-            resultEl.innerHTML = '<span style="color:#cc0000;">Please enter a Dispatcharr URL.</span>';
-            return;
-        }
-
-        var loginUrl = url + '/api/accounts/token/';
-        var xhr = new XMLHttpRequest();
-        xhr.open('POST', loginUrl, true);
-        xhr.setRequestHeader('Content-Type', 'application/json');
-        xhr.timeout = 10000;
-
-        xhr.onload = function () {
-            if (xhr.status >= 200 && xhr.status < 300) {
-                try {
-                    var resp = JSON.parse(xhr.responseText);
-                    if (resp.access) {
-                        resultEl.innerHTML = '<span style="color:#52B54B;">Connection successful!</span>';
-                    } else {
-                        resultEl.innerHTML = '<span style="color:#cc0000;">Login failed: no access token returned.</span>';
-                    }
-                } catch (e) {
-                    resultEl.innerHTML = '<span style="color:#cc0000;">Invalid response from server.</span>';
-                }
-            } else {
-                resultEl.innerHTML = '<span style="color:#cc0000;">Login failed (HTTP ' + xhr.status + ').</span>';
-            }
-        };
-
-        xhr.onerror = function () {
-            resultEl.innerHTML = '<span style="color:#cc0000;">Connection failed. Check the URL and ensure Dispatcharr is reachable.</span>';
-        };
-
-        xhr.ontimeout = function () {
-            resultEl.innerHTML = '<span style="color:#cc0000;">Connection timed out.</span>';
-        };
-
-        xhr.send(JSON.stringify({ username: user, password: pass }));
+        // Save config first so the server reads the latest Dispatcharr credentials
+        saveConfig(instance, function () {
+            ApiClient.ajax({
+                type: 'POST',
+                url: ApiClient.getUrl('XtreamTuner/TestDispatcharr'),
+                dataType: 'json'
+            }).then(function (result) {
+                var color = result.Success ? '#52B54B' : '#cc0000';
+                resultEl.innerHTML = '<span style="color:' + color + ';">' + escapeHtml(result.Message) + '</span>';
+            }).catch(function () {
+                resultEl.innerHTML = '<span style="color:#cc0000;">Test request failed. Check server logs.</span>';
+            });
+        });
     }
 
     // ---- Cached category loading (instant from config) ----

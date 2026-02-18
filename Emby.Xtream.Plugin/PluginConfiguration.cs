@@ -37,6 +37,7 @@ namespace Emby.Xtream.Plugin
         public string DispatcharrUrl { get; set; } = string.Empty;
         public string DispatcharrUser { get; set; } = string.Empty;
         public string DispatcharrPass { get; set; } = string.Empty;
+        public bool DispatcharrFallbackToXtream { get; set; } = true;
 
         // VOD Movies
         public bool SyncMovies { get; set; }

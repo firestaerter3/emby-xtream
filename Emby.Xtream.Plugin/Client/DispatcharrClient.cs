@@ -159,6 +159,94 @@ namespace Emby.Xtream.Plugin.Client
             }
         }
 
+        public async Task<(bool Success, string Message)> TestConnectionDetailedAsync(
+            string baseUrl, string username, string password, CancellationToken cancellationToken)
+        {
+            var steps = new List<string>();
+
+            // Step 1: Validate URL
+            if (string.IsNullOrWhiteSpace(baseUrl))
+                return (false, "Dispatcharr URL is empty.");
+
+            Uri uri;
+            if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out uri) ||
+                (uri.Scheme != "http" && uri.Scheme != "https"))
+                return (false, "Invalid URL format. Use http:// or https://.");
+
+            steps.Add("URL format OK");
+
+            // Step 2: Login to get JWT token
+            try
+            {
+                using (var httpClient = new HttpClient())
+                {
+                    httpClient.Timeout = TimeSpan.FromSeconds(10);
+                    var payload = JsonSerializer.Serialize(new { username = username, password = password });
+                    using (var content = new StringContent(payload, Encoding.UTF8, "application/json"))
+                    using (var response = await httpClient.PostAsync(
+                        baseUrl + "/api/accounts/token/", content, cancellationToken).ConfigureAwait(false))
+                    {
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            var snippet = body.Length > 200 ? body.Substring(0, 200) : body;
+                            return (false, string.Format("Login failed (HTTP {0}). Response: {1}",
+                                (int)response.StatusCode, snippet));
+                        }
+
+                        var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        var tokenResponse = JsonSerializer.Deserialize<LoginResponse>(json, JsonOptions);
+
+                        if (tokenResponse == null || string.IsNullOrEmpty(tokenResponse.Access))
+                            return (false, "Login succeeded but no access token in response.");
+
+                        steps.Add("JWT login OK");
+
+                        // Step 3: Test API access with a channels query
+                        try
+                        {
+                            using (var request = new HttpRequestMessage(HttpMethod.Get,
+                                baseUrl + "/api/channels/channels/?limit=1"))
+                            {
+                                request.Headers.Authorization =
+                                    new AuthenticationHeaderValue("Bearer", tokenResponse.Access);
+
+                                using (var apiResponse = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
+                                {
+                                    if (apiResponse.IsSuccessStatusCode)
+                                    {
+                                        steps.Add("API access OK");
+                                    }
+                                    else
+                                    {
+                                        steps.Add(string.Format("API returned HTTP {0} (channels query)", (int)apiResponse.StatusCode));
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            steps.Add("API probe failed: " + ex.Message);
+                        }
+                    }
+                }
+            }
+            catch (TaskCanceledException)
+            {
+                return (false, "Connection timed out after 10 seconds.");
+            }
+            catch (HttpRequestException ex)
+            {
+                return (false, "Connection failed: " + ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return (false, "Unexpected error: " + ex.Message);
+            }
+
+            return (true, string.Join(" > ", steps));
+        }
+
         private async Task<string> GetAuthenticatedAsync(
             string url, string baseUrl, CancellationToken cancellationToken)
         {

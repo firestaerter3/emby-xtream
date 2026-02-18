@@ -249,6 +249,9 @@
                         <button class="btnDashboardSyncAll raised button-submit" is="emby-button" type="button">
                             <span>Sync Movies &amp; Series</span>
                         </button>
+                        <button class="btnDownloadLog raised button-secondary" is="emby-button" type="button" style="margin-left:0.5em;">
+                            <span>Download Sanitized Log</span>
+                        </button>
                         <div class="dashboardSyncAllResult" style="margin-top:0.5em;"></div>
                     </div>
 
@@ -638,6 +641,15 @@
                         <div class="inputContainer">
                             <input class="txtDispatcharrPass" type="password" is="emby-input"
                                    label="Dispatcharr Password" />
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0.5em;">
+                            <label>
+                                <input class="chkDispatcharrFallback" type="checkbox" is="emby-checkbox" />
+                                <span>Fall back to direct Xtream URLs</span>
+                            </label>
+                            <div class="fieldDescription">
+                                If Dispatcharr is unavailable, use direct Xtream URLs instead. Disable to ensure all streams go through Dispatcharr.
+                            </div>
                         </div>
                         <button class="btnTestDispatcharr raised button-secondary" is="emby-button" type="button">
                             <span>Test Dispatcharr Connection</span>
