@@ -3,12 +3,15 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Emby.Xtream.Plugin.Client;
 using Emby.Xtream.Plugin.Client.Models;
 using Emby.Xtream.Plugin.Service;
 using MediaBrowser.Controller.Api;
 using MediaBrowser.Controller.Net;
+using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Services;
 
 namespace Emby.Xtream.Plugin.Api
@@ -80,6 +83,16 @@ namespace Emby.Xtream.Plugin.Api
 
     [Route("/XtreamTuner/TestConnection", "POST", Summary = "Tests connection to Xtream server")]
     public class TestXtreamConnection : IReturn<TestConnectionResult>
+    {
+    }
+
+    [Route("/XtreamTuner/TestDispatcharr", "POST", Summary = "Tests connection to Dispatcharr")]
+    public class TestDispatcharrConnection : IReturn<TestConnectionResult>
+    {
+    }
+
+    [Route("/XtreamTuner/Logs", "GET", Summary = "Downloads sanitized plugin logs")]
+    public class GetSanitizedLogs : IReturnVoid
     {
     }
 
@@ -620,6 +633,124 @@ namespace Emby.Xtream.Plugin.Api
             }
 
             return result;
+        }
+
+        public async Task<object> Post(TestDispatcharrConnection request)
+        {
+            var config = Plugin.Instance.Configuration;
+            var result = new TestConnectionResult();
+
+            if (string.IsNullOrEmpty(config.DispatcharrUrl))
+            {
+                result.Success = false;
+                result.Message = "Please configure Dispatcharr URL first.";
+                return result;
+            }
+
+            try
+            {
+                var logManager = Plugin.Instance.ApplicationHost.Resolve<ILogManager>();
+                var client = new DispatcharrClient(logManager.GetLogger("XtreamTuner.DispatcharrTest"));
+                client.Configure(config.DispatcharrUser ?? "", config.DispatcharrPass ?? "");
+
+                var (success, message) = await client.TestConnectionDetailedAsync(
+                    config.DispatcharrUrl, config.DispatcharrUser ?? "", config.DispatcharrPass ?? "",
+                    CancellationToken.None).ConfigureAwait(false);
+
+                result.Success = success;
+                result.Message = message;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = "Unexpected error: " + ex.Message;
+            }
+
+            return result;
+        }
+
+        public object Get(GetSanitizedLogs request)
+        {
+            var config = Plugin.Instance.Configuration;
+            var logDir = Plugin.Instance.ApplicationPaths.LogDirectoryPath;
+            var lines = new List<string>();
+
+            try
+            {
+                var logFiles = Directory.GetFiles(logDir, "*.txt")
+                    .Concat(Directory.GetFiles(logDir, "*.log"))
+                    .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
+                    .Take(5)
+                    .ToArray();
+
+                var keywords = new[] { "XtreamTuner", "Xtream", "Dispatcharr", "LiveTv" };
+
+                foreach (var logFile in logFiles)
+                {
+                    try
+                    {
+                        using (var reader = new StreamReader(logFile, Encoding.UTF8))
+                        {
+                            string line;
+                            while ((line = reader.ReadLine()) != null)
+                            {
+                                foreach (var kw in keywords)
+                                {
+                                    if (line.IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0)
+                                    {
+                                        lines.Add(line);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            // Sanitize PII
+            var sanitized = new StringBuilder();
+            foreach (var line in lines)
+            {
+                var s = line;
+
+                // Redact specific config values if non-empty
+                if (!string.IsNullOrEmpty(config.Username))
+                    s = s.Replace(config.Username, "<redacted>");
+                if (!string.IsNullOrEmpty(config.Password))
+                    s = s.Replace(config.Password, "<redacted>");
+                if (!string.IsNullOrEmpty(config.DispatcharrUser))
+                    s = s.Replace(config.DispatcharrUser, "<redacted>");
+                if (!string.IsNullOrEmpty(config.DispatcharrPass))
+                    s = s.Replace(config.DispatcharrPass, "<redacted>");
+
+                // Redact IP addresses
+                s = Regex.Replace(s, @"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", "<ip-redacted>");
+
+                // Redact Xtream credentials in URLs: /live/user/pass/
+                s = Regex.Replace(s, @"/live/[^/]+/[^/]+/", "/live/<user>/<pass>/");
+
+                // Redact email patterns
+                s = Regex.Replace(s, @"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", "<email-redacted>");
+
+                // Redact hostnames in stream URLs (http(s)://host:port patterns, keep path)
+                s = Regex.Replace(s, @"(https?://)([^/:]+)(:\d+)?(/player_api\.php|/live/|/movie/|/series/)",
+                    "$1<provider-host>$3$4");
+
+                sanitized.AppendLine(s);
+            }
+
+            if (sanitized.Length == 0)
+                sanitized.AppendLine("No plugin-related log entries found.");
+
+            var stream = new MemoryStream(Encoding.UTF8.GetBytes(sanitized.ToString()));
+            var headers = new Dictionary<string, string>
+            {
+                { "Content-Disposition", "attachment; filename=\"xtream-tuner-log.txt\"" },
+            };
+            return ResultFactory.GetResult(Request, stream, "text/plain", headers);
         }
     }
 }

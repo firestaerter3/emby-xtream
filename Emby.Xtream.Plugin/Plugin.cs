@@ -16,6 +16,7 @@ namespace Emby.Xtream.Plugin
     {
         private static volatile Plugin _instance;
         private readonly IApplicationHost _applicationHost;
+        private readonly IApplicationPaths _applicationPaths;
         private LiveTvService _liveTvService;
         private StrmSyncService _strmSyncService;
 
@@ -24,6 +25,7 @@ namespace Emby.Xtream.Plugin
         {
             _instance = this;
             _applicationHost = applicationHost;
+            _applicationPaths = applicationPaths;
             _liveTvService = new LiveTvService(logManager.GetLogger("XtreamTuner.LiveTv"));
             _strmSyncService = new StrmSyncService(logManager.GetLogger("XtreamTuner.StrmSync"));
         }
@@ -38,6 +40,8 @@ namespace Emby.Xtream.Plugin
         public static Plugin Instance => _instance ?? throw new InvalidOperationException("Plugin not initialized");
 
         public IApplicationHost ApplicationHost => _applicationHost;
+
+        public new IApplicationPaths ApplicationPaths => _applicationPaths;
 
         public LiveTvService LiveTvService => _liveTvService;
 

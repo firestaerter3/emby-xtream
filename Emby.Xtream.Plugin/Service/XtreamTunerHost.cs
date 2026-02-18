@@ -193,6 +193,11 @@ namespace Emby.Xtream.Plugin.Service
 
             var config = Plugin.Instance.Configuration;
             var streamUrl = BuildStreamUrl(config, streamId);
+            if (streamUrl == null)
+            {
+                return new List<MediaSourceInfo>();
+            }
+
             _streamStats.TryGetValue(streamId, out var stats);
 
             var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats);
@@ -215,6 +220,11 @@ namespace Emby.Xtream.Plugin.Service
 
             var config = Plugin.Instance.Configuration;
             var streamUrl = BuildStreamUrl(config, streamId);
+            if (streamUrl == null)
+            {
+                throw new System.IO.FileNotFoundException(
+                    string.Format("Channel {0}: Dispatcharr proxy unavailable and fallback disabled", streamId));
+            }
             _streamStats.TryGetValue(streamId, out var stats);
 
             var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats);
@@ -303,15 +313,24 @@ namespace Emby.Xtream.Plugin.Service
         {
             // When Dispatcharr is enabled and we have a UUID for this channel,
             // use the proxy stream URL instead of the Xtream-style URL.
-            if (config.EnableDispatcharr &&
-                !string.IsNullOrEmpty(config.DispatcharrUrl) &&
-                _channelUuidMap.TryGetValue(streamId, out var uuid))
+            if (config.EnableDispatcharr && !string.IsNullOrEmpty(config.DispatcharrUrl))
             {
-                var proxyUrl = string.Format(CultureInfo.InvariantCulture,
-                    "{0}/proxy/ts/stream/{1}",
-                    config.DispatcharrUrl.TrimEnd('/'), uuid);
-                Logger.Debug("Stream {0}: using Dispatcharr proxy URL (uuid={1})", streamId, uuid);
-                return proxyUrl;
+                if (_channelUuidMap.TryGetValue(streamId, out var uuid))
+                {
+                    var proxyUrl = string.Format(CultureInfo.InvariantCulture,
+                        "{0}/proxy/ts/stream/{1}",
+                        config.DispatcharrUrl.TrimEnd('/'), uuid);
+                    Logger.Debug("Stream {0}: using Dispatcharr proxy URL (uuid={1})", streamId, uuid);
+                    return proxyUrl;
+                }
+
+                if (!config.DispatcharrFallbackToXtream)
+                {
+                    Logger.Warn("Stream {0}: no Dispatcharr UUID and fallback disabled, skipping", streamId);
+                    return null;
+                }
+
+                Logger.Debug("Stream {0}: no Dispatcharr UUID, falling back to direct Xtream URL", streamId);
             }
 
             var extension = string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase)
