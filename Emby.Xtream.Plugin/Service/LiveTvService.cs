@@ -26,6 +26,10 @@ namespace Emby.Xtream.Plugin.Service
         private readonly ILogger _logger;
         private readonly SemaphoreSlim _m3uLock = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim _epgLock = new SemaphoreSlim(1, 1);
+        private readonly object _perChannelEpgLock = new object();
+
+        private Dictionary<int, (List<EpgProgram> Programs, DateTime CacheTime)> _perChannelEpgCache
+            = new Dictionary<int, (List<EpgProgram>, DateTime)>();
 
         private string _cachedM3U;
         private string _cachedCatchupM3U;
@@ -164,6 +168,10 @@ namespace Emby.Xtream.Plugin.Service
             _m3uCacheTime = DateTime.MinValue;
             _catchupCacheTime = DateTime.MinValue;
             _epgCacheTime = DateTime.MinValue;
+            lock (_perChannelEpgLock)
+            {
+                _perChannelEpgCache = new Dictionary<int, (List<EpgProgram>, DateTime)>();
+            }
             _logger.Info("Live TV cache invalidated");
         }
 
@@ -445,6 +453,35 @@ namespace Emby.Xtream.Plugin.Service
             return allPrograms;
         }
 
+        /// <summary>
+        /// Fetches EPG data for a single channel, with per-channel caching.
+        /// Used by the tuner host to serve guide data directly.
+        /// </summary>
+        internal async Task<List<EpgProgram>> FetchEpgForChannelCachedAsync(int streamId, CancellationToken cancellationToken)
+        {
+            var config = Plugin.Instance.Configuration;
+            var cacheTtl = TimeSpan.FromMinutes(config.EpgCacheMinutes);
+
+            lock (_perChannelEpgLock)
+            {
+                if (_perChannelEpgCache.TryGetValue(streamId, out var entry)
+                    && DateTime.UtcNow - entry.CacheTime < cacheTtl)
+                {
+                    return entry.Programs;
+                }
+            }
+
+            var epgListings = await FetchEpgForChannelAsync(streamId, cancellationToken).ConfigureAwait(false);
+            var programs = epgListings?.Listings ?? new List<EpgProgram>();
+
+            lock (_perChannelEpgLock)
+            {
+                _perChannelEpgCache[streamId] = (programs, DateTime.UtcNow);
+            }
+
+            return programs;
+        }
+
         private async Task<EpgListings> FetchEpgForChannelAsync(int streamId, CancellationToken cancellationToken)
         {
             var config = Plugin.Instance.Configuration;
@@ -481,7 +518,7 @@ namespace Emby.Xtream.Plugin.Service
                 .Replace("'", "&apos;");
         }
 
-        private static string DecodeBase64(string value)
+        internal static string DecodeBase64(string value)
         {
             if (string.IsNullOrEmpty(value))
             {

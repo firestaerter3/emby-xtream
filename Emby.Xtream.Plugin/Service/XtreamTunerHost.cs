@@ -70,7 +70,60 @@ namespace Emby.Xtream.Plugin.Service
 
         public override bool SupportsGuideData(TunerHostInfo tuner)
         {
-            return false;
+            return Plugin.Instance.Configuration.EnableEpg;
+        }
+
+        protected override async Task<List<ProgramInfo>> GetProgramsInternal(
+            TunerHostInfo tuner, string tunerChannelId,
+            DateTimeOffset startDateUtc, DateTimeOffset endDateUtc,
+            CancellationToken cancellationToken)
+        {
+            if (!int.TryParse(tunerChannelId, NumberStyles.None, CultureInfo.InvariantCulture, out int streamId))
+            {
+                Logger.Warn("GetProgramsInternal: cannot parse tunerChannelId '{0}'", tunerChannelId);
+                return new List<ProgramInfo>();
+            }
+
+            var liveTvService = Plugin.Instance.LiveTvService;
+            List<Client.Models.EpgProgram> programs;
+            try
+            {
+                programs = await liveTvService.FetchEpgForChannelCachedAsync(streamId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("GetProgramsInternal: failed to fetch EPG for stream {0}: {1}", streamId, ex.Message);
+                return new List<ProgramInfo>();
+            }
+
+            var startUnix = startDateUtc.ToUnixTimeSeconds();
+            var endUnix = endDateUtc.ToUnixTimeSeconds();
+
+            var result = new List<ProgramInfo>();
+            foreach (var p in programs)
+            {
+                if (p.StopTimestamp <= startUnix || p.StartTimestamp >= endUnix)
+                {
+                    continue;
+                }
+
+                var title = LiveTvService.DecodeBase64(p.Title);
+                var description = LiveTvService.DecodeBase64(p.Description);
+
+                result.Add(new ProgramInfo
+                {
+                    Id = string.Format(CultureInfo.InvariantCulture, "xtream_epg_{0}_{1}", streamId, p.StartTimestamp),
+                    ChannelId = tunerChannelId,
+                    StartDate = DateTimeOffset.FromUnixTimeSeconds(p.StartTimestamp).UtcDateTime,
+                    EndDate = DateTimeOffset.FromUnixTimeSeconds(p.StopTimestamp).UtcDateTime,
+                    Name = string.IsNullOrEmpty(title) ? "Unknown" : title,
+                    Overview = string.IsNullOrEmpty(description) ? null : description,
+                });
+            }
+
+            Logger.Debug("GetProgramsInternal: returning {0} programs for channel {1}", result.Count, streamId);
+            return result;
         }
 
         protected override async Task<List<ChannelInfo>> GetChannelsInternal(
