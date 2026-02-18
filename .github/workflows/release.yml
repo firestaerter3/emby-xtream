@@ -26,8 +26,31 @@ jobs:
           cd Emby.Xtream.Plugin
           dotnet publish -c Release -o out --no-self-contained -p:Version=$VERSION
 
-      - name: Create release
+      - name: Generate release notes
+        id: notes
+        run: |
+          # Find previous tag
+          PREV_TAG=$(git tag --sort=-v:refname | grep '^v' | sed -n '2p')
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+          # Build notes from commit messages (skip merge commits)
+          {
+            echo "## What's Changed"
+            echo ""
+            git log "$RANGE" --no-merges --pretty=format:"- %s" | grep -v "Co-Authored-By"
+            echo ""
+            echo ""
+            if [ -n "$PREV_TAG" ]; then
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${{ github.ref_name }}"
+            fi
+          } > release_notes.md
+
+      - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
           files: Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll
-          generate_release_notes: true
+          body_path: release_notes.md
+          draft: true
