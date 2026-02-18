@@ -8,6 +8,10 @@ namespace Emby.Xtream.Plugin.Service
             @"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",
             RegexOptions.Compiled);
 
+        private static readonly Regex VersionContextRegex = new Regex(
+            @"(?:Version[= ]|version )\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",
+            RegexOptions.Compiled);
+
         private static readonly Regex XtreamCredRegex = new Regex(
             @"/live/[^/]+/[^/]+/",
             RegexOptions.Compiled);
@@ -42,8 +46,19 @@ namespace Emby.Xtream.Plugin.Service
             if (!string.IsNullOrEmpty(dispatcharrPass))
                 s = s.Replace(dispatcharrPass, "<redacted>");
 
-            // Redact IP addresses
+            // Redact IP addresses, but preserve version numbers (e.g. Version=1.2.0.0)
+            // Replace version patterns with placeholders first, then redact IPs, then restore
+            var versionMatches = VersionContextRegex.Matches(s);
+            for (int i = versionMatches.Count - 1; i >= 0; i--)
+            {
+                var vm = versionMatches[i];
+                s = s.Substring(0, vm.Index) + "\x00VER" + i + "\x00" + s.Substring(vm.Index + vm.Length);
+            }
             s = IpRegex.Replace(s, "<ip-redacted>");
+            for (int i = 0; i < versionMatches.Count; i++)
+            {
+                s = s.Replace("\x00VER" + i + "\x00", versionMatches[i].Value);
+            }
 
             // Redact Xtream credentials in URLs: /live/user/pass/
             s = XtreamCredRegex.Replace(s, "/live/<user>/<pass>/");

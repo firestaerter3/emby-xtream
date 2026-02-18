@@ -138,6 +138,15 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.DoesNotContain("host.com", result);
         }
 
+        [Theory]
+        [InlineData("Loading Plugin, Version=1.2.0.0, Culture=neutral")]
+        [InlineData("File Emby.dll has version 4.8.0.80")]
+        public void PreservesVersionNumbers(string input)
+        {
+            var result = LogSanitizer.SanitizeLine(input, "", "", "", "");
+            Assert.Equal(input, result);
+        }
+
         [Fact]
         public void CredentialSubstringReplacesPartialWords()
         {
