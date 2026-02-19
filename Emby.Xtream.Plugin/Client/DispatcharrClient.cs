@@ -183,10 +183,24 @@ namespace Emby.Xtream.Plugin.Client
                 }
             }
 
+            if (uuidMap.Count == 0 && channels.Count > 0)
+            {
+                // stream_id is absent in embedded streams (Dispatcharr < v0.19.0).
+                // Fall back to using ch.Id directly as the Xtream stream ID — the channel
+                // object's id field matches the Xtream emulation stream_id.
+                _logger.Info(
+                    "No stream_id fields found in embedded streams; falling back to channel ID mapping (Dispatcharr < v0.19.0 compatibility)");
+                foreach (var ch in channels)
+                {
+                    if (!string.IsNullOrEmpty(ch.Uuid) && ch.Id > 0)
+                        uuidMap[ch.Id] = ch.Uuid;
+                }
+            }
+
             if (uuidMap.Count == 0)
             {
                 _logger.Warn(
-                    "Dispatcharr UUID map is empty — ensure Dispatcharr v0.19.0+ is installed and channels have stream sources");
+                    "Dispatcharr UUID map is empty — channels may have no stream sources or no UUIDs assigned");
             }
             else
             {
