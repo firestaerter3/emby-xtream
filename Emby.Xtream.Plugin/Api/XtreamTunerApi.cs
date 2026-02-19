@@ -841,6 +841,9 @@ namespace Emby.Xtream.Plugin.Api
 
         public async Task<object> Get(CheckForUpdate request)
         {
+            // Always invalidate before a user-initiated check so the dashboard
+            // reflects releases published since the last page load.
+            UpdateChecker.InvalidateCache();
             return await UpdateChecker.CheckForUpdateAsync(request.Beta).ConfigureAwait(false);
         }
 
