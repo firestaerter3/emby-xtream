@@ -234,7 +234,7 @@ namespace Emby.Xtream.Plugin.Service
             await EnsureStatsLoadedAsync(cancellationToken).ConfigureAwait(false);
 
             var config = Plugin.Instance.Configuration;
-            var streamUrl = BuildStreamUrl(config, streamId);
+            var (streamUrl, isDispatcharr) = BuildStreamUrl(config, streamId);
             if (streamUrl == null)
             {
                 return new List<MediaSourceInfo>();
@@ -242,7 +242,7 @@ namespace Emby.Xtream.Plugin.Service
 
             _streamStats.TryGetValue(streamId, out var stats);
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats);
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr);
 
             return new List<MediaSourceInfo> { mediaSource };
         }
@@ -261,7 +261,7 @@ namespace Emby.Xtream.Plugin.Service
             await EnsureStatsLoadedAsync(cancellationToken).ConfigureAwait(false);
 
             var config = Plugin.Instance.Configuration;
-            var streamUrl = BuildStreamUrl(config, streamId);
+            var (streamUrl, isDispatcharr) = BuildStreamUrl(config, streamId);
             if (streamUrl == null)
             {
                 throw new System.IO.FileNotFoundException(
@@ -269,7 +269,7 @@ namespace Emby.Xtream.Plugin.Service
             }
             _streamStats.TryGetValue(streamId, out var stats);
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats);
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr);
             var httpClient = new HttpClient();
             ILiveStream liveStream = new XtreamLiveStream(mediaSource, tuner.Id, httpClient);
 
@@ -332,7 +332,7 @@ namespace Emby.Xtream.Plugin.Service
             return int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out streamId);
         }
 
-        private string BuildStreamUrl(PluginConfiguration config, int streamId)
+        private (string Url, bool IsDispatcharr) BuildStreamUrl(PluginConfiguration config, int streamId)
         {
             // When Dispatcharr is enabled and we have a UUID for this channel,
             // use the proxy stream URL instead of the Xtream-style URL.
@@ -344,13 +344,13 @@ namespace Emby.Xtream.Plugin.Service
                         "{0}/proxy/ts/stream/{1}",
                         config.DispatcharrUrl.TrimEnd('/'), uuid);
                     Logger.Debug("Stream {0}: using Dispatcharr proxy URL (uuid={1})", streamId, uuid);
-                    return proxyUrl;
+                    return (proxyUrl, true);
                 }
 
                 if (!config.DispatcharrFallbackToXtream)
                 {
                     Logger.Warn("Stream {0}: no Dispatcharr UUID and fallback disabled, skipping", streamId);
-                    return null;
+                    return (null, false);
                 }
 
                 Logger.Debug("Stream {0}: no Dispatcharr UUID, falling back to direct Xtream URL", streamId);
@@ -358,16 +358,22 @@ namespace Emby.Xtream.Plugin.Service
 
             var extension = string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase)
                 ? "ts" : "m3u8";
-            return string.Format(CultureInfo.InvariantCulture,
+            return (string.Format(CultureInfo.InvariantCulture,
                 "{0}/live/{1}/{2}/{3}.{4}",
-                config.BaseUrl, config.Username, config.Password, streamId, extension);
+                config.BaseUrl, config.Username, config.Password, streamId, extension), false);
         }
 
         private MediaSourceInfo CreateMediaSourceInfo(
-            int streamId, string streamUrl, StreamStatsInfo stats)
+            int streamId, string streamUrl, StreamStatsInfo stats, bool disableProbing = false)
         {
             var sourceId = "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture);
             bool hasStats = stats?.VideoCodec != null;
+
+            // Disable probing for Dispatcharr proxy URLs: the probe opens a short-lived HTTP
+            // connection that Dispatcharr interprets as a client, and when it closes after
+            // analysis (~0.1s) Dispatcharr tears down the channel. The real playback connection
+            // then hits the teardown and fails, causing a rapid retry storm.
+            bool suppressProbing = disableProbing || hasStats;
 
             var mediaSource = new MediaSourceInfo
             {
@@ -375,13 +381,13 @@ namespace Emby.Xtream.Plugin.Service
                 Path = streamUrl,
                 Protocol = MediaProtocol.Http,
                 Container = "mpegts",
-                SupportsProbing = !hasStats,
+                SupportsProbing = !suppressProbing,
                 IsRemote = true,
                 IsInfiniteStream = true,
                 SupportsDirectPlay = false,
                 SupportsDirectStream = true,
                 SupportsTranscoding = true,
-                AnalyzeDurationMs = hasStats ? 0 : (int?)500,
+                AnalyzeDurationMs = suppressProbing ? 0 : (int?)500,
             };
 
             if (hasStats)
