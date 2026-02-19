@@ -38,6 +38,7 @@ namespace Emby.Xtream.Plugin.Service
 
         private volatile Dictionary<int, StreamStatsInfo> _streamStats = new Dictionary<int, StreamStatsInfo>();
         private volatile Dictionary<int, string> _channelUuidMap = new Dictionary<int, string>();
+        private volatile bool _dispatcharrDataLoaded;
         private List<ChannelInfo> _cachedChannels;
         private DateTime _cacheTime = DateTime.MinValue;
 
@@ -169,6 +170,7 @@ namespace Emby.Xtream.Plugin.Service
                         config.DispatcharrUrl, cancellationToken).ConfigureAwait(false);
                     newStats = statsMap;
                     _channelUuidMap = uuidMap;
+                    _dispatcharrDataLoaded = true;
                 }
                 catch (Exception ex)
                 {
@@ -285,16 +287,20 @@ namespace Emby.Xtream.Plugin.Service
             _cacheTime = DateTime.MinValue;
             _streamStats = new Dictionary<int, StreamStatsInfo>();
             _channelUuidMap = new Dictionary<int, string>();
+            _dispatcharrDataLoaded = false;
             Logger.Info("Xtream tuner caches cleared");
         }
 
         /// <summary>
         /// Ensures Dispatcharr stats and UUID mappings are loaded. Called lazily
         /// on first playback if GetChannelsInternal hasn't run yet (e.g. after restart).
+        /// Uses a flag rather than checking map counts so that a legitimately empty
+        /// stats map (all URL-based sources with no stats) doesn't cause a redundant
+        /// Dispatcharr API round-trip on every playback request.
         /// </summary>
         private async Task EnsureStatsLoadedAsync(CancellationToken cancellationToken)
         {
-            if (_streamStats.Count > 0 && _channelUuidMap.Count > 0)
+            if (_dispatcharrDataLoaded)
             {
                 return;
             }
@@ -314,6 +320,7 @@ namespace Emby.Xtream.Plugin.Service
                     config.DispatcharrUrl, cancellationToken).ConfigureAwait(false);
                 if (statsMap.Count > 0) _streamStats = statsMap;
                 if (uuidMap.Count > 0) _channelUuidMap = uuidMap;
+                _dispatcharrDataLoaded = true;
                 Logger.Info("Loaded {0} UUIDs and {1} stream stats from Dispatcharr on-demand",
                     uuidMap.Count, statsMap.Count);
             }
