@@ -223,8 +223,10 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
-        public async Task GetChannelDataAsync_NullStreamId_ReturnsEmptyMaps()
+        public async Task GetChannelDataAsync_NullStreamId_FallsBackToChannelId()
         {
+            // Simulates Dispatcharr < v0.19.0: stream sources have no stream_id field.
+            // The fallback should map ch.Id → ch.Uuid so channels are still playable.
             var channelsJson = JsonSerializer.Serialize(new[]
             {
                 new
@@ -266,7 +268,8 @@ namespace Emby.Xtream.Plugin.Tests
             client.Configure("admin", "pass");
             var (uuidMap, statsMap) = await client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None);
 
-            Assert.Empty(uuidMap);
+            Assert.True(uuidMap.ContainsKey(1), "Fallback should key UUID map by channel id");
+            Assert.Equal("aaaabbbb-cccc-dddd-eeee-ffff00001111", uuidMap[1]);
             Assert.Empty(statsMap);
         }
 
