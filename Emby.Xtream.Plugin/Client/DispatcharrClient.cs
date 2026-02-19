@@ -166,47 +166,23 @@ namespace Emby.Xtream.Plugin.Client
             var channels = JsonSerializer.Deserialize<List<DispatcharrChannelWithStreams>>(json, JsonOptions);
             if (channels == null) return (uuidMap, statsMap);
 
-            int fallbackCount = 0;
             foreach (var ch in channels)
             {
-                if (string.IsNullOrEmpty(ch.Uuid)) continue;
+                if (string.IsNullOrEmpty(ch.Uuid) || ch.Id == 0) continue;
 
-                bool channelMapped = false;
+                // Key by ch.Id — Dispatcharr's Xtream emulation always uses ch.Id as the
+                // stream_id it presents to Emby.  The stream_id field inside embedded stream
+                // sources reflects the upstream provider's own ID (or, for URL-based sources,
+                // the source's internal Dispatcharr ID), neither of which reliably matches
+                // what Emby stores as the channel's stream_id.
+                uuidMap[ch.Id] = ch.Uuid;
+
+                // Take stream stats from the first source that carries them.
                 foreach (var stream in ch.Streams)
                 {
-                    if (stream.StreamId == null || stream.StreamId == 0) continue;
-
-                    var sid = stream.StreamId.Value;
-                    if (!uuidMap.ContainsKey(sid))
-                        uuidMap[sid] = ch.Uuid;
-
-                    if (stream.StreamStats?.VideoCodec != null && !statsMap.ContainsKey(sid))
-                        statsMap[sid] = stream.StreamStats;
-
-                    channelMapped = true;
+                    if (stream.StreamStats?.VideoCodec != null && !statsMap.ContainsKey(ch.Id))
+                        statsMap[ch.Id] = stream.StreamStats;
                 }
-
-                // Per-channel fallback: if no streams had a stream_id, use ch.Id as the key.
-                // This handles Dispatcharr < v0.19.0 (no stream_id anywhere) and channels
-                // that have no stream sources configured.
-                if (!channelMapped && ch.Id > 0 && !uuidMap.ContainsKey(ch.Id))
-                {
-                    uuidMap[ch.Id] = ch.Uuid;
-                    fallbackCount++;
-                }
-            }
-
-            if (fallbackCount > 0 && fallbackCount == uuidMap.Count)
-            {
-                _logger.Info(
-                    "No stream_id fields found in embedded streams; used channel ID mapping for all {0} channels (Dispatcharr < v0.19.0 compatibility)",
-                    fallbackCount);
-            }
-            else if (fallbackCount > 0)
-            {
-                _logger.Info(
-                    "{0} channels had no stream_id in their streams; used channel ID fallback for those",
-                    fallbackCount);
             }
 
             if (uuidMap.Count == 0)

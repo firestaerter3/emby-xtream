@@ -166,8 +166,11 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
-        public async Task GetChannelDataAsync_MapsUuidAndStatsByStreamId()
+        public async Task GetChannelDataAsync_MapsUuidAndStatsByChannelId()
         {
+            // UUID and stats are always keyed by ch.Id regardless of what stream_id the
+            // embedded stream sources carry — ch.Id is what Dispatcharr's Xtream emulation
+            // presents to Emby as the channel's stream_id.
             var channelsJson = JsonSerializer.Serialize(new[]
             {
                 new
@@ -181,7 +184,7 @@ namespace Emby.Xtream.Plugin.Tests
                         {
                             id = 99,
                             name = "source1",
-                            stream_id = 73857,
+                            stream_id = 73857,   // upstream Xtream stream_id — NOT used as map key
                             stream_stats = new
                             {
                                 video_codec = "H264",
@@ -216,31 +219,33 @@ namespace Emby.Xtream.Plugin.Tests
             client.Configure("admin", "pass");
             var (uuidMap, statsMap) = await client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None);
 
-            Assert.True(uuidMap.ContainsKey(73857), "UUID map should be keyed by Xtream stream_id");
-            Assert.Equal("aaaabbbb-cccc-dddd-eeee-ffff00001111", uuidMap[73857]);
-            Assert.True(statsMap.ContainsKey(73857), "Stats map should be keyed by Xtream stream_id");
-            Assert.Equal("H264", statsMap[73857].VideoCodec);
+            Assert.True(uuidMap.ContainsKey(1), "UUID map should be keyed by ch.Id, not upstream stream_id");
+            Assert.Equal("aaaabbbb-cccc-dddd-eeee-ffff00001111", uuidMap[1]);
+            Assert.True(statsMap.ContainsKey(1), "Stats map should be keyed by ch.Id");
+            Assert.Equal("H264", statsMap[1].VideoCodec);
         }
 
         [Fact]
-        public async Task GetChannelDataAsync_NullStreamId_FallsBackToChannelId()
+        public async Task GetChannelDataAsync_UrlStreamSource_KeyedByChannelId()
         {
-            // Simulates Dispatcharr < v0.19.0: stream sources have no stream_id field.
-            // The fallback should map ch.Id → ch.Uuid so channels are still playable.
+            // Simulates the Joe bug: channel 8 has a URL-based stream source whose
+            // internal Dispatcharr ID happens to be 1.  The old stream_id-based approach
+            // would map uuidMap[1] → ch8_uuid (wrong key) and leave key 8 unmapped.
+            // The ch.Id-based approach always maps uuidMap[8] → ch8_uuid correctly.
             var channelsJson = JsonSerializer.Serialize(new[]
             {
                 new
                 {
-                    id = 1,
-                    uuid = "aaaabbbb-cccc-dddd-eeee-ffff00001111",
-                    name = "Old Channel",
+                    id = 8,
+                    uuid = "uuid-channel-eight",
+                    name = "OK | Oklahoma City | CBS 9 KWTV",
                     streams = new[]
                     {
                         new
                         {
-                            id = 99,
-                            name = "source1",
-                            stream_id = (int?)null,
+                            id = 1,           // internal stream source ID — would corrupt old approach
+                            name = "1 - CBSKWTV.us",
+                            stream_id = 1,    // URL source reports its own ID as stream_id
                             stream_stats = (object)null
                         }
                     }
@@ -251,13 +256,12 @@ namespace Emby.Xtream.Plugin.Tests
             {
                 if (request.RequestUri.AbsolutePath.Contains("/api/accounts/token/"))
                 {
-                    var json = JsonSerializer.Serialize(new { access = "tok123", refresh = "ref456" });
+                    var json = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
                     return new HttpResponseMessage(HttpStatusCode.OK)
                     {
                         Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
                     };
                 }
-
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(channelsJson, System.Text.Encoding.UTF8, "application/json")
@@ -268,17 +272,17 @@ namespace Emby.Xtream.Plugin.Tests
             client.Configure("admin", "pass");
             var (uuidMap, statsMap) = await client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None);
 
-            Assert.True(uuidMap.ContainsKey(1), "Fallback should key UUID map by channel id");
-            Assert.Equal("aaaabbbb-cccc-dddd-eeee-ffff00001111", uuidMap[1]);
+            Assert.True(uuidMap.ContainsKey(8), "Channel 8 must be reachable via its ch.Id");
+            Assert.Equal("uuid-channel-eight", uuidMap[8]);
+            Assert.False(uuidMap.ContainsKey(1), "Stream source internal ID must not pollute the UUID map");
             Assert.Empty(statsMap);
         }
 
         [Fact]
-        public async Task GetChannelDataAsync_MixedStreamId_FallsBackPerChannelOnly()
+        public async Task GetChannelDataAsync_AllChannelsKeyedByChannelId()
         {
-            // Simulates the real-world bug: most channels have stream_id, but a few don't.
-            // The per-channel fallback should apply only to channels missing stream_id,
-            // not drop them as the old all-or-nothing fallback did.
+            // All channel types (no streams, null stream_id, URL source, Xtream source)
+            // must all be reachable via ch.Id regardless of stream source configuration.
             var channelsJson = JsonSerializer.Serialize(new object[]
             {
                 new
@@ -291,8 +295,8 @@ namespace Emby.Xtream.Plugin.Tests
                 new
                 {
                     id = 2,
-                    uuid = "uuid-no-stream-id",
-                    name = "Channel With Stream But No stream_id",
+                    uuid = "uuid-null-stream-id",
+                    name = "Channel With Null stream_id",
                     streams = new[]
                     {
                         new { id = 10, name = "src", stream_id = (int?)null, stream_stats = (object)null }
@@ -301,8 +305,8 @@ namespace Emby.Xtream.Plugin.Tests
                 new
                 {
                     id = 3,
-                    uuid = "uuid-with-stream-id",
-                    name = "Channel With stream_id",
+                    uuid = "uuid-xtream-source",
+                    name = "Channel With Xtream Source",
                     streams = new[]
                     {
                         new
@@ -339,24 +343,15 @@ namespace Emby.Xtream.Plugin.Tests
             client.Configure("admin", "pass");
             var (uuidMap, statsMap) = await client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None);
 
-            // Channel 3: mapped via stream_id=500
-            Assert.True(uuidMap.ContainsKey(500), "Channel with stream_id should be keyed by stream_id");
-            Assert.Equal("uuid-with-stream-id", uuidMap[500]);
-
-            // Channel 1: no streams at all — per-channel fallback to ch.Id=1
-            Assert.True(uuidMap.ContainsKey(1), "Channel with no streams should fall back to ch.Id");
-            Assert.Equal("uuid-no-streams", uuidMap[1]);
-
-            // Channel 2: stream has null stream_id — per-channel fallback to ch.Id=2
-            Assert.True(uuidMap.ContainsKey(2), "Channel with null stream_id should fall back to ch.Id");
-            Assert.Equal("uuid-no-stream-id", uuidMap[2]);
-
-            // Total: 3 entries
             Assert.Equal(3, uuidMap.Count);
+            Assert.Equal("uuid-no-streams", uuidMap[1]);
+            Assert.Equal("uuid-null-stream-id", uuidMap[2]);
+            Assert.Equal("uuid-xtream-source", uuidMap[3]);
 
-            // Stats only for stream_id=500
-            Assert.True(statsMap.ContainsKey(500));
-            Assert.Equal("H264", statsMap[500].VideoCodec);
+            // Stats keyed by ch.Id=3, not by upstream stream_id=500
+            Assert.Single(statsMap);
+            Assert.True(statsMap.ContainsKey(3));
+            Assert.Equal("H264", statsMap[3].VideoCodec);
         }
 
         [Fact]
