@@ -422,12 +422,13 @@ namespace Emby.Xtream.Plugin.Service
 
                 mediaStreams.Add(videoStream);
 
-                // Audio stream without codec — forces Emby to transcode audio (fast),
-                // avoids the AAC ADTS issue.
                 mediaStreams.Add(new MediaStream
                 {
                     Type = MediaStreamType.Audio,
-                    Index = 1,
+                    Index = -1,
+                    Codec = !string.IsNullOrEmpty(stats.AudioCodec)
+                        ? stats.AudioCodec.ToLowerInvariant()
+                        : null,
                 });
 
                 mediaSource.MediaStreams = mediaStreams;
