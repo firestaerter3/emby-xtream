@@ -4,18 +4,6 @@ using System.Text.Json.Serialization;
 namespace Emby.Xtream.Plugin.Client.Models
 {
     /// <summary>
-    /// Wrapper for paginated Dispatcharr API responses.
-    /// </summary>
-    public class PaginatedResponse<T>
-    {
-        [JsonPropertyName("count")]
-        public int Count { get; set; }
-
-        [JsonPropertyName("results")]
-        public List<T> Results { get; set; } = new List<T>();
-    }
-
-    /// <summary>
     /// Model for /api/channels/streams/ response items (stream stats).
     /// </summary>
     public class DispatcharrChannel
@@ -34,28 +22,11 @@ namespace Emby.Xtream.Plugin.Client.Models
     }
 
     /// <summary>
-    /// Model for /api/channels/channels/ response items (channel info with UUID).
-    /// The Id field matches the Xtream emulation stream_id used by Emby.
-    /// The Streams array lists underlying stream source IDs from /api/channels/streams/.
-    /// </summary>
-    public class DispatcharrChannelInfo
-    {
-        [JsonPropertyName("id")]
-        public int Id { get; set; }
-
-        [JsonPropertyName("uuid")]
-        public string Uuid { get; set; } = string.Empty;
-
-        [JsonPropertyName("name")]
-        public string Name { get; set; } = string.Empty;
-
-        [JsonPropertyName("streams")]
-        public List<int> Streams { get; set; } = new List<int>();
-    }
-
-    /// <summary>
-    /// Channel object returned when fetching with include_streams=true (Dispatcharr v0.19.0+).
-    /// Each stream source embeds a stream_id field containing the original Xtream provider stream_id.
+    /// Channel object returned when fetching with include_streams=true.
+    /// The stream_id field inside embedded stream sources is unreliable — for URL-based sources
+    /// it contains the source's internal Dispatcharr ID rather than the Xtream provider stream_id.
+    /// Both UUID and stats maps are therefore keyed by ch.Id, which is the value Dispatcharr's
+    /// Xtream emulation always presents to Emby as the channel's stream_id.
     /// </summary>
     public class DispatcharrChannelWithStreams
     {
