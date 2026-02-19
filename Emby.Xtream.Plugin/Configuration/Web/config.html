@@ -312,6 +312,21 @@
 
                 <div class="verticalSection">
                     <h2 class="sectionTitle">STRM Sync Settings</h2>
+                    <div style="display:flex; gap:0.5em; align-items:flex-end;">
+                        <div class="inputContainer" style="flex:1; min-width:0; margin-bottom:0;">
+                            <input class="txtStrmLibraryPath" type="text" is="emby-input"
+                                   label="STRM Library Path" />
+                        </div>
+                        <button class="btnBrowseStrmPath raised button-secondary" is="emby-button" type="button"
+                                style="flex-shrink:0; margin-bottom:4px;" title="Browse folders">
+                            &#x1F4C2;
+                        </button>
+                    </div>
+                    <div class="fieldDescription" style="margin-top:0.25em;">
+                        Root directory where STRM files are written (default: /config/xtream).
+                        Movies go in a Movies/ subfolder, series in Shows/.
+                    </div>
+                    <div class="strmPathValidationResult" style="margin-top:0.25em; font-size:0.9em;"></div>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label>
                             <input class="chkSmartSkipExisting" type="checkbox" is="emby-checkbox" />
@@ -762,6 +777,25 @@
                 </div>
 
                 </div><!-- end tabLiveTv -->
+
+                <!-- STRM Folder Browser Modal -->
+                <div class="strmBrowserModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:9999; background:rgba(0,0,0,0.78); align-items:center; justify-content:center;">
+                    <div style="background:#1f1f1f; border:1px solid rgba(255,255,255,0.1); border-radius:8px; width:580px; max-width:94vw; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 12px 40px rgba(0,0,0,0.6);">
+                        <div style="display:flex; align-items:center; justify-content:space-between; padding:0.9em 1.5em; border-bottom:1px solid rgba(255,255,255,0.08);">
+                            <h3 style="margin:0; font-size:1em; font-weight:600;">Browse Folder</h3>
+                            <button class="btnCloseBrowser" type="button" style="background:none; border:none; cursor:pointer; font-size:1.2em; opacity:0.5; color:inherit; padding:0.2em 0.5em; line-height:1;" title="Close">&#x2715;</button>
+                        </div>
+                        <div style="padding:0.6em 1.5em; border-bottom:1px solid rgba(255,255,255,0.06);">
+                            <input class="txtBrowserCurrentPath" type="text" placeholder="/"
+                                   style="width:100%; box-sizing:border-box; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:4px; padding:0.45em 0.75em; color:inherit; font-size:0.85em; font-family:monospace;" />
+                        </div>
+                        <div class="browserList" style="flex:1; overflow-y:auto; min-height:180px; max-height:420px;"></div>
+                        <div style="display:flex; justify-content:flex-end; gap:0.5em; padding:0.9em 1.5em; border-top:1px solid rgba(255,255,255,0.08);">
+                            <button class="btnBrowserCancel raised button-secondary" is="emby-button" type="button">Cancel</button>
+                            <button class="btnBrowserOk raised button-submit" is="emby-button" type="button">OK</button>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Sticky Save -->
                 <div class="stickyFooter">

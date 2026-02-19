@@ -80,6 +80,23 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    [Route("/XtreamTuner/WritablePaths", "GET", Summary = "Returns writable mount points available to Emby")]
+    public class GetWritablePaths : IReturn<List<string>>
+    {
+    }
+
+    [Route("/XtreamTuner/BrowsePath", "GET", Summary = "Lists subdirectories at the given path, or writable mounts if no path given")]
+    public class BrowsePath : IReturn<BrowsePathResult>
+    {
+        public string Path { get; set; }
+    }
+
+    [Route("/XtreamTuner/ValidateStrmPath", "POST", Summary = "Validates that the STRM library path is writable")]
+    public class ValidateStrmPath : IReturn<TestConnectionResult>
+    {
+        public string Path { get; set; }
+    }
+
     [Route("/XtreamTuner/TestConnection", "POST", Summary = "Tests connection to Xtream server")]
     public class TestXtreamConnection : IReturn<TestConnectionResult>
     {
@@ -121,6 +138,13 @@ namespace Emby.Xtream.Plugin.Api
     {
         public bool Success { get; set; }
         public string Message { get; set; }
+    }
+
+    public class BrowsePathResult
+    {
+        public string CurrentPath { get; set; }
+        public string ParentPath { get; set; }
+        public List<string> Directories { get; set; }
     }
 
     public class InstallUpdateResult
@@ -615,6 +639,131 @@ namespace Emby.Xtream.Plugin.Api
         {
             Plugin.Instance.LiveTvService.InvalidateCache();
             XtreamTunerHost.Instance?.ClearCaches();
+        }
+
+        public object Get(GetWritablePaths request)
+        {
+            return EnumerateWritableMountPaths();
+        }
+
+        public object Get(BrowsePath request)
+        {
+            var path = string.IsNullOrWhiteSpace(request.Path) ? null : request.Path.TrimEnd('/').TrimEnd('\\');
+
+            if (path == null)
+            {
+                return new BrowsePathResult
+                {
+                    CurrentPath = null,
+                    ParentPath = null,
+                    Directories = EnumerateWritableMountPaths()
+                };
+            }
+
+            var dirs = new List<string>();
+            try
+            {
+                foreach (var dir in Directory.GetDirectories(path).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (System.IO.Path.GetFileName(dir).StartsWith(".")) continue;
+                    dirs.Add(dir);
+                }
+            }
+            catch { }
+
+            var parentInfo = Directory.GetParent(path);
+            var parentPath = (parentInfo == null || parentInfo.FullName == "/") ? null : parentInfo.FullName;
+
+            return new BrowsePathResult
+            {
+                CurrentPath = path,
+                ParentPath = parentPath,
+                Directories = dirs
+            };
+        }
+
+        private static List<string> EnumerateWritableMountPaths()
+        {
+            var paths = new List<string>();
+
+            try
+            {
+                if (File.Exists("/proc/mounts"))
+                {
+                    var skipFsTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "proc", "sysfs", "tmpfs", "devpts", "cgroup", "cgroup2",
+                        "mqueue", "overlay", "nsfs", "pstore", "securityfs", "debugfs"
+                    };
+
+                    var skipPrefixes = new[] { "/proc", "/sys", "/dev", "/etc", "/run" };
+                    var seen = new HashSet<string>(StringComparer.Ordinal);
+
+                    foreach (var line in File.ReadAllLines("/proc/mounts"))
+                    {
+                        var parts = line.Split(' ');
+                        if (parts.Length < 4) continue;
+
+                        var fsType = parts[2];
+                        var mountPoint = parts[1].Replace("\\040", " ").Replace("\\011", "\t").Replace("\\134", "\\");
+                        var options = parts[3].Split(',');
+
+                        if (skipFsTypes.Contains(fsType)) continue;
+                        if (!options.Contains("rw")) continue;
+                        if (!Directory.Exists(mountPoint)) continue;
+                        if (skipPrefixes.Any(p => mountPoint == p || mountPoint.StartsWith(p + "/"))) continue;
+                        if (!seen.Add(mountPoint)) continue;
+
+                        if (IsWritableDirectory(mountPoint))
+                            paths.Add(mountPoint);
+                    }
+                }
+            }
+            catch { }
+
+            paths.Sort();
+            return paths;
+        }
+
+        private static bool IsWritableDirectory(string path)
+        {
+            try
+            {
+                var testFile = System.IO.Path.Combine(path, ".xtream_write_test");
+                File.WriteAllText(testFile, string.Empty);
+                File.Delete(testFile);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public object Post(ValidateStrmPath request)
+        {
+            var path = (request.Path ?? string.Empty).TrimEnd('/').TrimEnd('\\');
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return new TestConnectionResult { Success = false, Message = "Path cannot be empty." };
+            }
+
+            try
+            {
+                Directory.CreateDirectory(path);
+
+                if (!IsWritableDirectory(path))
+                {
+                    return new TestConnectionResult { Success = false, Message = string.Format("Access denied: Emby cannot write to '{0}'.", path) };
+                }
+
+                return new TestConnectionResult { Success = true, Message = "Path is valid and writable." };
+            }
+            catch (Exception ex)
+            {
+                return new TestConnectionResult { Success = false, Message = string.Format("Invalid path: {0}", ex.Message) };
+            }
         }
 
         public async Task<object> Post(TestXtreamConnection request)

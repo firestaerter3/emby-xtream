@@ -65,6 +65,39 @@ function (BaseView, loading) {
             addFolderEntry(view, 'series', '', '', self.loadedSeriesCategories);
         });
 
+        view.querySelector('.txtStrmLibraryPath').addEventListener('blur', function () {
+            validateStrmPath(view);
+        });
+
+        view.querySelector('.btnBrowseStrmPath').addEventListener('click', function () {
+            openBrowser(view);
+        });
+
+        view.querySelector('.btnCloseBrowser').addEventListener('click', function () {
+            closeBrowser(view);
+        });
+
+        view.querySelector('.btnBrowserCancel').addEventListener('click', function () {
+            closeBrowser(view);
+        });
+
+        view.querySelector('.btnBrowserOk').addEventListener('click', function () {
+            var path = (view.querySelector('.txtBrowserCurrentPath').value || '').trim();
+            if (path) {
+                view.querySelector('.txtStrmLibraryPath').value = path;
+                validateStrmPath(view);
+            }
+            closeBrowser(view);
+        });
+
+        view.querySelector('.txtBrowserCurrentPath').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); browserNavigate(view, this.value.trim() || null); }
+        });
+
+        view.querySelector('.strmBrowserModal').addEventListener('click', function (e) {
+            if (e.target === this) closeBrowser(view);
+        });
+
         view.querySelector('.btnTestConnection').addEventListener('click', function () {
             testXtreamConnection(view);
         });
@@ -282,6 +315,8 @@ function (BaseView, loading) {
             instance.selectedSeriesCategoryIds = config.SelectedSeriesCategoryIds || [];
 
             // Sync settings
+            view.querySelector('.txtStrmLibraryPath').value = config.StrmLibraryPath || '/config/xtream';
+            validateStrmPath(view);
             view.querySelector('.chkSmartSkipExisting').checked = config.SmartSkipExisting !== false;
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
             view.querySelector('.chkCleanupOrphans').checked = !!config.CleanupOrphans;
@@ -363,6 +398,7 @@ function (BaseView, loading) {
             config.SelectedSeriesCategoryIds = getSelectedSeriesCategoryIds(instance);
 
             // Sync settings
+            config.StrmLibraryPath = view.querySelector('.txtStrmLibraryPath').value.replace(/\/+$/, '') || '/config/xtream';
             config.SmartSkipExisting = view.querySelector('.chkSmartSkipExisting').checked;
             config.SyncParallelism = parseInt(view.querySelector('.txtSyncParallelism').value, 10) || 3;
             config.CleanupOrphans = view.querySelector('.chkCleanupOrphans').checked;
@@ -700,6 +736,110 @@ function (BaseView, loading) {
         };
 
         xhr.send();
+    }
+
+    // ---- Folder browser ----
+
+    function openBrowser(view) {
+        var modal = view.querySelector('.strmBrowserModal');
+        modal.style.display = 'flex';
+        var startPath = (view.querySelector('.txtStrmLibraryPath').value || '').trim() || null;
+        browserNavigate(view, startPath);
+    }
+
+    function closeBrowser(view) {
+        view.querySelector('.strmBrowserModal').style.display = 'none';
+    }
+
+    function browserNavigate(view, path) {
+        var modal = view.querySelector('.strmBrowserModal');
+        var listEl = modal.querySelector('.browserList');
+        listEl.innerHTML = '<div style="padding:1.2em 1.5em; opacity:0.5;">Loading...</div>';
+        modal.querySelector('.txtBrowserCurrentPath').value = path || '';
+
+        var url = ApiClient.getUrl('XtreamTuner/BrowsePath');
+        if (path) url += '?path=' + encodeURIComponent(path);
+
+        ApiClient.ajax({ type: 'GET', url: url, dataType: 'json' })
+            .then(function (result) { browserRenderList(view, result); })
+            .catch(function () {
+                listEl.innerHTML = '<div style="padding:1.2em 1.5em; color:#cc0000;">Failed to load directory.</div>';
+            });
+    }
+
+    function browserRenderList(view, result) {
+        var modal = view.querySelector('.strmBrowserModal');
+        var listEl = modal.querySelector('.browserList');
+        listEl.innerHTML = '';
+
+        modal.querySelector('.txtBrowserCurrentPath').value = result.CurrentPath || '';
+
+        var isRoot = !result.CurrentPath;
+
+        if (!isRoot) {
+            var upRow = createBrowserRow('\u2191', '..', function () {
+                browserNavigate(view, result.ParentPath || null);
+            });
+            listEl.appendChild(upRow);
+        }
+
+        if (result.Directories && result.Directories.length > 0) {
+            result.Directories.forEach(function (dir) {
+                var parts = dir.replace(/\\/g, '/').split('/').filter(function (p) { return p.length > 0; });
+                var name = parts.length > 0 ? parts[parts.length - 1] : dir;
+                var row = createBrowserRow('\uD83D\uDCC1', name, function () {
+                    browserNavigate(view, dir);
+                });
+                listEl.appendChild(row);
+            });
+        } else if (isRoot) {
+            listEl.innerHTML = '<div style="padding:1.2em 1.5em; opacity:0.5;">No accessible folders found.</div>';
+        } else {
+            var emptyEl = document.createElement('div');
+            emptyEl.style.cssText = 'padding:1.2em 1.5em; opacity:0.5;';
+            emptyEl.textContent = 'No subdirectories.';
+            listEl.appendChild(emptyEl);
+        }
+    }
+
+    function createBrowserRow(icon, label, onClick) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex; align-items:center; gap:0.8em; padding:0.6em 1.5em; cursor:pointer; border-bottom:1px solid rgba(128,128,128,0.07); user-select:none;';
+        var iconEl = document.createElement('span');
+        iconEl.textContent = icon;
+        iconEl.style.cssText = 'flex-shrink:0; width:1.2em; text-align:center; opacity:0.6;';
+        var labelEl = document.createElement('span');
+        labelEl.textContent = label;
+        labelEl.style.cssText = 'font-size:0.9em; font-family:monospace;';
+        row.appendChild(iconEl);
+        row.appendChild(labelEl);
+        row.addEventListener('mouseenter', function () { this.style.background = 'rgba(128,128,128,0.1)'; });
+        row.addEventListener('mouseleave', function () { this.style.background = ''; });
+        row.addEventListener('click', onClick);
+        return row;
+    }
+
+    function validateStrmPath(view) {
+        var path = (view.querySelector('.txtStrmLibraryPath').value || '').trim();
+        var resultEl = view.querySelector('.strmPathValidationResult');
+        if (!path) {
+            resultEl.innerHTML = '';
+            return;
+        }
+        resultEl.innerHTML = '<span style="opacity:0.5;">Checking path...</span>';
+        ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('XtreamTuner/ValidateStrmPath'),
+            contentType: 'application/json',
+            data: JSON.stringify({ Path: path }),
+            dataType: 'json'
+        }).then(function (result) {
+            var color = result.Success ? '#52B54B' : '#cc0000';
+            var icon = result.Success ? '✓' : '✗';
+            resultEl.innerHTML = '<span style="color:' + color + ';">' + icon + ' ' + escapeHtml(result.Message) + '</span>';
+        }).catch(function () {
+            resultEl.innerHTML = '<span style="color:#cc0000;">✗ Validation request failed.</span>';
+        });
     }
 
     function testDispatcharrConnection(instance) {

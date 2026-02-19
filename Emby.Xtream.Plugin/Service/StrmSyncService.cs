@@ -127,6 +127,8 @@ namespace Emby.Xtream.Plugin.Service
 
             try
             {
+                EnsureStrmLibraryPath(config.StrmLibraryPath);
+
                 var categoryNames = new Dictionary<int, string>();
 
                 // Fetch category names if needed for folder organization
@@ -352,6 +354,8 @@ namespace Emby.Xtream.Plugin.Service
 
             try
             {
+                EnsureStrmLibraryPath(config.StrmLibraryPath);
+
                 var categoryNames = new Dictionary<int, string>();
 
                 if (!string.Equals(config.SeriesFolderMode, "single", StringComparison.OrdinalIgnoreCase))
@@ -618,6 +622,24 @@ namespace Emby.Xtream.Plugin.Service
                     SeriesFailed = _seriesProgress.Failed,
                     SeriesDeleted = _seriesProgress.Deleted,
                 });
+            }
+        }
+
+        private void EnsureStrmLibraryPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new InvalidOperationException("STRM Library Path is not configured. Set it in the plugin settings.");
+            }
+
+            try
+            {
+                Directory.CreateDirectory(path);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    string.Format("Cannot create STRM Library Path '{0}': {1}. Check the path is valid and Emby has write permission.", path, ex.Message), ex);
             }
         }
 
