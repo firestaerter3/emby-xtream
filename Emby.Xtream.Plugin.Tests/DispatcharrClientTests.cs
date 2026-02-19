@@ -166,6 +166,111 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public async Task GetChannelDataAsync_MapsUuidAndStatsByStreamId()
+        {
+            var channelsJson = JsonSerializer.Serialize(new[]
+            {
+                new
+                {
+                    id = 1,
+                    uuid = "aaaabbbb-cccc-dddd-eeee-ffff00001111",
+                    name = "Test Channel",
+                    streams = new[]
+                    {
+                        new
+                        {
+                            id = 99,
+                            name = "source1",
+                            stream_id = 73857,
+                            stream_stats = new
+                            {
+                                video_codec = "H264",
+                                resolution = "1920x1080",
+                                source_fps = (double?)25.0,
+                                bitrate = (double?)4000,
+                                audio_codec = (string)null
+                            }
+                        }
+                    }
+                }
+            });
+
+            var handler = new MockHandler(request =>
+            {
+                if (request.RequestUri.AbsolutePath.Contains("/api/accounts/token/"))
+                {
+                    var json = JsonSerializer.Serialize(new { access = "tok123", refresh = "ref456" });
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(channelsJson, System.Text.Encoding.UTF8, "application/json")
+                };
+            });
+
+            var client = CreateClient(handler);
+            client.Configure("admin", "pass");
+            var (uuidMap, statsMap) = await client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None);
+
+            Assert.True(uuidMap.ContainsKey(73857), "UUID map should be keyed by Xtream stream_id");
+            Assert.Equal("aaaabbbb-cccc-dddd-eeee-ffff00001111", uuidMap[73857]);
+            Assert.True(statsMap.ContainsKey(73857), "Stats map should be keyed by Xtream stream_id");
+            Assert.Equal("H264", statsMap[73857].VideoCodec);
+        }
+
+        [Fact]
+        public async Task GetChannelDataAsync_NullStreamId_ReturnsEmptyMaps()
+        {
+            var channelsJson = JsonSerializer.Serialize(new[]
+            {
+                new
+                {
+                    id = 1,
+                    uuid = "aaaabbbb-cccc-dddd-eeee-ffff00001111",
+                    name = "Old Channel",
+                    streams = new[]
+                    {
+                        new
+                        {
+                            id = 99,
+                            name = "source1",
+                            stream_id = (int?)null,
+                            stream_stats = (object)null
+                        }
+                    }
+                }
+            });
+
+            var handler = new MockHandler(request =>
+            {
+                if (request.RequestUri.AbsolutePath.Contains("/api/accounts/token/"))
+                {
+                    var json = JsonSerializer.Serialize(new { access = "tok123", refresh = "ref456" });
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(channelsJson, System.Text.Encoding.UTF8, "application/json")
+                };
+            });
+
+            var client = CreateClient(handler);
+            client.Configure("admin", "pass");
+            var (uuidMap, statsMap) = await client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None);
+
+            Assert.Empty(uuidMap);
+            Assert.Empty(statsMap);
+        }
+
+        [Fact]
         public async Task TestConnectionAsync_Success()
         {
             var handler = new MockHandler(request =>
