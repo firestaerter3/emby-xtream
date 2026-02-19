@@ -274,6 +274,92 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public async Task GetChannelDataAsync_MixedStreamId_FallsBackPerChannelOnly()
+        {
+            // Simulates the real-world bug: most channels have stream_id, but a few don't.
+            // The per-channel fallback should apply only to channels missing stream_id,
+            // not drop them as the old all-or-nothing fallback did.
+            var channelsJson = JsonSerializer.Serialize(new object[]
+            {
+                new
+                {
+                    id = 1,
+                    uuid = "uuid-no-streams",
+                    name = "Channel Without Streams",
+                    streams = System.Array.Empty<object>()
+                },
+                new
+                {
+                    id = 2,
+                    uuid = "uuid-no-stream-id",
+                    name = "Channel With Stream But No stream_id",
+                    streams = new[]
+                    {
+                        new { id = 10, name = "src", stream_id = (int?)null, stream_stats = (object)null }
+                    }
+                },
+                new
+                {
+                    id = 3,
+                    uuid = "uuid-with-stream-id",
+                    name = "Channel With stream_id",
+                    streams = new[]
+                    {
+                        new
+                        {
+                            id = 11, name = "src", stream_id = (int?)500,
+                            stream_stats = new
+                            {
+                                video_codec = "H264", resolution = "1280x720",
+                                source_fps = (double?)30.0, bitrate = (double?)2000,
+                                audio_codec = (string)null
+                            }
+                        }
+                    }
+                }
+            });
+
+            var handler = new MockHandler(request =>
+            {
+                if (request.RequestUri.AbsolutePath.Contains("/api/accounts/token/"))
+                {
+                    var json = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(channelsJson, System.Text.Encoding.UTF8, "application/json")
+                };
+            });
+
+            var client = CreateClient(handler);
+            client.Configure("admin", "pass");
+            var (uuidMap, statsMap) = await client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None);
+
+            // Channel 3: mapped via stream_id=500
+            Assert.True(uuidMap.ContainsKey(500), "Channel with stream_id should be keyed by stream_id");
+            Assert.Equal("uuid-with-stream-id", uuidMap[500]);
+
+            // Channel 1: no streams at all — per-channel fallback to ch.Id=1
+            Assert.True(uuidMap.ContainsKey(1), "Channel with no streams should fall back to ch.Id");
+            Assert.Equal("uuid-no-streams", uuidMap[1]);
+
+            // Channel 2: stream has null stream_id — per-channel fallback to ch.Id=2
+            Assert.True(uuidMap.ContainsKey(2), "Channel with null stream_id should fall back to ch.Id");
+            Assert.Equal("uuid-no-stream-id", uuidMap[2]);
+
+            // Total: 3 entries
+            Assert.Equal(3, uuidMap.Count);
+
+            // Stats only for stream_id=500
+            Assert.True(statsMap.ContainsKey(500));
+            Assert.Equal("H264", statsMap[500].VideoCodec);
+        }
+
+        [Fact]
         public async Task TestConnectionAsync_Success()
         {
             var handler = new MockHandler(request =>
