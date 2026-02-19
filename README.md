@@ -71,7 +71,7 @@ Efficient sync that doesn't re-download what you already have.
 Optional integration with [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) for IPTV stream management.
 
 - **Stream proxy routing** — routes Live TV through Dispatcharr's proxy for connection management
-- **Pre-populated media info** — fetches codec, resolution, and bitrate from Dispatcharr's stream stats
+- **Pre-populated media info** — fetches codec, resolution, and bitrate from Dispatcharr's stream stats (requires [Streamflow](https://github.com/krinkuto11/streamflow) configured in Dispatcharr to generate per-channel metadata)
 - **FFprobe bypass** — skips Emby's stream analysis when stats are available (faster channel switching)
 - **JWT authentication** — automatic token refresh with retry and exponential backoff
 - **Graceful fallback** — reverts to direct Xtream URLs if Dispatcharr is unavailable
@@ -182,6 +182,8 @@ If you use [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) for stream 
 3. Enter Dispatcharr URL, username, and password
 4. Click **Test Dispatcharr** to verify
 5. Save — Live TV streams will now route through Dispatcharr's proxy
+
+> **Note:** For the plugin to receive codec/resolution metadata and skip FFprobe, [Streamflow](https://github.com/krinkuto11/streamflow) must be enabled and configured in Dispatcharr. Without Streamflow generating per-channel stream stats, the plugin falls back to standard stream handling.
 
 ### Updating the Plugin
 
