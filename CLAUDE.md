@@ -48,3 +48,13 @@ Unrelated fixes should live on separate short-lived branches (e.g. `fix/audio-co
 ### Check `git status` at the start of every session
 
 The git status shown at conversation start reflects the state of the working tree. A modified file there means something is already in flight — address it before starting new work.
+
+### Release notes must credit bug reporters
+
+When editing or creating GitHub release notes, each bug fix entry should include the reporter in brackets:
+
+```
+- Fix Dispatcharr reconnect storm by disabling stream probing (reported by scottrobertson)
+```
+
+Use the reporter name from `BUGS.md`. If a bug has multiple reporters, list all of them. Internal/self-discovered fixes need no reporter credit. Auto-generated release notes from GitHub never include this — always edit them manually after tagging.
