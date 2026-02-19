@@ -222,5 +222,64 @@ namespace Emby.Xtream.Plugin.Tests
             var url = UpdateChecker.ExtractDllDownloadUrl(json, null);
             Assert.Null(url);
         }
+
+        // ---- ExtractFirstRelease tests ----
+
+        [Fact]
+        public void ExtractFirstRelease_ReturnsFirstObject()
+        {
+            var json = @"[
+                {""tag_name"":""v1.2.0"",""prerelease"":true,""assets"":[]},
+                {""tag_name"":""v1.1.0"",""prerelease"":false,""assets"":[]}
+            ]";
+            var first = UpdateChecker.ExtractFirstRelease(json);
+            Assert.Contains("v1.2.0", first);
+            Assert.DoesNotContain("v1.1.0", first);
+        }
+
+        [Fact]
+        public void ExtractFirstRelease_EmptyArray()
+        {
+            var json = @"[]";
+            var first = UpdateChecker.ExtractFirstRelease(json);
+            Assert.Equal("{}", first);
+        }
+
+        [Fact]
+        public void ExtractFirstRelease_NullInput()
+        {
+            var first = UpdateChecker.ExtractFirstRelease(null);
+            Assert.Equal("{}", first);
+        }
+
+        [Fact]
+        public void ExtractFirstRelease_EmptyInput()
+        {
+            var first = UpdateChecker.ExtractFirstRelease("");
+            Assert.Equal("{}", first);
+        }
+
+        // ---- ExtractJsonBool tests ----
+
+        [Fact]
+        public void ExtractJsonBool_True()
+        {
+            var json = @"{""prerelease"": true, ""draft"": false}";
+            Assert.True(UpdateChecker.ExtractJsonBool(json, "prerelease"));
+        }
+
+        [Fact]
+        public void ExtractJsonBool_False()
+        {
+            var json = @"{""prerelease"": false}";
+            Assert.False(UpdateChecker.ExtractJsonBool(json, "prerelease"));
+        }
+
+        [Fact]
+        public void ExtractJsonBool_Missing()
+        {
+            var json = @"{""tag_name"": ""v1.0.0""}";
+            Assert.False(UpdateChecker.ExtractJsonBool(json, "prerelease"));
+        }
     }
 }

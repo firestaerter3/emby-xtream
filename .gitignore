@@ -16,6 +16,7 @@ packages/
 
 # Local/sensitive config
 CLAUDE.local.md
+BUGS.md
 .claude/
 
 # Test artifacts

@@ -28,3 +28,23 @@ If the Emby guide grid shows no channels despite having channel data, check brow
 ### SupportsGuideData controls whether Emby polls the tuner for EPG
 
 When `SupportsGuideData()` returns `true`, Emby calls `GetProgramsInternal` on the tuner host for each channel. The `tunerChannelId` parameter is the raw stream ID (e.g. `"12345"`), not the Emby-prefixed form.
+
+### Emby probes MediaSource.Path directly — disable for Dispatcharr
+
+When `SupportsProbing = true` and `AnalyzeDurationMs > 0`, Emby runs ffprobe against `MediaSource.Path` **independently** of `GetChannelStream` / `ILiveStream`. For Dispatcharr proxy URLs this is destructive: the probe opens a short-lived HTTP connection (~0.1s, ~120KB), then closes it. Dispatcharr interprets the close as the last client leaving and tears down the channel. The real playback connection that follows immediately hits the teardown "channel stop signal" and fails — triggering a rapid retry storm visible in Dispatcharr logs as repeated `Fetchin channel with ID: <n>` → broken pipe cycles.
+
+**Rule**: Always set `SupportsProbing = false` and `AnalyzeDurationMs = 0` for Dispatcharr proxy URLs (`/proxy/ts/stream/{uuid}`), regardless of whether stream stats are available. Direct Xtream URLs (no Dispatcharr) can still use probing when stats are absent.
+
+## Git Workflow
+
+### Commit before switching context
+
+Never leave changes in the working tree when starting unrelated work or ending a session. An uncommitted change is invisible and easy to tangle with later work. Use a `WIP:` commit or `git stash` if the change isn't ready.
+
+### One concern per branch
+
+Unrelated fixes should live on separate short-lived branches (e.g. `fix/audio-codec-passthrough`, `fix/dispatcharr-probe-storm`) and be merged to `main` independently. This makes each change revertable without touching unrelated code.
+
+### Check `git status` at the start of every session
+
+The git status shown at conversation start reflects the state of the working tree. A modified file there means something is already in flight — address it before starting new work.

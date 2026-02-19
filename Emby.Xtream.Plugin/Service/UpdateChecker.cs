@@ -15,11 +15,13 @@ namespace Emby.Xtream.Plugin.Service
         public string PublishedAt { get; set; }
         public string DownloadUrl { get; set; }
         public string Error { get; set; }
+        public bool IsPreRelease { get; set; }
     }
 
     public static class UpdateChecker
     {
         private const string GitHubApiUrl = "https://api.github.com/repos/firestaerter3/emby-xtream/releases/latest";
+        private const string GitHubAllReleasesUrl = "https://api.github.com/repos/firestaerter3/emby-xtream/releases";
         private const string DllAssetName = "Emby.Xtream.Plugin.dll";
         private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(1);
 
@@ -27,6 +29,7 @@ namespace Emby.Xtream.Plugin.Service
         private static DateTime _cacheTime = DateTime.MinValue;
         private static readonly object _cacheLock = new object();
         private static bool _updateInstalled;
+        private static bool? _cachedForBetaChannel;
 
         public static bool UpdateInstalled
         {
@@ -40,13 +43,27 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _cachedResult = null;
                 _cacheTime = DateTime.MinValue;
+                _cachedForBetaChannel = null;
             }
         }
 
-        public static async Task<UpdateCheckResult> CheckForUpdateAsync()
+        public static async Task<UpdateCheckResult> CheckForUpdateAsync(bool? betaOverride = null)
         {
+            // betaOverride (from query string) takes precedence; falls back to saved config.
+            // This avoids relying on Emby's in-memory config cache being up-to-date immediately
+            // after updatePluginConfiguration returns.
+            var useBeta = betaOverride ?? Plugin.Instance?.Configuration?.UseBetaChannel ?? false;
+
             lock (_cacheLock)
             {
+                // Invalidate cache if the channel preference changed since last fetch
+                if (_cachedResult != null && _cachedForBetaChannel.HasValue && _cachedForBetaChannel.Value != useBeta)
+                {
+                    _cachedResult = null;
+                    _cacheTime = DateTime.MinValue;
+                    _cachedForBetaChannel = null;
+                }
+
                 if (_cachedResult != null && (DateTime.UtcNow - _cacheTime) < CacheTtl)
                 {
                     return _cachedResult;
@@ -63,16 +80,26 @@ namespace Emby.Xtream.Plugin.Service
                     httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Emby-Xtream-Plugin/1.0");
                     httpClient.Timeout = TimeSpan.FromSeconds(10);
 
-                    var json = await httpClient.GetStringAsync(GitHubApiUrl).ConfigureAwait(false);
+                    string releaseJson;
+                    if (useBeta)
+                    {
+                        var allJson = await httpClient.GetStringAsync(GitHubAllReleasesUrl).ConfigureAwait(false);
+                        releaseJson = ExtractFirstRelease(allJson);
+                    }
+                    else
+                    {
+                        releaseJson = await httpClient.GetStringAsync(GitHubApiUrl).ConfigureAwait(false);
+                    }
 
-                    var tagName = ExtractJsonString(json, "tag_name");
-                    var htmlUrl = ExtractJsonString(json, "html_url");
-                    var body = ExtractJsonString(json, "body");
-                    var publishedAt = ExtractJsonString(json, "published_at");
+                    var tagName = ExtractJsonString(releaseJson, "tag_name");
+                    var htmlUrl = ExtractJsonString(releaseJson, "html_url");
+                    var body = ExtractJsonString(releaseJson, "body");
+                    var publishedAt = ExtractJsonString(releaseJson, "published_at");
 
                     result = CompareVersions(currentVersion, tagName, htmlUrl, body, publishedAt);
-                    result.DownloadUrl = ExtractDllDownloadUrl(json, DllAssetName);
+                    result.DownloadUrl = ExtractDllDownloadUrl(releaseJson, DllAssetName);
                     result.UpdateInstalled = _updateInstalled;
+                    result.IsPreRelease = ExtractJsonBool(releaseJson, "prerelease");
 
                     // Suppress update banner if this version was already installed
                     if (result.UpdateAvailable && !_updateInstalled)
@@ -100,6 +127,7 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _cachedResult = result;
                 _cacheTime = DateTime.UtcNow;
+                _cachedForBetaChannel = useBeta;
             }
 
             return result;
@@ -283,6 +311,47 @@ namespace Emby.Xtream.Plugin.Service
                 else if (json[i] == '}') { depth--; if (depth == 0) return i; }
             }
             return -1;
+        }
+
+        /// <summary>
+        /// Extracts the first JSON object from a JSON array string (e.g. from /releases endpoint).
+        /// Returns "{}" if the array is empty or the input is null/empty.
+        /// </summary>
+        public static string ExtractFirstRelease(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return "{}";
+
+            var openBrace = json.IndexOf('{');
+            if (openBrace < 0) return "{}";
+
+            var closeBrace = FindMatchingBrace(json, openBrace);
+            if (closeBrace < 0) return "{}";
+
+            return json.Substring(openBrace, closeBrace - openBrace + 1);
+        }
+
+        /// <summary>
+        /// Extracts a boolean value (true/false) for the given key from a JSON string.
+        /// Returns false if the key is missing or the value is not a boolean literal.
+        /// </summary>
+        public static bool ExtractJsonBool(string json, string key)
+        {
+            if (string.IsNullOrEmpty(json)) return false;
+
+            var search = "\"" + key + "\"";
+            var idx = json.IndexOf(search, StringComparison.Ordinal);
+            if (idx < 0) return false;
+
+            idx += search.Length;
+
+            // Skip whitespace and colon
+            while (idx < json.Length && (json[idx] == ' ' || json[idx] == ':' || json[idx] == '\t' || json[idx] == '\n' || json[idx] == '\r'))
+                idx++;
+
+            if (idx >= json.Length) return false;
+
+            if (idx + 4 <= json.Length && json.Substring(idx, 4) == "true") return true;
+            return false;
         }
     }
 }

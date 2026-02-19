@@ -191,6 +191,11 @@ function (BaseView, loading) {
             view.querySelector('.updateBanner').style.display = 'none';
         });
 
+        // Beta channel toggle — save immediately then re-check for updates
+        view.querySelector('.chkUseBetaChannel').addEventListener('change', function () {
+            saveConfig(self, function () { checkForUpdate(view); });
+        });
+
         // Install update button
         view.querySelector('.btnInstallUpdate').addEventListener('click', function () {
             installUpdate(view);
@@ -314,6 +319,9 @@ function (BaseView, loading) {
             loadFolderEntries(view, 'series', config.SeriesFolderMappings || '', cachedSeriesCats);
             instance.selectedSeriesCategoryIds = config.SelectedSeriesCategoryIds || [];
 
+            // Update channel
+            view.querySelector('.chkUseBetaChannel').checked = !!config.UseBetaChannel;
+
             // Sync settings
             view.querySelector('.txtStrmLibraryPath').value = config.StrmLibraryPath || '/config/xtream';
             validateStrmPath(view);
@@ -396,6 +404,9 @@ function (BaseView, loading) {
             config.SeriesFolderMode = view.querySelector('.selSeriesFolderMode').value;
             config.SeriesFolderMappings = serializeFolderEntries(view, 'series');
             config.SelectedSeriesCategoryIds = getSelectedSeriesCategoryIds(instance);
+
+            // Update channel
+            config.UseBetaChannel = view.querySelector('.chkUseBetaChannel').checked;
 
             // Sync settings
             config.StrmLibraryPath = view.querySelector('.txtStrmLibraryPath').value.replace(/\/+$/, '') || '/config/xtream';
@@ -1423,7 +1434,9 @@ function (BaseView, loading) {
     }
 
     function checkForUpdate(view) {
-        var apiUrl = ApiClient.getUrl('XtreamTuner/CheckUpdate');
+        var betaEl = view.querySelector('.chkUseBetaChannel');
+        var betaParam = betaEl ? ('?beta=' + (betaEl.checked ? 'true' : 'false')) : '';
+        var apiUrl = ApiClient.getUrl('XtreamTuner/CheckUpdate') + betaParam;
 
         ApiClient.getJSON(apiUrl).then(function (data) {
             var banner = view.querySelector('.updateBanner');
@@ -1463,11 +1476,13 @@ function (BaseView, loading) {
                 view.querySelector('.updateStatus').style.display = 'none';
                 banner.style.display = 'block';
             } else if (data.UpdateAvailable) {
-                banner.style.background = 'rgba(82,181,75,0.15)';
-                banner.style.borderColor = 'rgba(82,181,75,0.4)';
+                var isBeta = !!data.IsPreRelease;
+                banner.style.background = isBeta ? 'rgba(230,152,34,0.15)' : 'rgba(82,181,75,0.15)';
+                banner.style.borderColor = isBeta ? 'rgba(230,152,34,0.4)' : 'rgba(82,181,75,0.4)';
                 view.querySelector('.updateBannerTitle').textContent = 'Update Available:';
+                var betaLabel = isBeta ? ' (beta)' : '';
                 view.querySelector('.updateBannerText').textContent =
-                    'v' + data.LatestVersion + ' is available (you have v' + data.CurrentVersion + ')';
+                    'v' + data.LatestVersion + betaLabel + ' is available (you have v' + data.CurrentVersion + ')';
                 view.querySelector('.btnInstallUpdate').style.display = '';
                 view.querySelector('.btnInstallUpdate').disabled = false;
                 view.querySelector('.btnRestartEmby').style.display = 'none';

@@ -110,6 +110,7 @@ namespace Emby.Xtream.Plugin.Api
     [Route("/XtreamTuner/CheckUpdate", "GET", Summary = "Checks GitHub for a newer plugin release")]
     public class CheckForUpdate : IReturn<UpdateCheckResult>
     {
+        public bool? Beta { get; set; }
     }
 
     [Route("/XtreamTuner/Logs", "GET", Summary = "Downloads sanitized plugin logs")]
@@ -840,7 +841,7 @@ namespace Emby.Xtream.Plugin.Api
 
         public async Task<object> Get(CheckForUpdate request)
         {
-            return await UpdateChecker.CheckForUpdateAsync().ConfigureAwait(false);
+            return await UpdateChecker.CheckForUpdateAsync(request.Beta).ConfigureAwait(false);
         }
 
         public async Task<object> Post(InstallUpdate request)

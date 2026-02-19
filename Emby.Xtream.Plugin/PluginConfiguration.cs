@@ -72,6 +72,7 @@ namespace Emby.Xtream.Plugin
 
         // Update tracking
         public string LastInstalledVersion { get; set; } = string.Empty;
+        public bool UseBetaChannel { get; set; }
 
         // Sync settings
         public bool SmartSkipExisting { get; set; } = true;
