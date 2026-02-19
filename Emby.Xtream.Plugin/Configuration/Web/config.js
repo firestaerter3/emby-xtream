@@ -1451,8 +1451,27 @@ function (BaseView, loading) {
         }
 
         var last = data.LastSync;
-        var badgeClass = last.Success ? 'success' : 'failed';
-        var badgeText = last.Success ? 'Success' : 'Failed';
+
+        // Look for a companion scan (movies if last was series-only, or vice versa).
+        // Movies always run before series in a combined sync, so it's in History[1+].
+        var companion = null;
+        if (data.History && data.History.length > 1) {
+            for (var i = 1; i < data.History.length; i++) {
+                var entry = data.History[i];
+                if (last.WasSeriesSync && !last.WasMovieSync && entry.WasMovieSync) {
+                    companion = entry;
+                    break;
+                }
+                if (last.WasMovieSync && !last.WasSeriesSync && entry.WasSeriesSync) {
+                    companion = entry;
+                    break;
+                }
+            }
+        }
+
+        var overallSuccess = last.Success && (!companion || companion.Success);
+        var badgeClass = overallSuccess ? 'success' : 'failed';
+        var badgeText = overallSuccess ? 'Success' : 'Failed';
 
         var duration = Math.round((new Date(last.EndTime) - new Date(last.StartTime)) / 1000);
         var durationText = duration >= 60
@@ -1465,23 +1484,39 @@ function (BaseView, loading) {
             '<span class="status-badge ' + badgeClass + '">' + badgeText + '</span>' +
             '<span style="margin-left:0.8em; opacity:0.6; font-size:0.9em;">' + timeAgo + ' (' + durationText + ')</span>';
 
-        var statsHtml = '';
-        if (last.WasMovieSync) {
-            statsHtml +=
-                '<div class="dashboard-stat"><div class="stat-value">' + last.MoviesTotal + '</div><div class="stat-label">Movies</div></div>' +
-                '<div class="dashboard-stat"><div class="stat-value">' + last.MoviesSkipped + '</div><div class="stat-label">Skipped</div></div>' +
-                '<div class="dashboard-stat"><div class="stat-value" style="color:' + (last.MoviesFailed > 0 ? '#cc0000' : '#52B54B') + ';">' + last.MoviesFailed + '</div><div class="stat-label">Failed</div></div>';
+        var movieEntry = last.WasMovieSync ? last : (companion && companion.WasMovieSync ? companion : null);
+        var seriesEntry = last.WasSeriesSync ? last : (companion && companion.WasSeriesSync ? companion : null);
+
+        function statTile(value, label, color) {
+            return '<div class="dashboard-stat"><div class="stat-value" style="color:' + (color || '#52B54B') + ';">' + value + '</div><div class="stat-label">' + label + '</div></div>';
         }
-        if (last.WasSeriesSync) {
-            statsHtml +=
-                '<div class="dashboard-stat"><div class="stat-value">' + last.SeriesTotal + '</div><div class="stat-label">Series</div></div>' +
-                '<div class="dashboard-stat"><div class="stat-value">' + last.SeriesSkipped + '</div><div class="stat-label">Skipped</div></div>' +
-                '<div class="dashboard-stat"><div class="stat-value" style="color:' + (last.SeriesFailed > 0 ? '#cc0000' : '#52B54B') + ';">' + last.SeriesFailed + '</div><div class="stat-label">Failed</div></div>';
+        function rowLabel(text) {
+            return '<div style="font-size:0.75em; font-weight:600; opacity:0.45; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.35em;">' + text + '</div>';
+        }
+
+        var statsHtml = '';
+        if (movieEntry) {
+            var movieTiles =
+                statTile(movieEntry.MoviesTotal, 'Total') +
+                (movieEntry.MoviesAdded > 0 ? statTile('+' + movieEntry.MoviesAdded, 'New') : '') +
+                statTile(movieEntry.MoviesSkipped, 'Skipped') +
+                statTile(movieEntry.MoviesFailed, 'Failed', movieEntry.MoviesFailed > 0 ? '#cc0000' : '#52B54B') +
+                (movieEntry.MoviesDeleted > 0 ? statTile(movieEntry.MoviesDeleted, 'Deleted', '#e74c3c') : '');
+            statsHtml += '<div style="margin-bottom:0.7em;">' + rowLabel('Movies') + '<div style="display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0.5em;">' + movieTiles + '</div></div>';
+        }
+        if (seriesEntry) {
+            var seriesTiles =
+                statTile(seriesEntry.SeriesTotal, 'Total') +
+                (seriesEntry.SeriesAdded > 0 ? statTile('+' + seriesEntry.SeriesAdded, 'New') : '') +
+                statTile(seriesEntry.SeriesSkipped, 'Skipped') +
+                statTile(seriesEntry.SeriesFailed, 'Failed', seriesEntry.SeriesFailed > 0 ? '#cc0000' : '#52B54B') +
+                (seriesEntry.SeriesDeleted > 0 ? statTile(seriesEntry.SeriesDeleted, 'Deleted', '#e74c3c') : '');
+            statsHtml += '<div>' + rowLabel('Episodes') + '<div style="display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0.5em;">' + seriesTiles + '</div></div>';
         }
 
         if (statsHtml) {
             statsContainer.innerHTML = statsHtml;
-            statsContainer.style.display = 'grid';
+            statsContainer.style.display = 'block';
         } else {
             statsContainer.style.display = 'none';
         }
@@ -1511,28 +1546,64 @@ function (BaseView, loading) {
         }
 
         var html = '<table class="dashboard-history-table">';
-        html += '<thead><tr><th>Time</th><th>Status</th><th>Duration</th><th>Movies</th><th>Series</th></tr></thead>';
+        html += '<thead><tr><th>Time</th><th>Status</th><th>Duration</th><th>Movies</th><th>Episodes</th></tr></thead>';
         html += '<tbody>';
 
-        for (var i = 0; i < data.History.length; i++) {
+        function historyMovieCol(e) {
+            return e.MoviesTotal +
+                ' <span style="opacity:0.5;">(' +
+                '<span style="color:#52B54B; opacity:1;">+' + (e.MoviesAdded || 0) + '</span> ' +
+                '<span style="color:#e74c3c; opacity:1;">-' + (e.MoviesDeleted || 0) + '</span>, ' +
+                e.MoviesSkipped + ' skip, ' +
+                e.MoviesFailed + ' fail' +
+                ')</span>';
+        }
+        function historySeriesCol(e) {
+            return e.SeriesTotal +
+                ' <span style="opacity:0.5;">(' +
+                '<span style="color:#52B54B; opacity:1;">+' + (e.SeriesAdded || 0) + '</span> ' +
+                '<span style="color:#e74c3c; opacity:1;">-' + (e.SeriesDeleted || 0) + '</span>, ' +
+                e.SeriesSkipped + ' skip, ' +
+                e.SeriesFailed + ' fail' +
+                ')</span>';
+        }
+
+        var dash = '<span style="opacity:0.3;">\u2014</span>';
+
+        var i = 0;
+        while (i < data.History.length) {
             var entry = data.History[i];
-            var badgeClass = entry.Success ? 'success' : 'failed';
-            var badgeText = entry.Success ? 'Success' : 'Failed';
+            var next = i + 1 < data.History.length ? data.History[i + 1] : null;
 
-            var duration = Math.round((new Date(entry.EndTime) - new Date(entry.StartTime)) / 1000);
-            var durationText = duration >= 60
-                ? Math.floor(duration / 60) + 'm ' + (duration % 60) + 's'
-                : duration + 's';
+            // Pair a series-only entry with the following movie-only entry (or vice versa)
+            var movieEntry = null, seriesEntry = null, consumed = 1;
+            if (next && entry.WasSeriesSync && !entry.WasMovieSync && next.WasMovieSync && !next.WasSeriesSync) {
+                seriesEntry = entry; movieEntry = next; consumed = 2;
+            } else if (next && entry.WasMovieSync && !entry.WasSeriesSync && next.WasSeriesSync && !next.WasMovieSync) {
+                movieEntry = entry; seriesEntry = next; consumed = 2;
+            } else {
+                movieEntry = entry.WasMovieSync ? entry : null;
+                seriesEntry = entry.WasSeriesSync ? entry : null;
+            }
 
-            var timeStr = formatTimeAgo(new Date(entry.EndTime));
+            // Use the most recent entry for time/status; sum durations if paired
+            var primary = entry;
+            var success = entry.Success && (!consumed === 2 || (movieEntry && movieEntry.Success) && (seriesEntry && seriesEntry.Success));
+            if (consumed === 2) {
+                success = (movieEntry ? movieEntry.Success : true) && (seriesEntry ? seriesEntry.Success : true);
+            }
+            var badgeClass = success ? 'success' : 'failed';
+            var badgeText = success ? 'Success' : 'Failed';
 
-            var movieCol = entry.WasMovieSync
-                ? entry.MoviesTotal + ' <span style="opacity:0.5;">(' + entry.MoviesSkipped + ' skip, ' + entry.MoviesFailed + ' fail)</span>'
-                : '<span style="opacity:0.3;">\u2014</span>';
+            var dur = Math.round((new Date(primary.EndTime) - new Date(primary.StartTime)) / 1000);
+            if (consumed === 2 && next) {
+                dur += Math.round((new Date(next.EndTime) - new Date(next.StartTime)) / 1000);
+            }
+            var durationText = dur >= 60 ? Math.floor(dur / 60) + 'm ' + (dur % 60) + 's' : dur + 's';
+            var timeStr = formatTimeAgo(new Date(primary.EndTime));
 
-            var seriesCol = entry.WasSeriesSync
-                ? entry.SeriesTotal + ' <span style="opacity:0.5;">(' + entry.SeriesSkipped + ' skip, ' + entry.SeriesFailed + ' fail)</span>'
-                : '<span style="opacity:0.3;">\u2014</span>';
+            var movieCol = movieEntry ? historyMovieCol(movieEntry) : dash;
+            var seriesCol = seriesEntry ? historySeriesCol(seriesEntry) : dash;
 
             html += '<tr>';
             html += '<td>' + timeStr + '</td>';
@@ -1541,6 +1612,8 @@ function (BaseView, loading) {
             html += '<td>' + movieCol + '</td>';
             html += '<td>' + seriesCol + '</td>';
             html += '</tr>';
+
+            i += consumed;
         }
 
         html += '</tbody></table>';

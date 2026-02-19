@@ -222,6 +222,21 @@ namespace Emby.Xtream.Plugin.Service
                 allChannels = allChannels.Where(c => !c.IsAdultChannel).ToList();
             }
 
+            // Channel hash: detect changes and log accordingly
+            var newHash = StrmSyncService.ComputeChannelListHash(allChannels);
+            if (newHash != config.LastChannelListHash)
+            {
+                _logger.Info("Channel list changed (hash {0} → {1}), invalidating cache",
+                    string.IsNullOrEmpty(config.LastChannelListHash) ? "(none)" : config.LastChannelListHash.Substring(0, 8),
+                    newHash.Substring(0, 8));
+                config.LastChannelListHash = newHash;
+                Plugin.Instance.SaveConfiguration();
+            }
+            else
+            {
+                _logger.Debug("Channel list unchanged (hash {0})", newHash.Substring(0, 8));
+            }
+
             _logger.Info("Fetched {0} Live TV channels", allChannels.Count);
             return allChannels;
         }

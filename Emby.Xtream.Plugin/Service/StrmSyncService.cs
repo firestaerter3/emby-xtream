@@ -4,6 +4,8 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,6 +22,8 @@ namespace Emby.Xtream.Plugin.Service
         public int Completed;
         public int Skipped;
         public int Failed;
+        public int Added;
+        public int Deleted;
         public bool IsRunning;
     }
 
@@ -30,12 +34,16 @@ namespace Emby.Xtream.Plugin.Service
         public bool Success { get; set; }
         public int MoviesTotal { get; set; }
         public int MoviesCompleted { get; set; }
+        public int MoviesAdded { get; set; }
         public int MoviesSkipped { get; set; }
         public int MoviesFailed { get; set; }
+        public int MoviesDeleted { get; set; }
         public int SeriesTotal { get; set; }
         public int SeriesCompleted { get; set; }
+        public int SeriesAdded { get; set; }
         public int SeriesSkipped { get; set; }
         public int SeriesFailed { get; set; }
+        public int SeriesDeleted { get; set; }
         public bool WasMovieSync { get; set; }
         public bool WasSeriesSync { get; set; }
     }
@@ -71,6 +79,32 @@ namespace Emby.Xtream.Plugin.Service
         {
             _logger = logger;
             _tmdbLookupService = new TmdbLookupService(logger);
+        }
+
+        /// <summary>
+        /// Computes a stable hash of the channel list for change detection.
+        /// </summary>
+        internal static string ComputeChannelListHash(List<LiveStreamInfo> channels)
+        {
+            var sorted = channels.OrderBy(c => c.StreamId);
+            var sb = new StringBuilder();
+            foreach (var c in sorted)
+            {
+                sb.Append(c.StreamId);
+                sb.Append(':');
+                sb.Append(c.Name ?? string.Empty);
+                sb.Append(':');
+                sb.Append(c.EpgChannelId ?? string.Empty);
+                sb.Append(':');
+                sb.Append(c.CategoryId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+                sb.Append('|');
+            }
+
+            using (var sha = SHA256.Create())
+            {
+                var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
+                return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
+            }
         }
 
         public SyncProgress MovieProgress => _movieProgress;
@@ -111,6 +145,18 @@ namespace Emby.Xtream.Plugin.Service
                 // Fetch streams for selected categories
                 _movieProgress.Phase = "Fetching VOD streams";
                 var allStreams = await FetchVodStreamsAsync(config.SelectedVodCategoryIds, config, cancellationToken).ConfigureAwait(false);
+
+                // Delta sync: split into new (not yet synced) and existing
+                var lastMovieTs = config.LastMovieSyncTimestamp;
+                var newStreams = lastMovieTs > 0
+                    ? allStreams.Where(m => m.Added > lastMovieTs).ToList()
+                    : allStreams;
+                var existingStreams = lastMovieTs > 0
+                    ? allStreams.Where(m => m.Added <= lastMovieTs).ToList()
+                    : new List<VodStreamInfo>();
+
+                _logger.Info("Delta movie sync: {0} new, {1} existing (since timestamp {2})",
+                    newStreams.Count, existingStreams.Count, lastMovieTs);
 
                 _movieProgress.Total = allStreams.Count;
                 _movieProgress.Phase = "Writing STRM files";
@@ -200,8 +246,9 @@ namespace Emby.Xtream.Plugin.Service
                         var movieDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
                         var strmPath = Path.Combine(movieDir, folderName + ".strm");
 
-                        // Smart skip: if file already exists with content, skip
-                        if (config.SmartSkipExisting && File.Exists(strmPath))
+                        // Smart skip: if file already exists AND the movie is not new (delta), skip
+                        var isNewMovie = lastMovieTs == 0 || movie.Added > lastMovieTs;
+                        if (!isNewMovie && config.SmartSkipExisting && File.Exists(strmPath))
                         {
                             lock (writtenPaths)
                             {
@@ -221,9 +268,11 @@ namespace Emby.Xtream.Plugin.Service
                             "{0}/movie/{1}/{2}/{3}.{4}",
                             config.BaseUrl, config.Username, config.Password, movie.StreamId, ext);
 
+                        var isNewFile = !File.Exists(strmPath);
                         Directory.CreateDirectory(movieDir);
                         File.WriteAllText(strmPath, streamUrl);
 
+                        if (isNewFile) Interlocked.Increment(ref _movieProgress.Added);
                         lock (writtenPaths)
                         {
                             writtenPaths.Add(strmPath);
@@ -249,7 +298,18 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     _movieProgress.Phase = "Cleaning up orphaned files";
                     var moviesRoot = Path.Combine(config.StrmLibraryPath, "Movies");
-                    CleanupOrphans(moviesRoot, writtenPaths);
+                    _movieProgress.Deleted = CleanupOrphans(moviesRoot, writtenPaths);
+                }
+
+                // Persist the highest Added timestamp seen so next sync can delta from here
+                if (allStreams.Count > 0)
+                {
+                    var maxAdded = allStreams.Max(m => m.Added);
+                    if (maxAdded > config.LastMovieSyncTimestamp)
+                    {
+                        config.LastMovieSyncTimestamp = maxAdded;
+                        Plugin.Instance.SaveConfiguration();
+                    }
                 }
 
                 _logger.Info("Movie STRM sync completed: {0} written, {1} skipped, {2} failed",
@@ -275,8 +335,10 @@ namespace Emby.Xtream.Plugin.Service
                     WasMovieSync = true,
                     MoviesTotal = _movieProgress.Total,
                     MoviesCompleted = _movieProgress.Completed,
+                    MoviesAdded = _movieProgress.Added,
                     MoviesSkipped = _movieProgress.Skipped,
                     MoviesFailed = _movieProgress.Failed,
+                    MoviesDeleted = _movieProgress.Deleted,
                 });
             }
         }
@@ -312,9 +374,31 @@ namespace Emby.Xtream.Plugin.Service
                 _seriesProgress.Phase = "Fetching series list";
                 var allSeries = await FetchSeriesListAsync(config.SelectedSeriesCategoryIds, config, cancellationToken).ConfigureAwait(false);
 
+                // Delta sync: split into changed and unchanged using LastModified timestamp
+                var lastSeriesTs = config.LastSeriesSyncTimestamp;
+                long maxSeriesTs = lastSeriesTs;
+
                 _seriesProgress.Total = allSeries.Count;
                 _seriesProgress.Phase = "Writing STRM files";
-                _logger.Info("Starting series STRM sync for {0} series", allSeries.Count);
+
+                int deltaNew = 0, deltaExisting = 0;
+                if (lastSeriesTs > 0)
+                {
+                    foreach (var s in allSeries)
+                    {
+                        long lm;
+                        if (long.TryParse(s.LastModified, NumberStyles.None, CultureInfo.InvariantCulture, out lm) && lm > lastSeriesTs)
+                            deltaNew++;
+                        else
+                            deltaExisting++;
+                    }
+                    _logger.Info("Delta series sync: {0} changed, {1} unchanged (since timestamp {2})",
+                        deltaNew, deltaExisting, lastSeriesTs);
+                }
+                else
+                {
+                    _logger.Info("Starting series STRM sync for {0} series", allSeries.Count);
+                }
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
@@ -401,9 +485,22 @@ namespace Emby.Xtream.Plugin.Service
                         }
 
                         var seriesDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
+                        var isNewSeries = !Directory.Exists(seriesDir);
 
-                        // Smart skip: check if series folder exists and has episodes
-                        if (config.SmartSkipExisting && Directory.Exists(seriesDir))
+                        // Track max LastModified for delta state
+                        long seriesLm = 0;
+                        long.TryParse(series.LastModified, NumberStyles.None, CultureInfo.InvariantCulture, out seriesLm);
+                        if (seriesLm > 0)
+                        {
+                            lock (_historyLock)
+                            {
+                                if (seriesLm > maxSeriesTs) maxSeriesTs = seriesLm;
+                            }
+                        }
+
+                        // Smart skip: skip unchanged series (delta) that already have episodes on disk
+                        var isChangedSeries = lastSeriesTs == 0 || seriesLm > lastSeriesTs;
+                        if (!isChangedSeries && config.SmartSkipExisting && Directory.Exists(seriesDir))
                         {
                             var existingStrms = Directory.GetFiles(seriesDir, "*.strm", SearchOption.AllDirectories);
                             if (existingStrms.Length > 0)
@@ -461,6 +558,7 @@ namespace Emby.Xtream.Plugin.Service
                             }
                         }
 
+                        if (isNewSeries) Interlocked.Increment(ref _seriesProgress.Added);
                         Interlocked.Increment(ref _seriesProgress.Completed);
                     }
                     catch (Exception ex)
@@ -482,7 +580,14 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     _seriesProgress.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");
-                    CleanupOrphans(showsRoot, writtenPaths);
+                    _seriesProgress.Deleted = CleanupOrphans(showsRoot, writtenPaths);
+                }
+
+                // Persist the highest LastModified timestamp seen
+                if (maxSeriesTs > config.LastSeriesSyncTimestamp)
+                {
+                    config.LastSeriesSyncTimestamp = maxSeriesTs;
+                    Plugin.Instance.SaveConfiguration();
                 }
 
                 _logger.Info("Series STRM sync completed: {0} written, {1} skipped, {2} failed",
@@ -508,14 +613,17 @@ namespace Emby.Xtream.Plugin.Service
                     WasSeriesSync = true,
                     SeriesTotal = _seriesProgress.Total,
                     SeriesCompleted = _seriesProgress.Completed,
+                    SeriesAdded = _seriesProgress.Added,
                     SeriesSkipped = _seriesProgress.Skipped,
                     SeriesFailed = _seriesProgress.Failed,
+                    SeriesDeleted = _seriesProgress.Deleted,
                 });
             }
         }
 
         private void AddHistoryEntry(SyncHistoryEntry entry)
         {
+            string historyJson;
             lock (_historyLock)
             {
                 _syncHistory.Insert(0, entry);
@@ -523,6 +631,17 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     _syncHistory.RemoveAt(_syncHistory.Count - 1);
                 }
+                historyJson = STJ.JsonSerializer.Serialize(_syncHistory, JsonOptions);
+            }
+
+            try
+            {
+                Plugin.Instance.Configuration.SyncHistoryJson = historyJson;
+                Plugin.Instance.SaveConfiguration();
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug("Failed to persist sync history: {0}", ex.Message);
             }
         }
 
@@ -858,11 +977,11 @@ namespace Emby.Xtream.Plugin.Service
             return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
         }
 
-        private void CleanupOrphans(string rootPath, HashSet<string> validPaths)
+        private int CleanupOrphans(string rootPath, HashSet<string> validPaths)
         {
             if (!Directory.Exists(rootPath))
             {
-                return;
+                return 0;
             }
 
             var existingStrms = Directory.GetFiles(rootPath, "*.strm", SearchOption.AllDirectories);
@@ -899,6 +1018,8 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _logger.Info("Removed {0} orphaned STRM files from {1}", removed, rootPath);
             }
+
+            return removed;
         }
     }
 }

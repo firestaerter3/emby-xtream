@@ -77,5 +77,11 @@ namespace Emby.Xtream.Plugin
         public bool SmartSkipExisting { get; set; } = true;
         public int SyncParallelism { get; set; } = 3;
         public bool CleanupOrphans { get; set; }
+
+        // Sync state (persisted across restarts)
+        public string LastChannelListHash { get; set; } = string.Empty;
+        public long LastMovieSyncTimestamp { get; set; }
+        public long LastSeriesSyncTimestamp { get; set; }
+        public string SyncHistoryJson { get; set; } = string.Empty;
     }
 }
