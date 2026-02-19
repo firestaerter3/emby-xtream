@@ -52,4 +52,23 @@ namespace Emby.Xtream.Plugin.Client.Models
         [JsonPropertyName("streams")]
         public List<int> Streams { get; set; } = new List<int>();
     }
+
+    /// <summary>
+    /// Channel object returned when fetching with include_streams=true (Dispatcharr v0.19.0+).
+    /// Each stream source embeds a stream_id field containing the original Xtream provider stream_id.
+    /// </summary>
+    public class DispatcharrChannelWithStreams
+    {
+        [JsonPropertyName("id")]
+        public int Id { get; set; }
+
+        [JsonPropertyName("uuid")]
+        public string Uuid { get; set; } = string.Empty;
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("streams")]
+        public List<DispatcharrChannel> Streams { get; set; } = new List<DispatcharrChannel>();
+    }
 }

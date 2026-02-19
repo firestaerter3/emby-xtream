@@ -158,32 +158,21 @@ namespace Emby.Xtream.Plugin.Service
                 channels = await FetchAllChannelsDirectAsync(config).ConfigureAwait(false);
             }
 
-            // Fetch stream stats from Dispatcharr REST API
+            // Fetch stream stats and UUID map from Dispatcharr in a single API call
             var newStats = new Dictionary<int, StreamStatsInfo>();
             if (config.EnableDispatcharr && !string.IsNullOrEmpty(config.DispatcharrUrl))
             {
                 try
                 {
                     _dispatcharrClient.Configure(config.DispatcharrUser, config.DispatcharrPass);
-                    var dispatcharrStats = await _dispatcharrClient.GetStreamStatsAsync(
+                    var (uuidMap, statsMap) = await _dispatcharrClient.GetChannelDataAsync(
                         config.DispatcharrUrl, cancellationToken).ConfigureAwait(false);
-                    newStats = dispatcharrStats;
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn("Failed to fetch Dispatcharr stream stats: {0}", ex.Message);
-                }
-
-                // Fetch channel UUID mapping for proxy stream URLs
-                try
-                {
-                    var uuidMap = await _dispatcharrClient.GetChannelUuidMapAsync(
-                        config.DispatcharrUrl, cancellationToken).ConfigureAwait(false);
+                    newStats = statsMap;
                     _channelUuidMap = uuidMap;
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warn("Failed to fetch Dispatcharr channel UUIDs: {0}", ex.Message);
+                    Logger.Warn("Failed to fetch Dispatcharr channel data: {0}", ex.Message);
                 }
             }
 
@@ -305,7 +294,7 @@ namespace Emby.Xtream.Plugin.Service
         /// </summary>
         private async Task EnsureStatsLoadedAsync(CancellationToken cancellationToken)
         {
-            if (_streamStats.Count > 0)
+            if (_streamStats.Count > 0 && _channelUuidMap.Count > 0)
             {
                 return;
             }
@@ -316,40 +305,21 @@ namespace Emby.Xtream.Plugin.Service
                 return;
             }
 
-            Logger.Info("Stream stats empty at playback time, fetching from Dispatcharr");
+            Logger.Info("Dispatcharr data missing at playback time, fetching on-demand");
             _dispatcharrClient.Configure(config.DispatcharrUser, config.DispatcharrPass);
 
             try
             {
-                var stats = await _dispatcharrClient.GetStreamStatsAsync(
+                var (uuidMap, statsMap) = await _dispatcharrClient.GetChannelDataAsync(
                     config.DispatcharrUrl, cancellationToken).ConfigureAwait(false);
-                if (stats.Count > 0)
-                {
-                    _streamStats = stats;
-                    Logger.Info("Loaded {0} stream stats from Dispatcharr on-demand", stats.Count);
-                }
+                if (statsMap.Count > 0) _streamStats = statsMap;
+                if (uuidMap.Count > 0) _channelUuidMap = uuidMap;
+                Logger.Info("Loaded {0} UUIDs and {1} stream stats from Dispatcharr on-demand",
+                    uuidMap.Count, statsMap.Count);
             }
             catch (Exception ex)
             {
-                Logger.Warn("On-demand Dispatcharr stats fetch failed: {0}", ex.Message);
-            }
-
-            if (_channelUuidMap.Count == 0)
-            {
-                try
-                {
-                    var uuidMap = await _dispatcharrClient.GetChannelUuidMapAsync(
-                        config.DispatcharrUrl, cancellationToken).ConfigureAwait(false);
-                    if (uuidMap.Count > 0)
-                    {
-                        _channelUuidMap = uuidMap;
-                        Logger.Info("Loaded {0} channel UUIDs from Dispatcharr on-demand", uuidMap.Count);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn("On-demand Dispatcharr UUID fetch failed: {0}", ex.Message);
-                }
+                Logger.Warn("On-demand Dispatcharr data fetch failed: {0}", ex.Message);
             }
         }
 

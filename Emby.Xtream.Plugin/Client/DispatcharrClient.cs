@@ -147,6 +147,55 @@ namespace Emby.Xtream.Plugin.Client
             return result;
         }
 
+        /// <summary>
+        /// Fetches channels with embedded stream sources in a single API call and returns both
+        /// the UUID map and stream stats map, keyed by the Xtream provider's stream_id.
+        /// Requires Dispatcharr v0.19.0+ (stream_id field in stream objects).
+        /// </summary>
+        public async Task<(Dictionary<int, string> UuidMap, Dictionary<int, StreamStatsInfo> StatsMap)>
+            GetChannelDataAsync(string baseUrl, CancellationToken cancellationToken)
+        {
+            var uuidMap = new Dictionary<int, string>();
+            var statsMap = new Dictionary<int, StreamStatsInfo>();
+
+            var json = await GetAuthenticatedAsync(
+                baseUrl + "/api/channels/channels/?include_streams=true&limit=2000",
+                baseUrl, cancellationToken).ConfigureAwait(false);
+            if (json == null) return (uuidMap, statsMap);
+
+            var channels = JsonSerializer.Deserialize<List<DispatcharrChannelWithStreams>>(json, JsonOptions);
+            if (channels == null) return (uuidMap, statsMap);
+
+            foreach (var ch in channels)
+            {
+                if (string.IsNullOrEmpty(ch.Uuid)) continue;
+
+                foreach (var stream in ch.Streams)
+                {
+                    if (stream.StreamId == null || stream.StreamId == 0) continue;
+
+                    var sid = stream.StreamId.Value;
+                    if (!uuidMap.ContainsKey(sid))
+                        uuidMap[sid] = ch.Uuid;
+
+                    if (stream.StreamStats?.VideoCodec != null && !statsMap.ContainsKey(sid))
+                        statsMap[sid] = stream.StreamStats;
+                }
+            }
+
+            if (uuidMap.Count == 0)
+            {
+                _logger.Warn(
+                    "Dispatcharr UUID map is empty — ensure Dispatcharr v0.19.0+ is installed and channels have stream sources");
+            }
+            else
+            {
+                _logger.Info("Loaded {0} UUIDs and {1} stream stats from Dispatcharr", uuidMap.Count, statsMap.Count);
+            }
+
+            return (uuidMap, statsMap);
+        }
+
         public async Task<bool> TestConnectionAsync(string baseUrl, CancellationToken cancellationToken)
         {
             try
