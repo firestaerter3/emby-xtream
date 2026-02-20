@@ -79,6 +79,12 @@ namespace Emby.Xtream.Plugin
         public int SyncParallelism { get; set; } = 3;
         public bool CleanupOrphans { get; set; }
 
+        // Auto-sync schedule
+        public bool   AutoSyncEnabled       { get; set; } = false;
+        public string AutoSyncMode          { get; set; } = "interval"; // "interval" | "daily"
+        public int    AutoSyncIntervalHours { get; set; } = 24;
+        public string AutoSyncDailyTime     { get; set; } = "03:00";    // HH:mm server local time
+
         // Sync state (persisted across restarts)
         public string LastChannelListHash { get; set; } = string.Empty;
         public long LastMovieSyncTimestamp { get; set; }
