@@ -29,8 +29,9 @@ tools/*.sh
 tools/*.csx
 tools/results/*.json
 
-# Documentation (local working docs)
-docs/
+# Documentation (local working/scratch docs — ADRs in docs/decisions/ are committed)
+docs/*.md
+docs/play-timing-analysis.md
 
 # Screenshots (scratch reference images)
 *.png

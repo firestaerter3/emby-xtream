@@ -35,6 +35,17 @@ When `SupportsProbing = true` and `AnalyzeDurationMs > 0`, Emby runs ffprobe aga
 
 **Rule**: Always set `SupportsProbing = false` and `AnalyzeDurationMs = 0` for Dispatcharr proxy URLs (`/proxy/ts/stream/{uuid}`), regardless of whether stream stats are available. Direct Xtream URLs (no Dispatcharr) can still use probing when stats are absent.
 
+## Architecture Decision Records (ADRs)
+
+Significant decisions are recorded in `docs/decisions/NNN-title.md`. Create a new ADR when:
+- Choosing between multiple viable approaches (especially after trying alternatives that failed)
+- Making a change driven by a non-obvious root cause
+- Reversing or replacing a previous approach
+
+Format: see `docs/decisions/001-bypass-dispatcharr-proxy.md` as the template. Each ADR should include Context, Problem, Alternatives considered, Decision, and Consequences.
+
+Numbering: sequential, zero-padded to 3 digits (`001`, `002`, ...).
+
 ## Git Workflow
 
 ### Commit before switching context
