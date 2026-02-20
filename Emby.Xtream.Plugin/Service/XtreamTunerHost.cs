@@ -159,6 +159,20 @@ namespace Emby.Xtream.Plugin.Service
                 channels = await FetchAllChannelsDirectAsync(config).ConfigureAwait(false);
             }
 
+            // Fetch category names for guide chips (Tags on ChannelInfo)
+            Dictionary<int, string> categoryMap;
+            try
+            {
+                var cats = await liveTvService.GetLiveCategoriesAsync(cancellationToken).ConfigureAwait(false);
+                categoryMap = cats.ToDictionary(c => c.CategoryId, c => c.CategoryName);
+                Logger.Debug("Fetched {0} live categories for guide chips", categoryMap.Count);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Failed to fetch live categories for guide chips: {0}", ex.Message);
+                categoryMap = new Dictionary<int, string>();
+            }
+
             // Fetch stream stats and UUID map from Dispatcharr in a single API call
             var newStats = new Dictionary<int, StreamStatsInfo>();
             if (config.EnableDispatcharr && !string.IsNullOrEmpty(config.DispatcharrUrl))
@@ -188,6 +202,15 @@ namespace Emby.Xtream.Plugin.Service
                     config.EnableChannelNameCleaning);
 
                 var streamIdStr = channel.StreamId.ToString(CultureInfo.InvariantCulture);
+
+                string[] tags = null;
+                if (channel.CategoryId.HasValue
+                    && categoryMap.TryGetValue(channel.CategoryId.Value, out var groupTitle)
+                    && !string.IsNullOrEmpty(groupTitle))
+                {
+                    tags = new[] { groupTitle };
+                }
+
                 return new ChannelInfo
                 {
                     Id = CreateEmbyChannelId(tuner, streamIdStr),
@@ -197,6 +220,7 @@ namespace Emby.Xtream.Plugin.Service
                     ImageUrl = string.IsNullOrEmpty(channel.StreamIcon) ? null : channel.StreamIcon,
                     ChannelType = ChannelType.TV,
                     TunerHostId = tuner.Id,
+                    Tags = tags,
                 };
             }).ToList();
 

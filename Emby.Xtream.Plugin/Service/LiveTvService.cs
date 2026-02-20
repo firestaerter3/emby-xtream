@@ -61,8 +61,23 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 _logger.Info("Generating M3U playlist");
-                var channels = await GetFilteredChannelsAsync(cancellationToken).ConfigureAwait(false);
-                var m3u = GenerateM3U(channels, config, catchupOnly: false);
+                var channelsTask = GetFilteredChannelsAsync(cancellationToken);
+                var categoriesTask = GetLiveCategoriesAsync(cancellationToken);
+                Dictionary<int, string> categoryMap;
+                try
+                {
+                    await Task.WhenAll(channelsTask, categoriesTask).ConfigureAwait(false);
+                    categoryMap = categoriesTask.Result.ToDictionary(c => c.CategoryId, c => c.CategoryName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn("Failed to fetch live categories for M3U group-title; categories will be omitted: {0}", ex.Message);
+                    await channelsTask.ConfigureAwait(false);
+                    categoryMap = new Dictionary<int, string>();
+                }
+
+                var channels = channelsTask.Result;
+                var m3u = GenerateM3U(channels, config, categoryMap, catchupOnly: false);
 
                 _cachedM3U = m3u;
                 _m3uCacheTime = DateTime.UtcNow;
@@ -92,8 +107,23 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 _logger.Info("Generating Catchup M3U playlist");
-                var channels = await GetFilteredChannelsAsync(cancellationToken).ConfigureAwait(false);
-                var m3u = GenerateM3U(channels, config, catchupOnly: true);
+                var channelsTask = GetFilteredChannelsAsync(cancellationToken);
+                var categoriesTask = GetLiveCategoriesAsync(cancellationToken);
+                Dictionary<int, string> categoryMap;
+                try
+                {
+                    await Task.WhenAll(channelsTask, categoriesTask).ConfigureAwait(false);
+                    categoryMap = categoriesTask.Result.ToDictionary(c => c.CategoryId, c => c.CategoryName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn("Failed to fetch live categories for catchup M3U group-title; categories will be omitted: {0}", ex.Message);
+                    await channelsTask.ConfigureAwait(false);
+                    categoryMap = new Dictionary<int, string>();
+                }
+
+                var channels = channelsTask.Result;
+                var m3u = GenerateM3U(channels, config, categoryMap, catchupOnly: true);
 
                 _cachedCatchupM3U = m3u;
                 _catchupCacheTime = DateTime.UtcNow;
@@ -281,7 +311,7 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        private static string GenerateM3U(List<LiveStreamInfo> channels, PluginConfiguration config, bool catchupOnly)
+        private static string GenerateM3U(List<LiveStreamInfo> channels, PluginConfiguration config, Dictionary<int, string> categoryNames, bool catchupOnly)
         {
             var sb = new StringBuilder();
             sb.AppendLine("#EXTM3U");
@@ -310,6 +340,13 @@ namespace Emby.Xtream.Plugin.Service
                 if (!string.IsNullOrEmpty(channel.StreamIcon))
                 {
                     extinf.AppendFormat(CultureInfo.InvariantCulture, " tvg-logo=\"{0}\"", EscapeAttribute(channel.StreamIcon));
+                }
+
+                if (channel.CategoryId.HasValue
+                    && categoryNames.TryGetValue(channel.CategoryId.Value, out var groupTitle)
+                    && !string.IsNullOrEmpty(groupTitle))
+                {
+                    extinf.AppendFormat(CultureInfo.InvariantCulture, " group-title=\"{0}\"", EscapeAttribute(groupTitle));
                 }
 
                 // Add catch-up attributes if enabled and channel supports it
