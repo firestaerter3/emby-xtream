@@ -24,7 +24,10 @@ BUGS.md
 
 # Dev tools & scripts
 InspectSDK/
-tools/
+tools/*.py
+tools/*.sh
+tools/*.csx
+tools/results/*.json
 
 # Documentation (local working docs)
 docs/
