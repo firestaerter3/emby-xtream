@@ -37,8 +37,10 @@ docs/
 logs/*.log
 logs/**/*.log
 
+# Credentials (committed as .env.example)
+.env
+
 # Playwright E2E tests
-tests/e2e/.env
 tests/e2e/node_modules/
 tests/e2e/results/*.json
 tests/e2e/test-results/
