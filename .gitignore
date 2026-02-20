@@ -24,9 +24,7 @@ BUGS.md
 
 # Dev tools & scripts
 InspectSDK/
-benchmark_*.py
-benchmark_*.sh
-inspect_sdk.csx
+tools/
 
 # Documentation (local working docs)
 docs/
