@@ -35,6 +35,17 @@ docs/
 *.png
 !Emby.Xtream.Plugin/thumb.png
 
+# Bug logs (directories committed, log files gitignored)
+logs/*.log
+logs/**/*.log
+
+# Playwright E2E tests
+tests/e2e/.env
+tests/e2e/node_modules/
+tests/e2e/results/*.json
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+
 # OS files
 .DS_Store
 Thumbs.db
