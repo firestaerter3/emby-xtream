@@ -57,6 +57,14 @@ function (BaseView, loading) {
             updateFoldersVisibility(view, 'series');
         });
 
+        view.querySelector('.chkAutoSyncEnabled').addEventListener('change', function () {
+            updateAutoSyncVisibility(view);
+        });
+
+        view.querySelector('.selAutoSyncMode').addEventListener('change', function () {
+            updateAutoSyncVisibility(view);
+        });
+
         view.querySelector('.btnAddMovieFolder').addEventListener('click', function () {
             addFolderEntry(view, 'movie', '', '', self.loadedVodCategories);
         });
@@ -329,6 +337,13 @@ function (BaseView, loading) {
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
             view.querySelector('.chkCleanupOrphans').checked = !!config.CleanupOrphans;
 
+            // Auto-sync schedule
+            view.querySelector('.chkAutoSyncEnabled').checked = !!config.AutoSyncEnabled;
+            view.querySelector('.selAutoSyncMode').value = config.AutoSyncMode || 'interval';
+            view.querySelector('.txtAutoSyncIntervalHours').value = config.AutoSyncIntervalHours || 24;
+            view.querySelector('.txtAutoSyncDailyTime').value = config.AutoSyncDailyTime || '03:00';
+            updateAutoSyncVisibility(view);
+
             // Metadata ID naming (unified)
             var metadataIdEnabled = !!config.EnableTmdbFolderNaming || !!config.EnableSeriesIdFolderNaming;
             view.querySelector('.chkEnableTmdbFolderNaming').checked = metadataIdEnabled;
@@ -414,6 +429,12 @@ function (BaseView, loading) {
             config.SyncParallelism = parseInt(view.querySelector('.txtSyncParallelism').value, 10) || 3;
             config.CleanupOrphans = view.querySelector('.chkCleanupOrphans').checked;
 
+            // Auto-sync schedule
+            config.AutoSyncEnabled = view.querySelector('.chkAutoSyncEnabled').checked;
+            config.AutoSyncMode = view.querySelector('.selAutoSyncMode').value;
+            config.AutoSyncIntervalHours = parseInt(view.querySelector('.txtAutoSyncIntervalHours').value, 10) || 24;
+            config.AutoSyncDailyTime = view.querySelector('.txtAutoSyncDailyTime').value || '03:00';
+
             // Metadata ID naming (unified → both backend properties)
             var metadataIdOn = view.querySelector('.chkEnableTmdbFolderNaming').checked;
             config.EnableTmdbFolderNaming = metadataIdOn;
@@ -425,6 +446,7 @@ function (BaseView, loading) {
 
             ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
                 Dashboard.processPluginConfigurationUpdateResult();
+                applyScheduleToTasks(view, config, ApiClient);
                 if (typeof callback === 'function') callback();
             });
         }).catch(function () {
@@ -544,6 +566,44 @@ function (BaseView, loading) {
         var mode = view.querySelector(selClass).value;
         view.querySelector(singleClass).style.display = mode === 'single' ? 'block' : 'none';
         view.querySelector(multiClass).style.display = mode === 'custom' ? 'block' : 'none';
+    }
+
+    function updateAutoSyncVisibility(v) {
+        var enabled = v.querySelector('.chkAutoSyncEnabled').checked;
+        v.querySelector('.autoSyncSettings').style.display = enabled ? '' : 'none';
+        var mode = v.querySelector('.selAutoSyncMode').value;
+        v.querySelector('.autoSyncIntervalContainer').style.display = mode === 'interval' ? '' : 'none';
+        v.querySelector('.autoSyncDailyContainer').style.display    = mode === 'daily'    ? '' : 'none';
+    }
+
+    function buildTriggers(config) {
+        if (!config.AutoSyncEnabled) return [];
+        if (config.AutoSyncMode === 'daily') {
+            var parts = (config.AutoSyncDailyTime || '03:00').split(':');
+            var ticks = (parseInt(parts[0], 10) * 3600 + parseInt(parts[1] || '0', 10) * 60) * 10000000;
+            return [{ Type: 'DailyTrigger', TimeOfDayTicks: ticks }];
+        }
+        // interval
+        var hours = Math.max(1, config.AutoSyncIntervalHours || 24);
+        return [{ Type: 'IntervalTrigger', IntervalTicks: hours * 36000000000 }];
+    }
+
+    function applyScheduleToTasks(view, config, apiClient) {
+        apiClient.ajax({ url: apiClient.getUrl('ScheduledTasks'), type: 'GET' })
+            .then(function (tasks) {
+                var xtreamTasks = tasks.filter(function (t) {
+                    return t.Category === 'Xtream Tuner';
+                });
+                var triggers = buildTriggers(config);
+                xtreamTasks.forEach(function (task) {
+                    apiClient.ajax({
+                        url: apiClient.getUrl('ScheduledTasks/' + task.Id + '/Triggers'),
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify(triggers)
+                    });
+                });
+            });
     }
 
     // ---- Folder card management (for Multiple Folders mode) ----

@@ -352,6 +352,35 @@
                             Remove STRM files that are no longer present in the source after sync.
                         </div>
                     </div>
+
+                    <!-- Auto-Sync Schedule -->
+                    <h3 class="sectionTitle" style="font-size:0.95em; margin-top:1.2em;">Auto-Sync Schedule</h3>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkAutoSyncEnabled" type="checkbox" is="emby-checkbox" />
+                            <span>Enable Auto-Sync</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Automatically sync movies and/or series. Movies must be enabled above; series likewise.
+                        </div>
+                    </div>
+                    <div class="autoSyncSettings">
+                        <div class="selectContainer">
+                            <select class="selAutoSyncMode" is="emby-select" label="Schedule Type">
+                                <option value="interval">Every N Hours</option>
+                                <option value="daily">Daily at Time</option>
+                            </select>
+                        </div>
+                        <div class="autoSyncIntervalContainer inputContainer">
+                            <input class="txtAutoSyncIntervalHours" type="number" is="emby-input"
+                                   label="Sync Interval (hours)" min="1" max="168" step="1" />
+                            <div class="fieldDescription">How often to run sync (1–168 hours).</div>
+                        </div>
+                        <div class="autoSyncDailyContainer inputContainer" style="display:none;">
+                            <input class="txtAutoSyncDailyTime" type="time" is="emby-input"
+                                   label="Daily Sync Time (server local time)" />
+                        </div>
+                    </div>
                 </div>
 
                 <div class="verticalSection">
