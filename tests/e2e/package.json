@@ -1,0 +1,16 @@
+{
+  "name": "emby-xtream-e2e",
+  "version": "1.0.0",
+  "description": "Playwright E2E performance tests for the Emby Xtream plugin",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "install-browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.41.0",
+    "dotenv": "^16.4.0"
+  }
+}
