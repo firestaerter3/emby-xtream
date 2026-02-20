@@ -1743,7 +1743,7 @@ function (BaseView, loading) {
 
             // Use the most recent entry for time/status; sum durations if paired
             var primary = entry;
-            var success = entry.Success && (!consumed === 2 || (movieEntry && movieEntry.Success) && (seriesEntry && seriesEntry.Success));
+            var success = entry.Success;
             if (consumed === 2) {
                 success = (movieEntry ? movieEntry.Success : true) && (seriesEntry ? seriesEntry.Success : true);
             }
