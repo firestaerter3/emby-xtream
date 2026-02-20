@@ -69,3 +69,27 @@ When editing or creating GitHub release notes, each bug fix entry should include
 ```
 
 Use the reporter name from `BUGS.md`. If a bug has multiple reporters, list all of them. Internal/self-discovered fixes need no reporter credit. Auto-generated release notes from GitHub never include this — always edit them manually after tagging.
+
+### Release notes must be written for users, not developers
+
+Release notes are read by non-technical users deciding whether to update. Write them from the user's perspective:
+
+- **Lead with what the user experiences**, not what changed in the code. "Channels were failing to play" beats "UUID lookup key was incorrect".
+- **Explain the symptom, then the cause, then the fix** — in that order. Users need to recognise their own problem before they care about the solution.
+- **Bug fixes**: describe what the user saw (the error message or behaviour), why it happened in plain terms, and what is now different. Credit the reporter at the end of the section.
+- **New features**: describe what the user can now do and where to find it. Include the config path if there's a UI setting involved (e.g. *Plugin Config → Settings → STRM Sync Settings*).
+- **Avoid commit-log language**: phrases like `feat:`, `fix:`, `refactor:`, or "add X via Y" belong in git history, not release notes.
+- Use a `## Bug Fix` or `## What's New` top-level heading, then a `### Short symptom-focused title` subheading per item.
+
+**Example — bad:**
+```
+- feat: fix Dispatcharr UUID mapping for URL-based stream sources
+```
+
+**Example — good:**
+```
+### "Dispatcharr Proxy Unavailable" for Some Channels (reported by Joe 🇺🇸)
+
+Some channels were failing to play with a *Dispatcharr proxy unavailable* error even
+though Dispatcharr itself was running fine and other channels worked normally. ...
+```
