@@ -184,6 +184,10 @@ function (BaseView, loading) {
             deleteContent(view, 'Series');
         });
 
+        view.querySelector('.chkCleanupOrphans').addEventListener('change', function () {
+            view.querySelector('.orphanThresholdContainer').style.display = this.checked ? '' : 'none';
+        });
+
         // Dashboard sync all button
         view.querySelector('.btnDashboardSyncAll').addEventListener('click', function () {
             dashboardSyncAll(self);
@@ -336,6 +340,8 @@ function (BaseView, loading) {
             view.querySelector('.chkSmartSkipExisting').checked = config.SmartSkipExisting !== false;
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
             view.querySelector('.chkCleanupOrphans').checked = !!config.CleanupOrphans;
+            view.querySelector('.txtOrphanSafetyThreshold').value = Math.round((config.OrphanSafetyThreshold || 0.20) * 100);
+            view.querySelector('.orphanThresholdContainer').style.display = config.CleanupOrphans ? '' : 'none';
 
             // Auto-sync schedule
             view.querySelector('.chkAutoSyncEnabled').checked = !!config.AutoSyncEnabled;
@@ -428,6 +434,7 @@ function (BaseView, loading) {
             config.SmartSkipExisting = view.querySelector('.chkSmartSkipExisting').checked;
             config.SyncParallelism = parseInt(view.querySelector('.txtSyncParallelism').value, 10) || 3;
             config.CleanupOrphans = view.querySelector('.chkCleanupOrphans').checked;
+            config.OrphanSafetyThreshold = (parseInt(view.querySelector('.txtOrphanSafetyThreshold').value, 10) || 0) / 100;
 
             // Auto-sync schedule
             config.AutoSyncEnabled = view.querySelector('.chkAutoSyncEnabled').checked;

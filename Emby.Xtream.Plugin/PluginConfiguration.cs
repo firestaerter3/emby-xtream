@@ -79,6 +79,9 @@ namespace Emby.Xtream.Plugin
         public int SyncParallelism { get; set; } = 3;
         public bool CleanupOrphans { get; set; }
 
+        /// <summary>Fraction of existing STRMs that can be deleted in one cleanup pass. 0 = disabled.</summary>
+        public double OrphanSafetyThreshold { get; set; } = 0.20;
+
         // Auto-sync schedule
         public bool   AutoSyncEnabled       { get; set; } = false;
         public string AutoSyncMode          { get; set; } = "interval"; // "interval" | "daily"

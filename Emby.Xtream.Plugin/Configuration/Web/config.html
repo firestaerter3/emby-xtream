@@ -352,6 +352,13 @@
                             Remove STRM files that are no longer present in the source after sync.
                         </div>
                     </div>
+                    <div class="orphanThresholdContainer inputContainer" style="display:none;">
+                        <input class="txtOrphanSafetyThreshold" type="number" is="emby-input"
+                               label="Safety Threshold (%)" min="0" max="100" step="1" />
+                        <div class="fieldDescription">
+                            Skip cleanup if more than this % of files would be deleted (protects against provider outages). Set 0 to disable.
+                        </div>
+                    </div>
 
                     <!-- Auto-Sync Schedule -->
                     <h3 class="sectionTitle" style="font-size:0.95em; margin-top:1.2em;">Auto-Sync Schedule</h3>
