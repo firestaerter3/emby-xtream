@@ -201,6 +201,14 @@ namespace Emby.Xtream.Plugin.Service
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
 
+                // Shared Dispatcharr VOD client — only queried per-movie, after smart-skip
+                Emby.Xtream.Plugin.Client.DispatcharrClient dispatcharrVodClient = null;
+                if (config.EnableDispatcharr && !string.IsNullOrEmpty(config.DispatcharrUrl))
+                {
+                    dispatcharrVodClient = new Emby.Xtream.Plugin.Client.DispatcharrClient(_logger);
+                    dispatcharrVodClient.Configure(config.DispatcharrUser, config.DispatcharrPass);
+                }
+
                 var tasks = allStreams.Select(async movie =>
                 {
                     await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -290,14 +298,52 @@ namespace Emby.Xtream.Plugin.Service
                             "{0}/movie/{1}/{2}/{3}.{4}",
                             config.BaseUrl, config.Username, config.Password, movie.StreamId, ext);
 
-                        var isNewFile = !File.Exists(strmPath);
-                        Directory.CreateDirectory(movieDir);
-                        File.WriteAllText(strmPath, streamUrl);
+                        // Build list of STRM entries (multi-version via Dispatcharr, or single)
+                        var strmEntries = new List<Tuple<string, string>>();
 
-                        if (isNewFile) Interlocked.Increment(ref _movieProgress.Added);
-                        lock (writtenPaths)
+                        if (dispatcharrVodClient != null)
                         {
-                            writtenPaths.Add(strmPath);
+                            try
+                            {
+                                var vodDetail = await dispatcharrVodClient.GetVodMovieDetailAsync(
+                                    config.DispatcharrUrl, movie.StreamId, cancellationToken).ConfigureAwait(false);
+                                if (vodDetail != null && !string.IsNullOrEmpty(vodDetail.Uuid))
+                                {
+                                    var providers = await dispatcharrVodClient.GetVodMovieProvidersAsync(
+                                        config.DispatcharrUrl, movie.StreamId, cancellationToken).ConfigureAwait(false);
+                                    if (providers.Count > 1)
+                                    {
+                                        for (int vi = 0; vi < providers.Count; vi++)
+                                        {
+                                            var suffix = vi == 0 ? string.Empty
+                                                : string.Format(CultureInfo.InvariantCulture, " - Version {0}", vi + 1);
+                                            var providerUrl = string.Format(
+                                                CultureInfo.InvariantCulture,
+                                                "{0}/proxy/vod/movie/{1}?stream_id={2}",
+                                                config.DispatcharrUrl, vodDetail.Uuid, providers[vi].StreamId);
+                                            strmEntries.Add(Tuple.Create(
+                                                Path.Combine(movieDir, folderName + suffix + ".strm"),
+                                                providerUrl));
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Debug("Dispatcharr VOD lookup failed for '{0}': {1}", movie.Name, ex.Message);
+                            }
+                        }
+
+                        if (strmEntries.Count == 0)
+                            strmEntries.Add(Tuple.Create(strmPath, streamUrl));
+
+                        Directory.CreateDirectory(movieDir);
+                        foreach (var entry in strmEntries)
+                        {
+                            var isNewFile = !File.Exists(entry.Item1);
+                            File.WriteAllText(entry.Item1, entry.Item2);
+                            if (isNewFile) Interlocked.Increment(ref _movieProgress.Added);
+                            lock (writtenPaths) { writtenPaths.Add(entry.Item1); }
                         }
 
                         if (config.EnableNfoFiles)
