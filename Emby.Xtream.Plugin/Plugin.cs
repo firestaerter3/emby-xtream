@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Cryptography;
 using Emby.Xtream.Plugin.Service;
 using MediaBrowser.Common;
 using MediaBrowser.Common.Configuration;
@@ -79,7 +78,7 @@ namespace Emby.Xtream.Plugin
         /// Returns a stable page name for config.html. Must never change between versions —
         /// if it did, the Emby SPA would navigate to a stale URL after a banner install and
         /// show "error processing request" because the old page name no longer exists in the
-        /// new DLL. JS cache-busting is handled separately via GetJsPageName().
+        /// new DLL. Emby appends ?v=&lt;ServerVersion&gt; for cache-busting.
         /// </summary>
         private static string GetHtmlPageName()
         {
@@ -87,35 +86,12 @@ namespace Emby.Xtream.Plugin
         }
 
         /// <summary>
-        /// Returns a stable JS page name derived from an 8-char MD5 hash of the embedded
-        /// config.js content. The build script stamps the same hash into config.html's
-        /// data-controller, so the browser always loads a fresh JS URL after each build.
+        /// Returns a stable JS page name. Emby appends ?v=&lt;ServerVersion&gt; automatically,
+        /// which provides sufficient cache-busting across plugin updates.
         /// </summary>
         private static string GetJsPageName()
         {
-            return GetEmbeddedResourcePageName("Emby.Xtream.Plugin.Configuration.Web.config.js", "xtreamconfigjs");
-        }
-
-        private static string GetEmbeddedResourcePageName(string resourcePath, string fallback)
-        {
-            try
-            {
-                using (var stream = typeof(Plugin).Assembly.GetManifestResourceStream(resourcePath))
-                {
-                    if (stream == null) return fallback;
-                    using (var md5 = MD5.Create())
-                    {
-                        var hash = md5.ComputeHash(stream);
-                        var slug = BitConverter.ToString(hash).Replace("-", string.Empty)
-                                               .Substring(0, 8).ToLowerInvariant();
-                        return fallback + slug;
-                    }
-                }
-            }
-            catch
-            {
-                return fallback;
-            }
+            return "xtreamconfigjs";
         }
     }
 }
