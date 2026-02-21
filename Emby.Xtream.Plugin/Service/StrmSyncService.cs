@@ -300,7 +300,7 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     _movieProgress.Phase = "Cleaning up orphaned files";
                     var moviesRoot = Path.Combine(config.StrmLibraryPath, "Movies");
-                    _movieProgress.Deleted = CleanupOrphans(moviesRoot, writtenPaths);
+                    _movieProgress.Deleted = CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold);
                 }
 
                 // Persist the highest Added timestamp seen so next sync can delta from here
@@ -584,7 +584,7 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     _seriesProgress.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");
-                    _seriesProgress.Deleted = CleanupOrphans(showsRoot, writtenPaths);
+                    _seriesProgress.Deleted = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold);
                 }
 
                 // Persist the highest LastModified timestamp seen
@@ -999,7 +999,7 @@ namespace Emby.Xtream.Plugin.Service
             return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
         }
 
-        private int CleanupOrphans(string rootPath, HashSet<string> validPaths)
+        private int CleanupOrphans(string rootPath, HashSet<string> validPaths, double safetyThreshold)
         {
             if (!Directory.Exists(rootPath))
             {
@@ -1007,6 +1007,19 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             var existingStrms = Directory.GetFiles(rootPath, "*.strm", SearchOption.AllDirectories);
+            var orphanCount = existingStrms.Count(s => !validPaths.Contains(s));
+
+            if (safetyThreshold > 0 && existingStrms.Length > 10 && orphanCount > 0)
+            {
+                double ratio = (double)orphanCount / existingStrms.Length;
+                if (ratio > safetyThreshold)
+                {
+                    _logger.Warn(
+                        "Orphan cleanup skipped: {0}/{1} ({2:P0}) exceeds safety threshold {3:P0} — possible provider issue",
+                        orphanCount, existingStrms.Length, ratio, safetyThreshold);
+                    return 0;
+                }
+            }
             var removed = 0;
 
             foreach (var strmFile in existingStrms)
