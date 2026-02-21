@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -97,6 +98,29 @@ namespace Emby.Xtream.Plugin.Client
             }
 
             return (uuidMap, statsMap);
+        }
+
+        /// <summary>Returns the Dispatcharr VOD movie detail (UUID) for a given Xtream stream ID.</summary>
+        public async Task<DispatcharrVodMovieDetail> GetVodMovieDetailAsync(
+            string baseUrl, int xtreamStreamId, CancellationToken cancellationToken)
+        {
+            var json = await GetAuthenticatedAsync(
+                string.Format(CultureInfo.InvariantCulture, "{0}/api/vod/movies/{1}/", baseUrl, xtreamStreamId),
+                baseUrl, cancellationToken).ConfigureAwait(false);
+            if (json == null) return null;
+            return JsonSerializer.Deserialize<DispatcharrVodMovieDetail>(json, JsonOptions);
+        }
+
+        /// <summary>Returns provider streams for a given Dispatcharr VOD movie.</summary>
+        public async Task<List<DispatcharrVodProvider>> GetVodMovieProvidersAsync(
+            string baseUrl, int xtreamStreamId, CancellationToken cancellationToken)
+        {
+            var json = await GetAuthenticatedAsync(
+                string.Format(CultureInfo.InvariantCulture, "{0}/api/vod/movies/{1}/providers/", baseUrl, xtreamStreamId),
+                baseUrl, cancellationToken).ConfigureAwait(false);
+            if (json == null) return new List<DispatcharrVodProvider>();
+            return JsonSerializer.Deserialize<List<DispatcharrVodProvider>>(json, JsonOptions)
+                   ?? new List<DispatcharrVodProvider>();
         }
 
         public async Task<bool> TestConnectionAsync(string baseUrl, CancellationToken cancellationToken)
