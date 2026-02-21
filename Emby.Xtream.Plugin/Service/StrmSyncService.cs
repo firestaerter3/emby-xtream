@@ -46,6 +46,8 @@ namespace Emby.Xtream.Plugin.Service
         public int SeriesDeleted { get; set; }
         public bool WasMovieSync { get; set; }
         public bool WasSeriesSync { get; set; }
+        public List<string> AddedMovieTitles { get; set; } = new List<string>();
+        public List<string> AddedSeriesTitles { get; set; } = new List<string>();
     }
 
     public class FailedSyncItem
@@ -168,6 +170,7 @@ namespace Emby.Xtream.Plugin.Service
             lock (_failedItemsLock) { _failedItems.Clear(); }
             var movieSyncStart = DateTime.UtcNow;
             var movieSyncSuccess = true;
+            var addedMovieTitles = new List<string>();
 
             try
             {
@@ -362,12 +365,24 @@ namespace Emby.Xtream.Plugin.Service
                             strmEntries.Add(Tuple.Create(strmPath, streamUrl));
 
                         Directory.CreateDirectory(movieDir);
+                        var isAnyNewFile = false;
                         foreach (var entry in strmEntries)
                         {
                             var isNewFile = !File.Exists(entry.Item1);
                             File.WriteAllText(entry.Item1, entry.Item2);
-                            if (isNewFile) Interlocked.Increment(ref _movieProgress.Added);
+                            if (isNewFile)
+                            {
+                                Interlocked.Increment(ref _movieProgress.Added);
+                                isAnyNewFile = true;
+                            }
                             lock (writtenPaths) { writtenPaths.Add(entry.Item1); }
+                        }
+                        if (isAnyNewFile)
+                        {
+                            lock (addedMovieTitles)
+                            {
+                                if (addedMovieTitles.Count < 20) addedMovieTitles.Add(cleanedName);
+                            }
                         }
 
                         if (config.EnableNfoFiles)
@@ -460,6 +475,7 @@ namespace Emby.Xtream.Plugin.Service
                     MoviesSkipped = _movieProgress.Skipped,
                     MoviesFailed = _movieProgress.Failed,
                     MoviesDeleted = _movieProgress.Deleted,
+                    AddedMovieTitles = addedMovieTitles,
                 });
             }
         }
@@ -471,6 +487,7 @@ namespace Emby.Xtream.Plugin.Service
             lock (_failedItemsLock) { _failedItems.RemoveAll(i => i.ItemType == "Series"); }
             var seriesSyncStart = DateTime.UtcNow;
             var seriesSyncSuccess = true;
+            var addedSeriesTitles = new List<string>();
 
             try
             {
@@ -707,7 +724,14 @@ namespace Emby.Xtream.Plugin.Service
                             }
                         }
 
-                        if (isNewSeries) Interlocked.Increment(ref _seriesProgress.Added);
+                        if (isNewSeries)
+                        {
+                            Interlocked.Increment(ref _seriesProgress.Added);
+                            lock (addedSeriesTitles)
+                            {
+                                if (addedSeriesTitles.Count < 20) addedSeriesTitles.Add(cleanedName);
+                            }
+                        }
                         Interlocked.Increment(ref _seriesProgress.Completed);
                     }
                     catch (Exception ex)
@@ -777,6 +801,7 @@ namespace Emby.Xtream.Plugin.Service
                     SeriesSkipped = _seriesProgress.Skipped,
                     SeriesFailed = _seriesProgress.Failed,
                     SeriesDeleted = _seriesProgress.Deleted,
+                    AddedSeriesTitles = addedSeriesTitles,
                 });
             }
         }

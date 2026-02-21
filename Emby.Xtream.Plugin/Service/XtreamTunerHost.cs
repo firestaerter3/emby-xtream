@@ -42,6 +42,8 @@ namespace Emby.Xtream.Plugin.Service
         private List<ChannelInfo> _cachedChannels;
         private DateTime _cacheTime = DateTime.MinValue;
 
+        public int CachedChannelCount => _cachedChannels?.Count ?? 0;
+
         public XtreamTunerHost(IServerApplicationHost applicationHost)
             : base(applicationHost)
         {

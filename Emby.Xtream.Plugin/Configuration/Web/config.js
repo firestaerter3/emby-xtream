@@ -549,99 +549,51 @@ function (BaseView, loading) {
 
     function updateTmdbVisibility(view) {
         var enabled = view.querySelector('.chkEnableTmdbFolderNaming').checked;
-        var settings = view.querySelector('.tmdbSettings');
-        var inputs = settings.querySelectorAll('input, textarea');
-        for (var i = 0; i < inputs.length; i++) {
-            inputs[i].disabled = !enabled;
-        }
-        settings.style.opacity = enabled ? '1' : '0.5';
+        view.querySelector('.tmdbSettings').style.display = enabled ? '' : 'none';
     }
 
     function updateDispatcharrVisibility(view) {
         var enabled = view.querySelector('.chkEnableDispatcharr').checked;
-        var settings = view.querySelector('.dispatcharrSettings');
-        var inputs = settings.querySelectorAll('input');
-        var disabledTitle = enabled ? '' : 'Enable Dispatcharr above to configure';
-        for (var i = 0; i < inputs.length; i++) {
-            inputs[i].disabled = !enabled;
-            inputs[i].title    = disabledTitle;
-        }
-        settings.style.opacity = enabled ? '1' : '0.5';
-        view.querySelector('.btnTestDispatcharr').disabled = !enabled;
-        view.querySelector('.btnTestDispatcharr').title    = disabledTitle;
+        view.querySelector('.dispatcharrSettings').style.display = enabled ? '' : 'none';
     }
 
     function updateEpgVisibility(view) {
         var enabled = view.querySelector('.chkEnableEpg').checked;
-        var settings = view.querySelector('.epgSettings');
-        var inputs = settings.querySelectorAll('input');
-        for (var i = 0; i < inputs.length; i++) {
-            inputs[i].disabled = !enabled;
-        }
-        settings.style.opacity = enabled ? '1' : '0.5';
+        view.querySelector('.epgSettings').style.display = enabled ? '' : 'none';
     }
 
     function updateCatchupVisibility(view) {
         var enabled = view.querySelector('.chkEnableCatchup').checked;
-        var settings = view.querySelector('.catchupSettings');
-        var inputs = settings.querySelectorAll('input');
-        for (var i = 0; i < inputs.length; i++) {
-            inputs[i].disabled = !enabled;
-        }
-        settings.style.opacity = enabled ? '1' : '0.5';
+        view.querySelector('.catchupSettings').style.display = enabled ? '' : 'none';
     }
 
     function updateNameCleaningVisibility(view) {
         var enabled = view.querySelector('.chkEnableNameCleaning').checked;
-        var settings = view.querySelector('.nameCleaningSettings');
-        var inputs = settings.querySelectorAll('input, textarea');
-        for (var i = 0; i < inputs.length; i++) {
-            inputs[i].disabled = !enabled;
-        }
-        settings.style.opacity = enabled ? '1' : '0.5';
+        view.querySelector('.nameCleaningSettings').style.display = enabled ? '' : 'none';
     }
 
     function updateVodMovieVisibility(view) {
         var enabled = view.querySelector('.chkSyncMovies').checked;
-        var settings = view.querySelector('.vodMovieSettings');
-        var disabledTitle = enabled ? '' : 'Enable VOD Movies above to configure';
-        var inputs = settings.querySelectorAll('input, select, textarea');
-        for (var i = 0; i < inputs.length; i++) {
-            inputs[i].disabled = !enabled;
-            inputs[i].title    = disabledTitle;
-        }
-        var buttons = settings.querySelectorAll('button');
-        for (var i = 0; i < buttons.length; i++) {
-            buttons[i].disabled = !enabled;
-            buttons[i].title    = disabledTitle;
-        }
-        settings.style.opacity = enabled ? '1' : '0.5';
+        view.querySelector('.vodMovieSettings').style.display = enabled ? '' : 'none';
     }
 
     function updateSeriesVisibility(view) {
         var enabled = view.querySelector('.chkSyncSeries').checked;
-        var settings = view.querySelector('.seriesSettings');
-        var disabledTitle = enabled ? '' : 'Enable Series above to configure';
-        var inputs = settings.querySelectorAll('input, select, textarea');
-        for (var i = 0; i < inputs.length; i++) {
-            inputs[i].disabled = !enabled;
-            inputs[i].title    = disabledTitle;
-        }
-        var buttons = settings.querySelectorAll('button');
-        for (var i = 0; i < buttons.length; i++) {
-            buttons[i].disabled = !enabled;
-            buttons[i].title    = disabledTitle;
-        }
-        settings.style.opacity = enabled ? '1' : '0.5';
+        view.querySelector('.seriesSettings').style.display = enabled ? '' : 'none';
     }
 
     function updateFoldersVisibility(view, type) {
-        var selClass = type === 'movie' ? '.selMovieFolderMode' : '.selSeriesFolderMode';
-        var singleClass = type === 'movie' ? '.movieSingleContainer' : '.seriesSingleContainer';
-        var multiClass = type === 'movie' ? '.movieFoldersContainer' : '.seriesFoldersContainer';
+        var selClass    = type === 'movie' ? '.selMovieFolderMode'      : '.selSeriesFolderMode';
+        var singleClass = type === 'movie' ? '.movieSingleContainer'    : '.seriesSingleContainer';
+        var multiClass  = type === 'movie' ? '.movieFoldersContainer'   : '.seriesFoldersContainer';
+        var listClass   = type === 'movie' ? '.movieFoldersList'        : '.seriesFoldersList';
+        var addBtnClass = type === 'movie' ? '.btnAddMovieFolder'       : '.btnAddSeriesFolder';
         var mode = view.querySelector(selClass).value;
-        view.querySelector(singleClass).style.display = mode === 'single' ? 'block' : 'none';
-        view.querySelector(multiClass).style.display = mode === 'custom' ? 'block' : 'none';
+        var isMulti = mode === 'custom';
+        view.querySelector(singleClass).style.display  = isMulti ? 'none'  : 'block';
+        view.querySelector(multiClass).style.display   = isMulti ? 'block' : 'none';
+        view.querySelector(listClass).style.display    = isMulti ? ''      : 'none';
+        view.querySelector(addBtnClass).style.display  = isMulti ? ''      : 'none';
     }
 
     function updateAutoSyncVisibility(v) {
@@ -691,7 +643,7 @@ function (BaseView, loading) {
         var card = document.createElement('div');
         card.className = 'folderCard';
         card.setAttribute('data-checked-ids', checkedIdsStr || '');
-        card.style.cssText = 'border:1px solid rgba(128,128,128,0.2); border-radius:6px; padding:1em; margin-bottom:1em;';
+        card.style.cssText = 'background:rgba(128,128,128,0.04); border:1px solid rgba(128,128,128,0.15); border-radius:8px; padding:1.2em 1.4em; margin-bottom:1em;';
 
         // Header: name input + remove button
         var header = document.createElement('div');
@@ -700,7 +652,7 @@ function (BaseView, loading) {
         var nameInput = document.createElement('input');
         nameInput.type = 'text';
         nameInput.className = 'folderCardName';
-        nameInput.placeholder = 'e.g. Netflix';
+        nameInput.placeholder = 'e.g. Drama';
         nameInput.value = name;
         nameInput.style.cssText = 'flex:1; padding:0.5em 0.8em; background:transparent; border:1px solid rgba(128,128,128,0.25); border-radius:4px; color:inherit; font-size:1em;';
 
@@ -1851,24 +1803,69 @@ function (BaseView, loading) {
             return '<div style="font-size:0.75em; font-weight:600; opacity:0.45; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.35em;">' + text + '</div>';
         }
 
+        var mAdded = movieEntry ? (movieEntry.MoviesAdded || 0) : 0;
+        var mDeleted = movieEntry ? (movieEntry.MoviesDeleted || 0) : 0;
+        var sAdded = seriesEntry ? (seriesEntry.SeriesAdded || 0) : 0;
+        var sDeleted = seriesEntry ? (seriesEntry.SeriesDeleted || 0) : 0;
+
+        // Single shared 5-column grid so Movies and Episodes tiles are always the same width
         var statsHtml = '';
-        if (movieEntry) {
-            var movieTiles =
-                statTile(movieEntry.MoviesTotal, 'Total') +
-                (movieEntry.MoviesAdded > 0 ? statTile('+' + movieEntry.MoviesAdded, 'New') : '') +
-                statTile(movieEntry.MoviesSkipped, 'Skipped') +
-                statTile(movieEntry.MoviesFailed, 'Failed', movieEntry.MoviesFailed > 0 ? '#cc0000' : '#52B54B') +
-                (movieEntry.MoviesDeleted > 0 ? statTile(movieEntry.MoviesDeleted, 'Deleted', '#e74c3c') : '');
-            statsHtml += '<div style="margin-bottom:0.7em;">' + rowLabel('Movies') + '<div style="display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0.5em;">' + movieTiles + '</div></div>';
+        if (movieEntry || seriesEntry) {
+            statsHtml += '<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:0.5em;">';
+
+            if (movieEntry) {
+                statsHtml += '<div style="grid-column:1/-1;">' + rowLabel('Movies') + '</div>';
+                statsHtml +=
+                    statTile(movieEntry.MoviesTotal, 'Total') +
+                    statTile(movieEntry.MoviesSkipped, 'Up to date', '#aaa') +
+                    statTile(mAdded > 0 ? '+' + mAdded : '0', 'Added', mAdded > 0 ? '#52B54B' : '#aaa') +
+                    statTile(mDeleted > 0 ? mDeleted : '0', 'Deleted', mDeleted > 0 ? '#e74c3c' : '#aaa') +
+                    statTile(movieEntry.MoviesFailed, 'Failed', movieEntry.MoviesFailed > 0 ? '#cc0000' : '#52B54B');
+            }
+
+            if (seriesEntry) {
+                statsHtml += '<div style="grid-column:1/-1;">' + rowLabel('Episodes') + '</div>';
+                statsHtml +=
+                    statTile(seriesEntry.SeriesTotal, 'Total') +
+                    statTile(seriesEntry.SeriesSkipped, 'Up to date', '#aaa') +
+                    statTile(sAdded > 0 ? '+' + sAdded : '0', 'Added', sAdded > 0 ? '#52B54B' : '#aaa') +
+                    statTile(sDeleted > 0 ? sDeleted : '0', 'Deleted', sDeleted > 0 ? '#e74c3c' : '#aaa') +
+                    statTile(seriesEntry.SeriesFailed, 'Failed', seriesEntry.SeriesFailed > 0 ? '#cc0000' : '#52B54B');
+            }
+
+            statsHtml += '</div>';
         }
-        if (seriesEntry) {
-            var seriesTiles =
-                statTile(seriesEntry.SeriesTotal, 'Total') +
-                (seriesEntry.SeriesAdded > 0 ? statTile('+' + seriesEntry.SeriesAdded, 'New') : '') +
-                statTile(seriesEntry.SeriesSkipped, 'Skipped') +
-                statTile(seriesEntry.SeriesFailed, 'Failed', seriesEntry.SeriesFailed > 0 ? '#cc0000' : '#52B54B') +
-                (seriesEntry.SeriesDeleted > 0 ? statTile(seriesEntry.SeriesDeleted, 'Deleted', '#e74c3c') : '');
-            statsHtml += '<div>' + rowLabel('Episodes') + '<div style="display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0.5em;">' + seriesTiles + '</div></div>';
+
+        // Expandable added-title lists (outside the shared grid)
+        if (movieEntry && mAdded > 0 && movieEntry.AddedMovieTitles && movieEntry.AddedMovieTitles.length > 0) {
+            statsHtml += '<details style="margin-top:0.3em; margin-bottom:0.4em; font-size:0.82em; opacity:0.65;">' +
+                '<summary style="cursor:pointer; list-style:none;">Show added movie titles</summary>' +
+                '<ul style="margin:0.3em 0 0 1em; padding:0;">' +
+                movieEntry.AddedMovieTitles.map(function(t) { return '<li>' + escapeHtml(t) + '</li>'; }).join('') +
+                (mAdded > movieEntry.AddedMovieTitles.length
+                    ? '<li style="opacity:0.5;">\u2026and ' + (mAdded - movieEntry.AddedMovieTitles.length) + ' more</li>'
+                    : '') +
+                '</ul></details>';
+        }
+        if (seriesEntry && sAdded > 0 && seriesEntry.AddedSeriesTitles && seriesEntry.AddedSeriesTitles.length > 0) {
+            statsHtml += '<details style="margin-top:0.3em; font-size:0.82em; opacity:0.65;">' +
+                '<summary style="cursor:pointer; list-style:none;">Show added series titles</summary>' +
+                '<ul style="margin:0.3em 0 0 1em; padding:0;">' +
+                seriesEntry.AddedSeriesTitles.map(function(t) { return '<li>' + escapeHtml(t) + '</li>'; }).join('') +
+                (sAdded > seriesEntry.AddedSeriesTitles.length
+                    ? '<li style="opacity:0.5;">\u2026and ' + (sAdded - seriesEntry.AddedSeriesTitles.length) + ' more</li>'
+                    : '') +
+                '</ul></details>';
+        }
+
+        if (data.AutoSyncOn && data.NextSyncTime) {
+            var delta = new Date(data.NextSyncTime) - new Date();
+            if (delta > 0) {
+                var hrs = Math.floor(delta / 3600000);
+                var mins = Math.floor((delta % 3600000) / 60000);
+                var nextText = hrs > 0 ? 'Next sync in ' + hrs + 'h ' + mins + 'm' : 'Next sync in ' + mins + 'm';
+                statsHtml += '<div style="margin-top:0.6em; font-size:0.82em; opacity:0.5;">' + nextText + '</div>';
+            }
         }
 
         if (statsHtml) {
@@ -1883,15 +1880,30 @@ function (BaseView, loading) {
         var container = view.querySelector('.dashboardLibraryContent');
         var stats = data.LibraryStats || {};
 
-        container.innerHTML =
-            '<div class="library-stat-bar">' +
-                '<div class="stat-count">' + (stats.MovieFolders || 0) + '</div>' +
-                '<div class="stat-type">Movie folders</div>' +
-            '</div>' +
-            '<div class="library-stat-bar">' +
-                '<div class="stat-count">' + (stats.SeriesFolders || 0) + '</div>' +
-                '<div class="stat-type">Series folders</div>' +
+        function libTile(value, label, sub, extraStyle) {
+            return '<div class="dashboard-stat"' + (extraStyle ? ' style="' + extraStyle + '"' : '') + '>' +
+                '<div class="stat-value">' + value + '</div>' +
+                '<div class="stat-label">' + label +
+                    (sub ? '<br><span style="opacity:0.5; font-size:0.85em;">' + sub + '</span>' : '') +
+                '</div>' +
             '</div>';
+        }
+
+        // 3-column grid: Movies spans all 3 columns (row 1), series tiles fill one each (row 2)
+        var html = '<div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 0.5em;">';
+        html += libTile(stats.MovieCount || 0, 'Movies', null, 'grid-column: 1 / -1;');
+        html += libTile(stats.SeriesCount || 0, 'Shows');
+        html += libTile(stats.SeasonCount || 0, 'Seasons');
+        html += libTile(stats.EpisodeCount || 0, 'Episodes');
+        html += '</div>';
+
+        if (stats.LiveTvChannels > 0) {
+            html += '<div style="margin-top:0.5em;">' +
+                libTile(stats.LiveTvChannels, 'Live TV channels') +
+            '</div>';
+        }
+
+        container.innerHTML = html;
     }
 
     function renderDashboardHistory(view, data) {

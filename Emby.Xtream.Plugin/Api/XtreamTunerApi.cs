@@ -203,12 +203,19 @@ namespace Emby.Xtream.Plugin.Api
         public List<SyncHistoryEntry> History { get; set; }
         public bool IsRunning { get; set; }
         public LibraryStats LibraryStats { get; set; }
+        public bool AutoSyncOn { get; set; }
+        public DateTime? NextSyncTime { get; set; }
     }
 
     public class LibraryStats
     {
-        public int MovieFolders { get; set; }
-        public int SeriesFolders { get; set; }
+        public int MovieFolders   { get; set; }
+        public int MovieCount     { get; set; }
+        public int SeriesFolders  { get; set; }
+        public int SeriesCount    { get; set; }
+        public int SeasonCount    { get; set; }
+        public int EpisodeCount   { get; set; }
+        public int LiveTvChannels { get; set; }
     }
 
     public class XtreamTunerApi : BaseApiService
@@ -478,7 +485,10 @@ namespace Emby.Xtream.Plugin.Api
             var history = syncService.GetSyncHistory();
 
             var movieFolders = 0;
-            var seriesFolders = 0;
+            var movieCount = 0;
+            var seriesCount = 0;
+            var seasonCount = 0;
+            var episodeCount = 0;
 
             try
             {
@@ -486,29 +496,69 @@ namespace Emby.Xtream.Plugin.Api
                 if (Directory.Exists(moviesRoot))
                 {
                     movieFolders = Directory.GetDirectories(moviesRoot, "*", SearchOption.TopDirectoryOnly).Length;
+                    movieCount = Directory.GetFiles(moviesRoot, "*.strm", SearchOption.AllDirectories).Length;
                 }
             }
             catch { }
 
             try
             {
-                var seriesRoot = Path.Combine(config.StrmLibraryPath, "Shows");
-                if (Directory.Exists(seriesRoot))
+                var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");
+                if (Directory.Exists(showsRoot))
                 {
-                    seriesFolders = Directory.GetDirectories(seriesRoot, "*", SearchOption.TopDirectoryOnly).Length;
+                    var seriesDirs = Directory.GetDirectories(showsRoot, "*", SearchOption.TopDirectoryOnly);
+                    seriesCount = seriesDirs.Length;
+                    foreach (var seriesDir in seriesDirs)
+                    {
+                        try
+                        {
+                            seasonCount += Directory.GetDirectories(seriesDir, "*", SearchOption.TopDirectoryOnly).Length;
+                        }
+                        catch { }
+                    }
+                    episodeCount = Directory.GetFiles(showsRoot, "*.strm", SearchOption.AllDirectories).Length;
                 }
             }
             catch { }
+
+            // Compute next sync time
+            DateTime? nextSyncTime = null;
+            if (config.AutoSyncEnabled)
+            {
+                if (string.Equals(config.AutoSyncMode, "daily", StringComparison.OrdinalIgnoreCase))
+                {
+                    var parts = (config.AutoSyncDailyTime ?? "03:00").Split(':');
+                    int hour = 0, minute = 0;
+                    if (parts.Length >= 1) int.TryParse(parts[0], out hour);
+                    if (parts.Length >= 2) int.TryParse(parts[1], out minute);
+                    var nextLocal = DateTime.Today.AddHours(hour).AddMinutes(minute);
+                    if (nextLocal <= DateTime.Now) nextLocal = nextLocal.AddDays(1);
+                    nextSyncTime = nextLocal.ToUniversalTime();
+                }
+                else
+                {
+                    var intervalHours = Math.Max(1, config.AutoSyncIntervalHours);
+                    var lastEnd = history.Count > 0 ? history[0].EndTime : DateTime.UtcNow;
+                    nextSyncTime = lastEnd.AddHours(intervalHours);
+                }
+            }
 
             return new DashboardResult
             {
                 LastSync = history.Count > 0 ? history[0] : null,
                 History = history,
                 IsRunning = syncService.MovieProgress.IsRunning || syncService.SeriesProgress.IsRunning,
+                AutoSyncOn = config.AutoSyncEnabled,
+                NextSyncTime = nextSyncTime,
                 LibraryStats = new LibraryStats
                 {
-                    MovieFolders = movieFolders,
-                    SeriesFolders = seriesFolders,
+                    MovieFolders   = movieFolders,
+                    MovieCount     = movieCount,
+                    SeriesFolders  = seriesCount,
+                    SeriesCount    = seriesCount,
+                    SeasonCount    = seasonCount,
+                    EpisodeCount   = episodeCount,
+                    LiveTvChannels = Emby.Xtream.Plugin.Service.XtreamTunerHost.Instance?.CachedChannelCount ?? 0,
                 },
             };
         }
