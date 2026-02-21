@@ -16,6 +16,7 @@
                         grid-template-columns: 1fr 1fr;
                         gap: 1.2em;
                         margin-bottom: 1.5em;
+                        align-items: stretch;
                     }
                     @media (max-width: 700px) {
                         .dashboard-grid { grid-template-columns: 1fr; }
@@ -25,6 +26,8 @@
                         border: 1px solid rgba(128,128,128,0.15);
                         border-radius: 8px;
                         padding: 1.2em;
+                        display: flex;
+                        flex-direction: column;
                     }
                     .dashboard-card h3 {
                         margin: 0 0 0.8em 0;
@@ -63,19 +66,33 @@
                     }
                     .dashboard-stat {
                         text-align: center;
-                        padding: 0.6em;
+                        padding: 0.5em 0.6em;
                         background: rgba(128,128,128,0.06);
                         border-radius: 6px;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: flex-end;
                     }
                     .dashboard-stat .stat-value {
                         font-size: 1.5em;
                         font-weight: 700;
                         color: #52B54B;
+                        line-height: 1.1;
                     }
                     .dashboard-stat .stat-label {
                         font-size: 0.8em;
                         opacity: 0.6;
-                        margin-top: 0.2em;
+                        margin-top: 0.25em;
+                        min-height: 2.2em;
+                        display: flex;
+                        align-items: flex-start;
+                    }
+                    .dashboard-card .dashboardLibraryContent {
+                        flex: 1;
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: center;
                     }
                     .library-stat-bar {
                         display: flex;
@@ -232,6 +249,32 @@
                         margin-bottom: 0.4em;
                     }
                     .category-count-badge.zero-selected { color: #e67e22; opacity: 1; }
+
+                    /* ---- Settings, Live TV, Movies & Series section cards ---- */
+                    .tabGeneric .verticalSection,
+                    .tabLiveTv .verticalSection,
+                    .tabMovies .verticalSection,
+                    .tabSeries .verticalSection {
+                        background: rgba(128,128,128,0.04);
+                        border: 1px solid rgba(128,128,128,0.15);
+                        border-radius: 8px;
+                        padding: 1.2em 1.4em 1.2em 1.4em;
+                        margin-bottom: 1em;
+                    }
+                    .tabGeneric .verticalSection h2.sectionTitle,
+                    .tabLiveTv .verticalSection h2.sectionTitle,
+                    .tabMovies .verticalSection h2.sectionTitle,
+                    .tabSeries .verticalSection h2.sectionTitle {
+                        margin: 0 0 0.9em 0;
+                        padding-bottom: 0.6em;
+                        border-bottom: 1px solid rgba(128,128,128,0.15);
+                        font-size: 1em;
+                        font-weight: 700;
+                        text-transform: none;
+                        letter-spacing: 0;
+                        opacity: 0.9;
+                    }
+                    .tabGeneric hr { display: none; }
                 </style>
 
                 <div class="configTabs" style="display:flex; gap:0; margin-bottom:1.5em; border-bottom:2px solid rgba(128,128,128,0.15);">
@@ -280,8 +323,7 @@
                 </div>
 
                 <div class="verticalSection">
-                    <h2 class="sectionTitle" style="display:inline;">Dashboard</h2>
-                    <span class="pluginVersion" style="font-size:0.8em; opacity:0.5; margin-left:0.6em;"></span>
+                    <span class="pluginVersion" style="font-size:0.8em; opacity:0.5;"></span>
 
                     <!-- System Health Bar -->
                     <div class="dashboardHealthBar" style="display:flex; gap:1.5em; align-items:center; padding:0.6em 0.8em; margin-bottom:1em; background:rgba(128,128,128,0.05); border:1px solid rgba(128,128,128,0.1); border-radius:6px; flex-wrap:wrap; font-size:0.88em;">
@@ -501,7 +543,8 @@
                         <div class="inputContainer">
                             <textarea class="txtRemoveTerms" is="emby-input"
                                       label="Additional Terms to Remove (one per line)"
-                                      rows="4" style="resize:vertical;"></textarea>
+                                      rows="4" style="resize:vertical;"
+                                      placeholder="4K&#10;HDR&#10;REMASTERED"></textarea>
                             <div class="fieldDescription">
                                 Extra terms to strip from movie, series, and channel names, one per line.
                                 The built-in pattern automatically removes ┃XX┃ style tags.
@@ -545,10 +588,11 @@
                         <div class="inputContainer">
                             <textarea class="txtTvdbFolderIdOverrides" is="emby-input"
                                       label="Manual ID Overrides (one per line)"
-                                      rows="4" style="resize:vertical;"></textarea>
+                                      rows="4" style="resize:vertical;"
+                                      placeholder="Crime Drama (2022)=12345&#10;Sci-Fi Series (2019)=67890"></textarea>
                             <div class="fieldDescription">
                                 Override IDs for specific series. Format: FolderName=TvdbID, one per line.
-                                Example: Breaking Bad (2008)=81189. Overrides take highest priority.
+                                Overrides take highest priority.
                             </div>
                         </div>
                     </div>
@@ -628,7 +672,6 @@
                 <div class="tabPanel tabMovies" style="display:none;">
 
                 <div class="verticalSection">
-                    <h2 class="sectionTitle">VOD Movies</h2>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label>
                             <input class="chkSyncMovies" type="checkbox" is="emby-checkbox" />
@@ -638,7 +681,10 @@
                             Generate STRM files for VOD movies from the Xtream server.
                         </div>
                     </div>
-                    <div class="vodMovieSettings">
+                </div>
+
+                <div class="vodMovieSettings">
+                <div class="verticalSection">
                         <select class="selMovieFolderMode" style="display:none;">
                             <option value="single">Single Folder</option>
                             <option value="custom">Multiple Folders</option>
@@ -653,9 +699,9 @@
                             <div class="folder-mode-card" data-mode="custom">
                                 <div class="folder-mode-card-title">Multiple Folders <span class="folder-mode-card-check">&#10003;</span></div>
                                 <pre>Movies/
-&#9500;&#9472; Action/
+&#9500;&#9472; English/
 &#9474;  &#9492;&#9472; Film A.strm
-&#9492;&#9472; Netflix/
+&#9492;&#9472; 4K/
    &#9492;&#9472; Film B.strm</pre>
                             </div>
                         </div>
@@ -687,22 +733,23 @@
                             </div>
                         </div>
 
-                        <!-- Multiple folders mode: folder-based category assignment -->
+                        <!-- Multiple folders mode: header + refresh -->
                         <div class="movieFoldersContainer" style="display:none;">
                             <div class="fieldDescription" style="margin-bottom:0.5em;">
                                 Create folders and assign categories to each. Categories can be in multiple folders.
                             </div>
-                            <div style="margin-bottom:1em;">
+                            <div style="margin-bottom:0;">
                                 <button class="btnLoadVodCategoriesMulti raised button-secondary" is="emby-button" type="button" style="border:1px solid rgba(128,128,128,0.25);">
                                     <span>&#x21bb; Refresh Categories</span>
                                 </button>
                                 <span class="vodCategoriesMultiStatus" style="margin-left:0.5em; color:#52B54B;"></span>
                             </div>
-                            <div class="movieFoldersList"></div>
-                            <button class="btnAddMovieFolder raised button-secondary" is="emby-button" type="button" style="margin-top:0.5em;">
-                                <span>+ Add Folder</span>
-                            </button>
                         </div>
+                </div><!-- end settings card -->
+                <div class="movieFoldersList"></div>
+                <button class="btnAddMovieFolder raised button-secondary" is="emby-button" type="button" style="margin-top:0.5em; margin-bottom:1em; display:none;">
+                    <span>+ Add Folder</span>
+                </button>
 
                         <div style="margin-top:1em;">
                             <button class="btnSyncMovies raised button-submit block" is="emby-button" type="button">
@@ -725,15 +772,14 @@
                             </div>
                         </div>
                     </div>
-                </div>
 
                 </div><!-- end tabMovies -->
+
 
                 <!-- ===== Series ===== -->
                 <div class="tabPanel tabSeries" style="display:none;">
 
                 <div class="verticalSection">
-                    <h2 class="sectionTitle">Series / TV Shows</h2>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label>
                             <input class="chkSyncSeries" type="checkbox" is="emby-checkbox" />
@@ -743,7 +789,10 @@
                             Generate STRM files for series/TV shows with season and episode structure.
                         </div>
                     </div>
-                    <div class="seriesSettings">
+                </div>
+
+                <div class="seriesSettings">
+                <div class="verticalSection">
                         <select class="selSeriesFolderMode" style="display:none;">
                             <option value="single">Single Folder</option>
                             <option value="custom">Multiple Folders</option>
@@ -752,16 +801,16 @@
                             <div class="folder-mode-card" data-mode="single">
                                 <div class="folder-mode-card-title">Single Folder <span class="folder-mode-card-check">&#10003;</span></div>
                                 <pre>Shows/
-&#9500;&#9472; Breaking Bad (2008)/
-&#9492;&#9472; The Wire (2002)/</pre>
+&#9500;&#9472; Crime Drama (2022)/
+&#9492;&#9472; Sci-Fi Series (2019)/</pre>
                             </div>
                             <div class="folder-mode-card" data-mode="custom">
                                 <div class="folder-mode-card-title">Multiple Folders <span class="folder-mode-card-check">&#10003;</span></div>
                                 <pre>Shows/
-&#9500;&#9472; Netflix/
-&#9474;  &#9492;&#9472; Breaking Bad/
-&#9492;&#9472; 4K HDR/
-   &#9492;&#9472; The Wire/</pre>
+&#9500;&#9472; Spanish/
+&#9474;  &#9492;&#9472; Drama Series/
+&#9492;&#9472; HD/
+   &#9492;&#9472; Sci-Fi Show/</pre>
                             </div>
                         </div>
 
@@ -792,22 +841,23 @@
                             </div>
                         </div>
 
-                        <!-- Multiple folders mode: folder-based category assignment -->
+                        <!-- Multiple folders mode: header + refresh -->
                         <div class="seriesFoldersContainer" style="display:none;">
                             <div class="fieldDescription" style="margin-bottom:0.5em;">
                                 Create folders and assign categories to each. Categories can be in multiple folders.
                             </div>
-                            <div style="margin-bottom:1em;">
+                            <div style="margin-bottom:0;">
                                 <button class="btnLoadSeriesCategoriesMulti raised button-secondary" is="emby-button" type="button" style="border:1px solid rgba(128,128,128,0.25);">
                                     <span>&#x21bb; Refresh Categories</span>
                                 </button>
                                 <span class="seriesCategoriesMultiStatus" style="margin-left:0.5em; color:#52B54B;"></span>
                             </div>
-                            <div class="seriesFoldersList"></div>
-                            <button class="btnAddSeriesFolder raised button-secondary" is="emby-button" type="button" style="margin-top:0.5em;">
-                                <span>+ Add Folder</span>
-                            </button>
                         </div>
+                </div><!-- end settings card -->
+                <div class="seriesFoldersList"></div>
+                <button class="btnAddSeriesFolder raised button-secondary" is="emby-button" type="button" style="margin-top:0.5em; margin-bottom:1em; display:none;">
+                    <span>+ Add Folder</span>
+                </button>
 
                         <div style="margin-top:1em;">
                             <button class="btnSyncSeries raised button-submit block" is="emby-button" type="button">
@@ -830,7 +880,6 @@
                             </div>
                         </div>
                     </div>
-                </div>
 
                 </div><!-- end tabSeries -->
 
@@ -861,15 +910,6 @@
                         <span>Refresh Channel &amp; EPG Cache</span>
                     </button>
                     <div class="refreshCacheResult" style="margin-top:0.5em;"></div>
-                    <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:1em;">
-                        <label>
-                            <input class="chkIncludeAdult" type="checkbox" is="emby-checkbox" />
-                            <span>Include Adult Channels</span>
-                        </label>
-                        <div class="fieldDescription checkboxFieldDescription">
-                            When enabled, adult-flagged channels will be included in the channel list.
-                        </div>
-                    </div>
                 </div>
 
                 <div class="verticalSection">
@@ -953,6 +993,15 @@
                     <div class="categoriesContainer" style="max-height:450px; overflow-y:auto; border:1px solid rgba(128,128,128,0.15); border-radius:4px; padding:0.5em;">
                         <div class="categoriesLoading" style="display:none; opacity:0.5;">Loading categories...</div>
                         <div class="categoriesList"></div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0.8em;">
+                        <label>
+                            <input class="chkIncludeAdult" type="checkbox" is="emby-checkbox" />
+                            <span>Include Adult Channels</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            When enabled, adult-flagged channels will be included in the channel list.
+                        </div>
                     </div>
                 </div>
 
