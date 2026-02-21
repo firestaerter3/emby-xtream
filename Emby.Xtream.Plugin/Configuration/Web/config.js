@@ -7,12 +7,15 @@ function (BaseView, loading) {
     function View(view, params) {
         BaseView.apply(this, arguments);
 
-        // Ensure spacing between path validation result and the next field.
-        // Done in JS so it is covered by the hash-based cache-busting on this file.
+        // Fix spacing between path validation result and Smart Skip checkbox.
+        // Direct style assignment overrides any inline styles from cached HTML.
         (function () {
-            var s = document.createElement('style');
-            s.textContent = '.strmPathValidationResult { margin-bottom: 0.8em !important; }';
-            document.head.appendChild(s);
+            var valDiv = view.querySelector('.strmPathValidationResult');
+            if (valDiv) {
+                valDiv.style.cssText = 'margin-top:0.25em; margin-bottom:1.2em; font-size:0.9em;';
+                var next = valDiv.nextElementSibling;
+                if (next) next.style.marginTop = '';
+            }
         }());
 
         this.loadedCategories = [];
@@ -246,6 +249,35 @@ function (BaseView, loading) {
         setupCategorySearch(view, '.seriesCategorySearch', '.seriesCategoriesList');
         setupCategorySearch(view, '.liveCategorySearch', '.categoriesList');
 
+        // Category checkbox change — live count badge updates
+        view.querySelector('.vodCategoriesContainer').addEventListener('change', function (e) {
+            if (e.target.classList.contains('vodCategoryCheckbox')) {
+                updateCategoryCountBadge(view, 'vod');
+            }
+        });
+        view.querySelector('.seriesCategoriesContainer').addEventListener('change', function (e) {
+            if (e.target.classList.contains('seriesCategoryCheckbox')) {
+                updateCategoryCountBadge(view, 'series');
+            }
+        });
+        view.querySelector('.categoriesContainer').addEventListener('change', function (e) {
+            if (e.target.classList.contains('categoryCheckbox')) {
+                updateCategoryCountBadge(view, 'live');
+            }
+        });
+
+        // Folder mode visual cards
+        initFolderModeCards(view, 'movie');
+        initFolderModeCards(view, 'series');
+
+        // Empty-state "Go to Settings" button
+        var btnGoToSettings = view.querySelector('.btnGoToSettings');
+        if (btnGoToSettings) {
+            btnGoToSettings.addEventListener('click', function () {
+                switchTab(view, 'generic');
+            });
+        }
+
         // Tab buttons
         var tabBtns = view.querySelectorAll('.tabBtn');
         for (var i = 0; i < tabBtns.length; i++) {
@@ -381,6 +413,15 @@ function (BaseView, loading) {
             updateFoldersVisibility(view, 'movie');
             updateFoldersVisibility(view, 'series');
 
+            // Sync folder mode card visuals to loaded select values
+            syncFolderModeCards(view, 'movie');
+            syncFolderModeCards(view, 'series');
+
+            // Health bar, auto-sync line, empty-state
+            renderHealthBar(view, config);
+            renderAutoSyncDashboardLine(view, config);
+            updateDashboardEmptyState(view, config);
+
             loading.hide();
 
             // Load cached categories from config (instant, no API call)
@@ -500,6 +541,10 @@ function (BaseView, loading) {
             btn.style.opacity = '1';
             btn.style.borderBottomColor = '#52B54B';
         }
+
+        // Hide Save button on Dashboard — nothing to save there
+        var footer = view.querySelector('.stickyFooter');
+        if (footer) footer.style.display = tabName === 'dashboard' ? 'none' : '';
     }
 
     function updateTmdbVisibility(view) {
@@ -516,11 +561,14 @@ function (BaseView, loading) {
         var enabled = view.querySelector('.chkEnableDispatcharr').checked;
         var settings = view.querySelector('.dispatcharrSettings');
         var inputs = settings.querySelectorAll('input');
+        var disabledTitle = enabled ? '' : 'Enable Dispatcharr above to configure';
         for (var i = 0; i < inputs.length; i++) {
             inputs[i].disabled = !enabled;
+            inputs[i].title    = disabledTitle;
         }
         settings.style.opacity = enabled ? '1' : '0.5';
         view.querySelector('.btnTestDispatcharr').disabled = !enabled;
+        view.querySelector('.btnTestDispatcharr').title    = disabledTitle;
     }
 
     function updateEpgVisibility(view) {
@@ -556,13 +604,16 @@ function (BaseView, loading) {
     function updateVodMovieVisibility(view) {
         var enabled = view.querySelector('.chkSyncMovies').checked;
         var settings = view.querySelector('.vodMovieSettings');
+        var disabledTitle = enabled ? '' : 'Enable VOD Movies above to configure';
         var inputs = settings.querySelectorAll('input, select, textarea');
         for (var i = 0; i < inputs.length; i++) {
             inputs[i].disabled = !enabled;
+            inputs[i].title    = disabledTitle;
         }
         var buttons = settings.querySelectorAll('button');
         for (var i = 0; i < buttons.length; i++) {
             buttons[i].disabled = !enabled;
+            buttons[i].title    = disabledTitle;
         }
         settings.style.opacity = enabled ? '1' : '0.5';
     }
@@ -570,13 +621,16 @@ function (BaseView, loading) {
     function updateSeriesVisibility(view) {
         var enabled = view.querySelector('.chkSyncSeries').checked;
         var settings = view.querySelector('.seriesSettings');
+        var disabledTitle = enabled ? '' : 'Enable Series above to configure';
         var inputs = settings.querySelectorAll('input, select, textarea');
         for (var i = 0; i < inputs.length; i++) {
             inputs[i].disabled = !enabled;
+            inputs[i].title    = disabledTitle;
         }
         var buttons = settings.querySelectorAll('button');
         for (var i = 0; i < buttons.length; i++) {
             buttons[i].disabled = !enabled;
+            buttons[i].title    = disabledTitle;
         }
         settings.style.opacity = enabled ? '1' : '0.5';
     }
@@ -646,7 +700,7 @@ function (BaseView, loading) {
         var nameInput = document.createElement('input');
         nameInput.type = 'text';
         nameInput.className = 'folderCardName';
-        nameInput.placeholder = 'Folder name';
+        nameInput.placeholder = 'e.g. Netflix';
         nameInput.value = name;
         nameInput.style.cssText = 'flex:1; padding:0.5em 0.8em; background:transparent; border:1px solid rgba(128,128,128,0.25); border-radius:4px; color:inherit; font-size:1em;';
 
@@ -786,7 +840,7 @@ function (BaseView, loading) {
         var pass = view.querySelector('.txtPassword').value;
 
         if (!url || !user || !pass) {
-            resultEl.innerHTML = '<span style="color:#cc0000;">Please enter server URL, username, and password.</span>';
+            setPillResult(resultEl, false, 'Please enter server URL, username, and password.');
             return;
         }
 
@@ -801,31 +855,32 @@ function (BaseView, loading) {
                     var resp = JSON.parse(xhr.responseText);
                     if (resp.user_info) {
                         var status = resp.user_info.status || 'unknown';
-                        var msg = 'Connection successful! Status: ' + status;
+                        var msg = 'Connected as ' + user + ' — status: ' + status;
                         if (resp.user_info.active_cons !== undefined) {
-                            msg += ', Active connections: ' + resp.user_info.active_cons;
+                            msg += ', ' + resp.user_info.active_cons;
+                            if (resp.user_info.max_connections !== undefined) {
+                                msg += '/' + resp.user_info.max_connections;
+                            }
+                            msg += ' active streams';
                         }
-                        if (resp.user_info.max_connections !== undefined) {
-                            msg += '/' + resp.user_info.max_connections;
-                        }
-                        resultEl.innerHTML = '<span style="color:#52B54B;">' + msg + '</span>';
+                        setPillResult(resultEl, true, msg);
                     } else {
-                        resultEl.innerHTML = '<span style="color:#52B54B;">Connection successful!</span>';
+                        setPillResult(resultEl, true, 'Connection successful!');
                     }
                 } catch (e) {
-                    resultEl.innerHTML = '<span style="color:#52B54B;">Connection successful (non-JSON response).</span>';
+                    setPillResult(resultEl, true, 'Connection successful (non-JSON response).');
                 }
             } else {
-                resultEl.innerHTML = '<span style="color:#cc0000;">Connection failed (HTTP ' + xhr.status + ').</span>';
+                setPillResult(resultEl, false, 'Connection failed (HTTP ' + xhr.status + ').');
             }
         };
 
         xhr.onerror = function () {
-            resultEl.innerHTML = '<span style="color:#cc0000;">Connection failed. Check URL and ensure server is reachable.</span>';
+            setPillResult(resultEl, false, 'Connection failed. Check URL and ensure server is reachable.');
         };
 
         xhr.ontimeout = function () {
-            resultEl.innerHTML = '<span style="color:#cc0000;">Connection timed out.</span>';
+            setPillResult(resultEl, false, 'Connection timed out.');
         };
 
         xhr.send();
@@ -870,7 +925,7 @@ function (BaseView, loading) {
         var isRoot = !result.CurrentPath;
 
         if (!isRoot) {
-            var upRow = createBrowserRow('\u2191', '..', function () {
+            var upRow = createBrowserRow('', '../  Parent directory', function () {
                 browserNavigate(view, result.ParentPath || null);
             });
             listEl.appendChild(upRow);
@@ -880,7 +935,7 @@ function (BaseView, loading) {
             result.Directories.forEach(function (dir) {
                 var parts = dir.replace(/\\/g, '/').split('/').filter(function (p) { return p.length > 0; });
                 var name = parts.length > 0 ? parts[parts.length - 1] : dir;
-                var row = createBrowserRow('\uD83D\uDCC1', name, function () {
+                var row = createBrowserRow('\u2192', name, function () {
                     browserNavigate(view, dir);
                 });
                 listEl.appendChild(row);
@@ -927,11 +982,9 @@ function (BaseView, loading) {
             data: JSON.stringify({ Path: path }),
             dataType: 'json'
         }).then(function (result) {
-            var color = result.Success ? '#52B54B' : '#cc0000';
-            var icon = result.Success ? '✓' : '✗';
-            resultEl.innerHTML = '<span style="color:' + color + ';">' + icon + ' ' + escapeHtml(result.Message) + '</span>';
+            setPillResult(resultEl, result.Success, result.Message);
         }).catch(function () {
-            resultEl.innerHTML = '<span style="color:#cc0000;">✗ Validation request failed.</span>';
+            setPillResult(resultEl, false, 'Validation request failed.');
         });
     }
 
@@ -947,10 +1000,9 @@ function (BaseView, loading) {
                 url: ApiClient.getUrl('XtreamTuner/TestDispatcharr'),
                 dataType: 'json'
             }).then(function (result) {
-                var color = result.Success ? '#52B54B' : '#cc0000';
-                resultEl.innerHTML = '<span style="color:' + color + ';">' + escapeHtml(result.Message) + '</span>';
+                setPillResult(resultEl, result.Success, result.Message);
             }).catch(function () {
-                resultEl.innerHTML = '<span style="color:#cc0000;">Test request failed. Check server logs.</span>';
+                setPillResult(resultEl, false, 'Test request failed. Check server logs.');
             });
         });
     }
@@ -972,7 +1024,9 @@ function (BaseView, loading) {
                     view.querySelector('.btnSelectAllVodCategories').disabled = false;
                     view.querySelector('.btnDeselectAllVodCategories').disabled = false;
                     var statusEl = view.querySelector('.vodCategoriesStatus');
-                    if (statusEl) statusEl.textContent = vodCats.length + ' categories';
+                    if (statusEl) statusEl.textContent = '';
+                    updateCategoryCountBadge(view, 'vod');
+
                     populateFolderCheckboxes(view, 'movie', vodCats);
                 }
             } catch (e) { /* ignore parse errors */ }
@@ -997,7 +1051,9 @@ function (BaseView, loading) {
                     view.querySelector('.btnSelectAllSeriesCategories').disabled = false;
                     view.querySelector('.btnDeselectAllSeriesCategories').disabled = false;
                     var statusEl = view.querySelector('.seriesCategoriesStatus');
-                    if (statusEl) statusEl.textContent = seriesCats.length + ' categories';
+                    if (statusEl) statusEl.textContent = '';
+                    updateCategoryCountBadge(view, 'series');
+
                     populateFolderCheckboxes(view, 'series', seriesCats);
                 }
             } catch (e) { /* ignore parse errors */ }
@@ -1019,6 +1075,8 @@ function (BaseView, loading) {
                     renderCategoryList(view, '.categoriesList', liveCats, 'categoryCheckbox', instance.selectedCategoryIds);
                     view.querySelector('.btnSelectAllCategories').disabled = false;
                     view.querySelector('.btnDeselectAllCategories').disabled = false;
+                    updateCategoryCountBadge(view, 'live');
+
                 }
             } catch (e) { /* ignore parse errors */ }
         }
@@ -1077,6 +1135,7 @@ function (BaseView, loading) {
 
             view.querySelector('.btnSelectAllCategories').disabled = false;
             view.querySelector('.btnDeselectAllCategories').disabled = false;
+            updateCategoryCountBadge(view, 'live');
         }).catch(function () {
             loadingEl.style.display = 'none';
             listEl.innerHTML = '<div style="color:#cc0000;">Failed to load categories. Save your connection settings first, then try again.</div>';
@@ -1088,6 +1147,7 @@ function (BaseView, loading) {
         for (var i = 0; i < checkboxes.length; i++) {
             checkboxes[i].checked = checked;
         }
+        updateCategoryCountBadge(view, 'live');
     }
 
     function getSelectedCategoryIds(instance) {
@@ -1127,7 +1187,7 @@ function (BaseView, loading) {
                 return;
             }
 
-            statusEl.textContent = 'Loaded ' + categories.length + ' categories';
+            if (statusEl) statusEl.textContent = '';
 
             var html = '';
             for (var i = 0; i < categories.length; i++) {
@@ -1144,6 +1204,7 @@ function (BaseView, loading) {
 
             view.querySelector('.btnSelectAllVodCategories').disabled = false;
             view.querySelector('.btnDeselectAllVodCategories').disabled = false;
+            updateCategoryCountBadge(view, 'vod');
         }).catch(function () {
             loadingEl.style.display = 'none';
             listEl.innerHTML = '<div style="color:#cc0000;">Failed to load VOD categories. Save your connection settings first, then try again.</div>';
@@ -1155,6 +1216,7 @@ function (BaseView, loading) {
         for (var i = 0; i < checkboxes.length; i++) {
             checkboxes[i].checked = checked;
         }
+        updateCategoryCountBadge(view, 'vod');
     }
 
     // ---- VOD Categories (multi/folder mode) ----
@@ -1246,7 +1308,7 @@ function (BaseView, loading) {
                 return;
             }
 
-            statusEl.textContent = 'Loaded ' + categories.length + ' categories';
+            if (statusEl) statusEl.textContent = '';
 
             var html = '';
             for (var i = 0; i < categories.length; i++) {
@@ -1263,6 +1325,7 @@ function (BaseView, loading) {
 
             view.querySelector('.btnSelectAllSeriesCategories').disabled = false;
             view.querySelector('.btnDeselectAllSeriesCategories').disabled = false;
+            updateCategoryCountBadge(view, 'series');
         }).catch(function () {
             loadingEl.style.display = 'none';
             listEl.innerHTML = '<div style="color:#cc0000;">Failed to load series categories. Save your connection settings first, then try again.</div>';
@@ -1274,6 +1337,7 @@ function (BaseView, loading) {
         for (var i = 0; i < checkboxes.length; i++) {
             checkboxes[i].checked = checked;
         }
+        updateCategoryCountBadge(view, 'series');
     }
 
     // ---- Series Categories (multi/folder mode) ----
@@ -1399,16 +1463,14 @@ function (BaseView, loading) {
         }).then(function (result) {
             clearInterval(pollId);
             btn.disabled = false;
-            if (result.Success) {
-                resultEl.innerHTML = '<span style="color:#52B54B;">' + escapeHtml(result.Message) +
-                    ' (Total: ' + result.Total + ', Skipped: ' + result.Skipped + ', Failed: ' + result.Failed + ')</span>';
-            } else {
-                resultEl.innerHTML = '<span style="color:#cc0000;">' + escapeHtml(result.Message) + '</span>';
-            }
+            var msg = result.Success
+                ? result.Message + ' (Total: ' + result.Total + ', Skipped: ' + result.Skipped + ', Failed: ' + result.Failed + ')'
+                : result.Message;
+            setPillResult(resultEl, result.Success, msg);
         }).catch(function () {
             clearInterval(pollId);
             btn.disabled = false;
-            resultEl.innerHTML = '<span style="color:#cc0000;">Movie sync request failed. Check server logs for details.</span>';
+            setPillResult(resultEl, false, 'Movie sync request failed. Check server logs for details.');
         });
     }
 
@@ -1428,16 +1490,14 @@ function (BaseView, loading) {
         }).then(function (result) {
             clearInterval(pollId);
             btn.disabled = false;
-            if (result.Success) {
-                resultEl.innerHTML = '<span style="color:#52B54B;">' + escapeHtml(result.Message) +
-                    ' (Total: ' + result.Total + ', Skipped: ' + result.Skipped + ', Failed: ' + result.Failed + ')</span>';
-            } else {
-                resultEl.innerHTML = '<span style="color:#cc0000;">' + escapeHtml(result.Message) + '</span>';
-            }
+            var msg = result.Success
+                ? result.Message + ' (Total: ' + result.Total + ', Skipped: ' + result.Skipped + ', Failed: ' + result.Failed + ')'
+                : result.Message;
+            setPillResult(resultEl, result.Success, msg);
         }).catch(function () {
             clearInterval(pollId);
             btn.disabled = false;
-            resultEl.innerHTML = '<span style="color:#cc0000;">Series sync request failed. Check server logs for details.</span>';
+            setPillResult(resultEl, false, 'Series sync request failed. Check server logs for details.');
         });
     }
 
@@ -1448,29 +1508,33 @@ function (BaseView, loading) {
         var resultEl = view.querySelector(resultClass);
         var btn = view.querySelector(btnClass);
 
-        if (!confirm('Are you sure you want to delete ALL ' + label + '? This cannot be undone.')) {
-            return;
-        }
+        // Inline confirm instead of window.confirm
+        resultEl.innerHTML =
+            '<div style="display:flex; gap:0.5em; align-items:center; flex-wrap:wrap; margin-top:0.3em;">' +
+            '<span style="font-size:0.9em; opacity:0.7;">Delete ALL ' + label + '? This cannot be undone.</span>' +
+            '<button type="button" class="deleteConfirmYes" style="background:#c0392b; color:white; border:none; border-radius:4px; padding:0.3em 0.8em; font-size:0.85em; cursor:pointer; font-weight:600;">Yes, delete all</button>' +
+            '<button type="button" class="deleteConfirmNo button-secondary" style="font-size:0.85em; padding:0.3em 0.8em; border:1px solid rgba(128,128,128,0.3); border-radius:4px; background:transparent; color:inherit; cursor:pointer;">Cancel</button>' +
+            '</div>';
 
-        btn.disabled = true;
-        resultEl.innerHTML = '<span style="opacity:0.5;">Deleting ' + label + '...</span>';
+        resultEl.querySelector('.deleteConfirmNo').addEventListener('click', function () {
+            resultEl.innerHTML = '';
+        });
 
-        var apiUrl = ApiClient.getUrl('XtreamTuner/Content/' + type);
+        resultEl.querySelector('.deleteConfirmYes').addEventListener('click', function () {
+            btn.disabled = true;
+            resultEl.innerHTML = '<span style="opacity:0.5;">Deleting ' + label + '...</span>';
 
-        ApiClient.ajax({
-            type: 'DELETE',
-            url: apiUrl,
-            dataType: 'json'
-        }).then(function (result) {
-            btn.disabled = false;
-            if (result.Success) {
-                resultEl.innerHTML = '<span style="color:#52B54B;">' + escapeHtml(result.Message) + '</span>';
-            } else {
-                resultEl.innerHTML = '<span style="color:#cc0000;">' + escapeHtml(result.Message) + '</span>';
-            }
-        }).catch(function () {
-            btn.disabled = false;
-            resultEl.innerHTML = '<span style="color:#cc0000;">Delete request failed. Check server logs.</span>';
+            ApiClient.ajax({
+                type: 'DELETE',
+                url: ApiClient.getUrl('XtreamTuner/Content/' + type),
+                dataType: 'json'
+            }).then(function (result) {
+                btn.disabled = false;
+                setPillResult(resultEl, result.Success, result.Message);
+            }).catch(function () {
+                btn.disabled = false;
+                setPillResult(resultEl, false, 'Delete request failed. Check server logs.');
+            });
         });
     }
 
@@ -1484,9 +1548,9 @@ function (BaseView, loading) {
             type: 'POST',
             url: apiUrl
         }).then(function () {
-            resultEl.innerHTML = '<span style="color:#52B54B;">Cache refreshed successfully!</span>';
+            setPillResult(resultEl, true, 'Cache refreshed successfully!');
         }).catch(function () {
-            resultEl.innerHTML = '<span style="color:#cc0000;">Failed to refresh cache.</span>';
+            setPillResult(resultEl, false, 'Failed to refresh cache.');
         });
     }
 
@@ -1832,8 +1896,10 @@ function (BaseView, loading) {
 
     function renderDashboardHistory(view, data) {
         var container = view.querySelector('.dashboardHistoryContent');
+        var hasHistory = !!(data.History && data.History.length > 0);
+        updateSyncCTAEmphasis(view, hasHistory);
 
-        if (!data.History || data.History.length === 0) {
+        if (!hasHistory) {
             container.innerHTML = '<div style="opacity:0.5;">No sync history yet</div>';
             return;
         }
@@ -1965,7 +2031,7 @@ function (BaseView, loading) {
 
             if (!doMovies && !doSeries) {
                 btn.disabled = false;
-                resultEl.innerHTML = '<span style="color:#cc0000;">Nothing to sync. Enable Movies or Series sync in Settings first.</span>';
+                setPillResult(resultEl, false, 'Nothing to sync. Enable Movies or Series sync in Settings first.');
                 return;
             }
 
@@ -2003,28 +2069,26 @@ function (BaseView, loading) {
                         if (movieMsg) parts.push(movieMsg);
                         parts.push(seriesMsg);
                         var overallSuccess = (!movieResult || movieResult.Success) && seriesResult.Success;
-                        var color = overallSuccess ? '#52B54B' : '#cc0000';
-                        resultEl.innerHTML = '<span style="color:' + color + ';">' + escapeHtml(parts.join(' | ')) + '</span>';
+                        setPillResult(resultEl, overallSuccess, parts.join(' | '));
                         loadDashboard(view);
                     });
                 } else {
                     stopDashboardProgressPolling();
                     view.querySelector('.dashboardLiveProgress').style.display = 'none';
                     btn.disabled = false;
-                    var color = movieResult && movieResult.Success ? '#52B54B' : '#cc0000';
-                    resultEl.innerHTML = '<span style="color:' + color + ';">' + escapeHtml(movieMsg) + '</span>';
+                    setPillResult(resultEl, !!(movieResult && movieResult.Success), movieMsg);
                     loadDashboard(view);
                 }
             }).catch(function () {
                 stopDashboardProgressPolling();
                 view.querySelector('.dashboardLiveProgress').style.display = 'none';
                 btn.disabled = false;
-                resultEl.innerHTML = '<span style="color:#cc0000;">Sync request failed. Check server logs.</span>';
+                setPillResult(resultEl, false, 'Sync request failed. Check server logs.');
                 loadDashboard(view);
             });
         }).catch(function () {
             btn.disabled = false;
-            resultEl.innerHTML = '<span style="color:#cc0000;">Failed to load config.</span>';
+            setPillResult(resultEl, false, 'Failed to load config.');
         });
     }
 
@@ -2054,6 +2118,214 @@ function (BaseView, loading) {
         var div = document.createElement('div');
         div.appendChild(document.createTextNode(text));
         return div.innerHTML;
+    }
+
+    // ---- UX helpers ----
+
+    function setPillResult(el, isSuccess, message) {
+        var cls = isSuccess ? 'success' : 'error';
+        var icon = isSuccess ? '\u2713' : '\u2717';
+        el.innerHTML = '<span class="result-pill ' + cls + '">' + icon + '  ' + escapeHtml(message) + '</span>';
+    }
+
+
+    function updateCategoryCountBadge(view, type) {
+        var map = {
+            vod:    { badge: '.vodCategoryCountBadge',    checkbox: '.vodCategoryCheckbox' },
+            series: { badge: '.seriesCategoryCountBadge', checkbox: '.seriesCategoryCheckbox' },
+            live:   { badge: '.liveCategoryCountBadge',   checkbox: '.categoryCheckbox' }
+        };
+        var entry = map[type];
+        if (!entry) return;
+        var badge = view.querySelector(entry.badge);
+        if (!badge) return;
+        var total    = view.querySelectorAll(entry.checkbox).length;
+        var selected = view.querySelectorAll(entry.checkbox + ':checked').length;
+        if (total === 0) { badge.style.display = 'none'; return; }
+        badge.querySelector('.countSelected').textContent = selected;
+        badge.querySelector('.countTotal').textContent    = total;
+        badge.style.display = '';
+        badge.classList.toggle('zero-selected', selected === 0);
+    }
+
+    function renderHealthBar(view, config) {
+        var xtreamItem      = view.querySelector('.healthItemXtream');
+        var dispatcharrItem = view.querySelector('.healthItemDispatcharr');
+        var syncItem        = view.querySelector('.healthItemLastSync');
+        if (!xtreamItem) return;
+
+        // Xtream dot
+        var xtreamOk = !!(config.BaseUrl && config.Username);
+        setHealthDot(xtreamItem, xtreamOk ? 'ok' : 'grey');
+        xtreamItem.querySelector('.healthLabel').textContent = xtreamOk
+            ? 'Xtream: Connected (' + config.Username + ')'
+            : 'Xtream: Not configured';
+
+        // Dispatcharr dot
+        var dispatcharrOn = !!config.EnableDispatcharr;
+        setHealthDot(dispatcharrItem, dispatcharrOn ? 'ok' : 'grey');
+        dispatcharrItem.querySelector('.healthLabel').textContent = dispatcharrOn
+            ? 'Dispatcharr: Active'
+            : 'Dispatcharr: Disabled';
+
+        // Last sync dot — prefer SyncHistoryJson[0].EndTime (updated on every sync),
+        // fall back to LastMovieSyncTimestamp (may be Unix epoch int or ISO string).
+        var syncLabel = 'Last Sync: Never';
+        var syncOk = false;
+        var syncDate = null;
+
+        // Primary: SyncHistoryJson[0].EndTime (ISO string, always current)
+        try {
+            var hist = config.SyncHistoryJson ? JSON.parse(config.SyncHistoryJson) : null;
+            if (hist && hist.length > 0) {
+                var et = new Date(hist[0].EndTime);
+                if (!isNaN(et.getTime())) syncDate = et;
+            }
+        } catch (e) { /* ignore parse errors */ }
+
+        // Fallback: LastMovieSyncTimestamp (numeric Unix epoch seconds or ISO string)
+        if (!syncDate) {
+            var lastTs = config.LastMovieSyncTimestamp;
+            if (lastTs && /^\d+$/.test(String(lastTs))) {
+                var epoch = parseInt(lastTs, 10);
+                if (epoch > 0) syncDate = new Date(epoch * 1000);
+            } else if (lastTs && String(lastTs).indexOf('0001') !== 0) {
+                var parsed = new Date(lastTs);
+                if (!isNaN(parsed.getTime())) syncDate = parsed;
+            }
+        }
+
+        if (syncDate) {
+            syncOk = true;
+            syncLabel = 'Last Sync: ' + formatTimeAgo(syncDate);
+        }
+        setHealthDot(syncItem, syncOk ? 'ok' : 'grey');
+        syncItem.querySelector('.healthLabel').textContent = syncLabel;
+    }
+
+    function setHealthDot(itemEl, status) {
+        var dot = itemEl.querySelector('.healthDot');
+        if (!dot) return;
+        var colours = { ok: '#52B54B', error: '#cc0000', grey: '#888' };
+        dot.style.background = colours[status] || colours.grey;
+    }
+
+    function updateDashboardEmptyState(view, config) {
+        var unconfigured = view.querySelector('.dashboardEmptyStateUnconfigured');
+        var noCategories = view.querySelector('.dashboardEmptyStateNoCategories');
+        var grid         = view.querySelector('.dashboard-grid');
+        if (!unconfigured || !grid) return;
+
+        var isConfigured = !!(config.BaseUrl && config.Username);
+        var hasContent   = !!(config.SyncMovies || config.SyncSeries || config.EnableLiveTv);
+
+        if (!isConfigured) {
+            unconfigured.style.display = '';
+            noCategories.style.display = 'none';
+            grid.style.display = 'none';
+        } else if (!hasContent) {
+            unconfigured.style.display = 'none';
+            noCategories.style.display = '';
+            grid.style.display = '';
+        } else {
+            unconfigured.style.display = 'none';
+            noCategories.style.display = 'none';
+            grid.style.display = '';
+        }
+    }
+
+    function renderAutoSyncDashboardLine(view, config) {
+        var el = view.querySelector('.dashboardAutoSyncLine');
+        if (!el) return;
+        if (!config.AutoSyncEnabled) {
+            el.innerHTML = 'Auto-sync: Off \u00a0\u2014\u00a0<a class="lnkGoToAutoSync" href="#" style="color:inherit; text-decoration:underline;">Enable in Settings</a>';
+        } else {
+            var interval = config.AutoSyncIntervalHours || 24;
+            var nextText = '';
+            var lastTs = config.LastMovieSyncTimestamp;
+            if (lastTs && lastTs.indexOf('0001') !== 0) {
+                var lastDate = new Date(lastTs);
+                if (!isNaN(lastDate.getTime())) {
+                    var diff = new Date(lastDate.getTime() + interval * 3600000) - new Date();
+                    if (diff > 0) {
+                        var h = Math.floor(diff / 3600000);
+                        var m = Math.floor((diff % 3600000) / 60000);
+                        nextText = ' \u2014 next run in ' + (h > 0 ? h + 'h ' : '') + m + 'm';
+                    } else {
+                        nextText = ' \u2014 overdue';
+                    }
+                }
+            }
+            el.textContent = 'Auto-sync: Every ' + interval + 'h' + nextText;
+        }
+        var link = el.querySelector('.lnkGoToAutoSync');
+        if (link) {
+            link.addEventListener('click', function (e) {
+                e.preventDefault();
+                switchTab(view, 'generic');
+            });
+        }
+    }
+
+    function updateSyncCTAEmphasis(view, hasHistory) {
+        var btn  = view.querySelector('.btnDashboardSyncAll');
+        var hint = view.querySelector('.syncNoCTAHint');
+        if (!btn) return;
+        if (!hasHistory) {
+            btn.classList.add('block');
+            if (hint) hint.style.display = '';
+        } else {
+            btn.classList.remove('block');
+            if (hint) hint.style.display = 'none';
+        }
+    }
+
+    function initFolderModeCards(view, type) {
+        var containerClass = type === 'movie' ? '.movieFolderModeCards' : '.seriesFolderModeCards';
+        var selectClass    = type === 'movie' ? '.selMovieFolderMode'   : '.selSeriesFolderMode';
+        var container = view.querySelector(containerClass);
+        var select    = view.querySelector(selectClass);
+        if (!container || !select) return;
+
+        var cards = container.querySelectorAll('.folder-mode-card');
+
+        function activateCard(val) {
+            for (var i = 0; i < cards.length; i++) {
+                cards[i].classList.toggle('active', cards[i].getAttribute('data-mode') === val);
+            }
+        }
+
+        for (var i = 0; i < cards.length; i++) {
+            (function (card) {
+                card.addEventListener('click', function () {
+                    select.value = card.getAttribute('data-mode');
+                    activateCard(select.value);
+                    var evt;
+                    if (typeof Event === 'function') {
+                        evt = new Event('change', { bubbles: true });
+                    } else {
+                        evt = document.createEvent('Event');
+                        evt.initEvent('change', true, true);
+                    }
+                    select.dispatchEvent(evt);
+                });
+            })(cards[i]);
+        }
+
+        activateCard(select.value);
+    }
+
+    function syncFolderModeCards(view, type) {
+        var containerClass = type === 'movie' ? '.movieFolderModeCards' : '.seriesFolderModeCards';
+        var selectClass    = type === 'movie' ? '.selMovieFolderMode'   : '.selSeriesFolderMode';
+        var container = view.querySelector(containerClass);
+        var select    = view.querySelector(selectClass);
+        if (!container || !select) return;
+        var val   = select.value;
+        var cards = container.querySelectorAll('.folder-mode-card');
+        for (var i = 0; i < cards.length; i++) {
+            cards[i].classList.toggle('active', cards[i].getAttribute('data-mode') === val);
+        }
     }
 
     return View;

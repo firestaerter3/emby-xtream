@@ -81,7 +81,7 @@ namespace Emby.Xtream.Plugin.Service
 
         private readonly ILogger _logger;
         private readonly TmdbLookupService _tmdbLookupService;
-        private readonly List<SyncHistoryEntry> _syncHistory = new List<SyncHistoryEntry>();
+        private List<SyncHistoryEntry> _syncHistory;
         private readonly object _historyLock = new object();
         private readonly List<FailedSyncItem> _failedItems = new List<FailedSyncItem>();
         private readonly object _failedItemsLock = new object();
@@ -129,11 +129,35 @@ namespace Emby.Xtream.Plugin.Service
             get { lock (_failedItemsLock) { return _failedItems.ToList(); } }
         }
 
+        // Lazy-loaded from PluginConfiguration.SyncHistoryJson so history survives restarts.
+        // Must be called inside _historyLock.
+        private List<SyncHistoryEntry> GetOrLoadHistory()
+        {
+            if (_syncHistory != null) return _syncHistory;
+
+            _syncHistory = new List<SyncHistoryEntry>();
+            try
+            {
+                var json = Plugin.Instance?.Configuration?.SyncHistoryJson;
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    var loaded = STJ.JsonSerializer.Deserialize<List<SyncHistoryEntry>>(json, JsonOptions);
+                    if (loaded != null) _syncHistory.AddRange(loaded);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug("Failed to load sync history from config: {0}", ex.Message);
+            }
+
+            return _syncHistory;
+        }
+
         public List<SyncHistoryEntry> GetSyncHistory()
         {
             lock (_historyLock)
             {
-                return new List<SyncHistoryEntry>(_syncHistory);
+                return new List<SyncHistoryEntry>(GetOrLoadHistory());
             }
         }
 
@@ -930,10 +954,11 @@ namespace Emby.Xtream.Plugin.Service
             string historyJson;
             lock (_historyLock)
             {
-                _syncHistory.Insert(0, entry);
-                while (_syncHistory.Count > MaxHistoryEntries)
+                var history = GetOrLoadHistory();
+                history.Insert(0, entry);
+                while (history.Count > MaxHistoryEntries)
                 {
-                    _syncHistory.RemoveAt(_syncHistory.Count - 1);
+                    history.RemoveAt(history.Count - 1);
                 }
                 historyJson = STJ.JsonSerializer.Serialize(_syncHistory, JsonOptions);
             }
