@@ -464,7 +464,7 @@ namespace Emby.Xtream.Plugin.Service
                 mediaStreams.Add(new MediaStream
                 {
                     Type = MediaStreamType.Audio,
-                    Index = -1,
+                    Index = 1,
                     Codec = !string.IsNullOrEmpty(stats.AudioCodec)
                         ? stats.AudioCodec.ToLowerInvariant()
                         : null,
