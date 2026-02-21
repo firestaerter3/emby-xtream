@@ -275,6 +275,16 @@
                         <div class="dashboardSyncAllResult" style="margin-top:0.5em;"></div>
                     </div>
 
+                    <!-- Failed Items (hidden when empty) -->
+                    <div class="dashboardFailedItemsCard dashboard-card" style="display:none; border-color:rgba(204,0,0,0.3);">
+                        <h3 style="color:#cc4444;">Failed Items</h3>
+                        <div class="dashboardFailedItemsContent"></div>
+                        <button class="btnRetryFailed raised button-submit" is="emby-button" type="button" style="margin-top:0.8em;">
+                            <span>Retry Failed Items</span>
+                        </button>
+                        <div class="retryFailedResult" style="margin-top:0.5em;"></div>
+                    </div>
+
                     <!-- Sync History -->
                     <div class="dashboard-card">
                         <h3>Sync History</h3>
