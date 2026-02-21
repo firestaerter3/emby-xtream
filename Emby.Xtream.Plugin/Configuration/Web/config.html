@@ -855,7 +855,11 @@
                             Stream container format. MPEG-TS is recommended for lower latency.
                         </div>
                     </div>
-                    <div class="checkboxContainer checkboxContainer-withDescription">
+                    <button class="btnRefreshCache raised button-secondary" is="emby-button" type="button" style="margin-top:0.5em;">
+                        <span>Refresh Channel &amp; EPG Cache</span>
+                    </button>
+                    <div class="refreshCacheResult" style="margin-top:0.5em;"></div>
+                    <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:1em;">
                         <label>
                             <input class="chkIncludeAdult" type="checkbox" is="emby-checkbox" />
                             <span>Include Adult Channels</span>
@@ -864,10 +868,6 @@
                             When enabled, adult-flagged channels will be included in the channel list.
                         </div>
                     </div>
-                    <button class="btnRefreshCache raised button-secondary" is="emby-button" type="button" style="margin-top:0.5em;">
-                        <span>Refresh Channel &amp; EPG Cache</span>
-                    </button>
-                    <div class="refreshCacheResult" style="margin-top:0.5em;"></div>
                 </div>
 
                 <div class="verticalSection">
