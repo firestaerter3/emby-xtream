@@ -56,7 +56,7 @@ namespace Emby.Xtream.Plugin.Service
             if (_stream == null)
                 throw new InvalidOperationException("Stream not opened. Call Open() first.");
 
-            var buffer = new byte[81920];
+            var buffer = new byte[262144];
             try
             {
                 while (!cancellationToken.IsCancellationRequested)
@@ -89,7 +89,7 @@ namespace Emby.Xtream.Plugin.Service
             if (_stream == null)
                 throw new InvalidOperationException("Stream not opened. Call Open() first.");
 
-            await _stream.CopyToAsync(writer, 81920, cancellationToken).ConfigureAwait(false);
+            await _stream.CopyToAsync(writer, 262144, cancellationToken).ConfigureAwait(false);
         }
 
         public void Dispose()
