@@ -426,6 +426,9 @@ function (BaseView, loading) {
 
             // Load cached categories from config (instant, no API call)
             loadCachedCategories(instance, config);
+
+            // Check for updates after config is applied so UseBetaChannel is correct
+            checkForUpdate(view);
         }).catch(function () {
             loading.hide();
             console.error('Xtream: failed to load plugin configuration');
@@ -1532,7 +1535,6 @@ function (BaseView, loading) {
         });
 
         loadFailedItems(view);
-        checkForUpdate(view);
     }
 
     function loadFailedItems(view) {
