@@ -342,6 +342,7 @@ function (BaseView, loading) {
             view.querySelector('.chkCleanupOrphans').checked = !!config.CleanupOrphans;
             view.querySelector('.txtOrphanSafetyThreshold').value = Math.round((config.OrphanSafetyThreshold || 0.20) * 100);
             view.querySelector('.orphanThresholdContainer').style.display = config.CleanupOrphans ? '' : 'none';
+            view.querySelector('.chkEnableNfoFiles').checked = !!config.EnableNfoFiles;
 
             // Auto-sync schedule
             view.querySelector('.chkAutoSyncEnabled').checked = !!config.AutoSyncEnabled;
@@ -435,6 +436,7 @@ function (BaseView, loading) {
             config.SyncParallelism = parseInt(view.querySelector('.txtSyncParallelism').value, 10) || 3;
             config.CleanupOrphans = view.querySelector('.chkCleanupOrphans').checked;
             config.OrphanSafetyThreshold = (parseInt(view.querySelector('.txtOrphanSafetyThreshold').value, 10) || 0) / 100;
+            config.EnableNfoFiles = view.querySelector('.chkEnableNfoFiles').checked;
 
             // Auto-sync schedule
             config.AutoSyncEnabled = view.querySelector('.chkAutoSyncEnabled').checked;
