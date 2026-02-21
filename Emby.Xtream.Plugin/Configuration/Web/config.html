@@ -478,6 +478,57 @@
                 </div>
 
                 <div class="verticalSection">
+                    <h2 class="sectionTitle">Dispatcharr Integration</h2>
+                    <div class="fieldDescription" style="margin-bottom:0.8em;">
+                        <a href="https://github.com/Dispatcharr/Dispatcharr" target="_blank" rel="noopener" style="color:#52B54B;">Dispatcharr</a>
+                        is an open-source IPTV stream proxy. When enabled, it applies to Live TV, VOD movies, and series:
+                        faster channel switching via FFprobe bypass, stream proxying, reconnect handling, and multiple
+                        quality versions per movie (when multiple provider streams exist).
+                        <br /><br />
+                        <strong>Requires Streamflow:</strong> Per-channel codec and resolution metadata is only
+                        available when <a href="https://github.com/krinkuto11/streamflow" target="_blank" rel="noopener" style="color:#52B54B;">Streamflow</a> is enabled and configured inside Dispatcharr.
+                        Without it, stream stats will not be populated and FFprobe bypass will not apply.
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkEnableDispatcharr" type="checkbox" is="emby-checkbox" />
+                            <span>Enable Dispatcharr</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Route Live TV, VOD movies, and series through Dispatcharr for FFprobe bypass,
+                            stream proxying, and multi-version STRM support.
+                        </div>
+                    </div>
+                    <div class="dispatcharrSettings">
+                        <div class="inputContainer">
+                            <input class="txtDispatcharrUrl" type="text" is="emby-input"
+                                   label="Dispatcharr URL (e.g. http://example.com:5656)" />
+                        </div>
+                        <div class="inputContainer">
+                            <input class="txtDispatcharrUser" type="text" is="emby-input"
+                                   label="Dispatcharr Username" />
+                        </div>
+                        <div class="inputContainer">
+                            <input class="txtDispatcharrPass" type="password" is="emby-input"
+                                   label="Dispatcharr Password" />
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0.5em;">
+                            <label>
+                                <input class="chkDispatcharrFallback" type="checkbox" is="emby-checkbox" />
+                                <span>Fall back to direct Xtream URLs</span>
+                            </label>
+                            <div class="fieldDescription">
+                                If Dispatcharr is unavailable, use direct Xtream URLs instead. Disable to ensure all streams go through Dispatcharr.
+                            </div>
+                        </div>
+                        <button class="btnTestDispatcharr raised button-secondary" is="emby-button" type="button">
+                            <span>Test Dispatcharr Connection</span>
+                        </button>
+                        <div class="dispatcharrTestResult" style="margin-top:0.5em;"></div>
+                    </div>
+                </div>
+
+                <div class="verticalSection">
                     <h2 class="sectionTitle">Updates</h2>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label>
@@ -714,56 +765,6 @@
                         <span>Refresh Channel &amp; EPG Cache</span>
                     </button>
                     <div class="refreshCacheResult" style="margin-top:0.5em;"></div>
-                </div>
-
-                <div class="verticalSection">
-                    <h2 class="sectionTitle">Dispatcharr Integration</h2>
-                    <div class="fieldDescription" style="margin-bottom:0.8em;">
-                        <a href="https://github.com/Dispatcharr/Dispatcharr" target="_blank" rel="noopener" style="color:#52B54B;">Dispatcharr</a>
-                        is an open-source IPTV stream proxy. It provides faster channel switching by supplying
-                        codec/resolution data upfront (skipping FFprobe), and handles stream proxying and reconnects.
-                        <br /><br />
-                        <strong>Requires Streamflow:</strong> Per-channel codec and resolution metadata is only
-                        available when <a href="https://github.com/krinkuto11/streamflow" target="_blank" rel="noopener" style="color:#52B54B;">Streamflow</a> is enabled and configured inside Dispatcharr.
-                        Without it, stream stats will not be populated and FFprobe bypass will not apply.
-                    </div>
-                    <div class="checkboxContainer checkboxContainer-withDescription">
-                        <label>
-                            <input class="chkEnableDispatcharr" type="checkbox" is="emby-checkbox" />
-                            <span>Enable Dispatcharr</span>
-                        </label>
-                        <div class="fieldDescription checkboxFieldDescription">
-                            Fetch stream stats (codec, resolution, FPS) from Dispatcharr to skip FFprobe
-                            and speed up channel switching.
-                        </div>
-                    </div>
-                    <div class="dispatcharrSettings">
-                        <div class="inputContainer">
-                            <input class="txtDispatcharrUrl" type="text" is="emby-input"
-                                   label="Dispatcharr URL (e.g. http://example.com:5656)" />
-                        </div>
-                        <div class="inputContainer">
-                            <input class="txtDispatcharrUser" type="text" is="emby-input"
-                                   label="Dispatcharr Username" />
-                        </div>
-                        <div class="inputContainer">
-                            <input class="txtDispatcharrPass" type="password" is="emby-input"
-                                   label="Dispatcharr Password" />
-                        </div>
-                        <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0.5em;">
-                            <label>
-                                <input class="chkDispatcharrFallback" type="checkbox" is="emby-checkbox" />
-                                <span>Fall back to direct Xtream URLs</span>
-                            </label>
-                            <div class="fieldDescription">
-                                If Dispatcharr is unavailable, use direct Xtream URLs instead. Disable to ensure all streams go through Dispatcharr.
-                            </div>
-                        </div>
-                        <button class="btnTestDispatcharr raised button-secondary" is="emby-button" type="button">
-                            <span>Test Dispatcharr Connection</span>
-                        </button>
-                        <div class="dispatcharrTestResult" style="margin-top:0.5em;"></div>
-                    </div>
                 </div>
 
                 <div class="verticalSection">
