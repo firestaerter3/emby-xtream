@@ -61,7 +61,7 @@ namespace Emby.Xtream.Plugin
             {
                 new PluginPageInfo
                 {
-                    Name = "xtreamconfig",
+                    Name = GetHtmlPageName(),
                     EmbeddedResourcePath = "Emby.Xtream.Plugin.Configuration.Web.config.html",
                     IsMainConfigPage = true,
                     EnableInMainMenu = true,
@@ -76,30 +76,45 @@ namespace Emby.Xtream.Plugin
         }
 
         /// <summary>
+        /// Returns a content-hashed page name for config.html. Since config.html is stamped
+        /// with the JS hash at build time, this hash changes whenever either file changes.
+        /// Emby generates the settings link by calling GetPages() at runtime, so the link
+        /// is always current — users never hit a stale cached URL after a plugin update.
+        /// </summary>
+        private static string GetHtmlPageName()
+        {
+            return GetEmbeddedResourcePageName("Emby.Xtream.Plugin.Configuration.Web.config.html", "xtreamconfig");
+        }
+
+        /// <summary>
         /// Returns a stable JS page name derived from an 8-char MD5 hash of the embedded
         /// config.js content. The build script stamps the same hash into config.html's
         /// data-controller, so the browser always loads a fresh JS URL after each build.
         /// </summary>
         private static string GetJsPageName()
         {
+            return GetEmbeddedResourcePageName("Emby.Xtream.Plugin.Configuration.Web.config.js", "xtreamconfigjs");
+        }
+
+        private static string GetEmbeddedResourcePageName(string resourcePath, string fallback)
+        {
             try
             {
-                using (var stream = typeof(Plugin).Assembly.GetManifestResourceStream(
-                    "Emby.Xtream.Plugin.Configuration.Web.config.js"))
+                using (var stream = typeof(Plugin).Assembly.GetManifestResourceStream(resourcePath))
                 {
-                    if (stream == null) return "xtreamconfigjs";
+                    if (stream == null) return fallback;
                     using (var md5 = MD5.Create())
                     {
                         var hash = md5.ComputeHash(stream);
                         var slug = BitConverter.ToString(hash).Replace("-", string.Empty)
                                                .Substring(0, 8).ToLowerInvariant();
-                        return "xtreamconfigjs" + slug;
+                        return fallback + slug;
                     }
                 }
             }
             catch
             {
-                return "xtreamconfigjs";
+                return fallback;
             }
         }
     }
