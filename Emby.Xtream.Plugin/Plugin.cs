@@ -76,14 +76,14 @@ namespace Emby.Xtream.Plugin
         }
 
         /// <summary>
-        /// Returns a content-hashed page name for config.html. Since config.html is stamped
-        /// with the JS hash at build time, this hash changes whenever either file changes.
-        /// Emby generates the settings link by calling GetPages() at runtime, so the link
-        /// is always current — users never hit a stale cached URL after a plugin update.
+        /// Returns a stable page name for config.html. Must never change between versions —
+        /// if it did, the Emby SPA would navigate to a stale URL after a banner install and
+        /// show "error processing request" because the old page name no longer exists in the
+        /// new DLL. JS cache-busting is handled separately via GetJsPageName().
         /// </summary>
         private static string GetHtmlPageName()
         {
-            return GetEmbeddedResourcePageName("Emby.Xtream.Plugin.Configuration.Web.config.html", "xtreamconfig");
+            return "xtreamconfig";
         }
 
         /// <summary>
