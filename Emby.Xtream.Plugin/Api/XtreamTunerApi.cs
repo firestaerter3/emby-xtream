@@ -113,6 +113,16 @@ namespace Emby.Xtream.Plugin.Api
         public bool? Beta { get; set; }
     }
 
+    [Route("/XtreamTuner/Sync/FailedItems", "GET", Summary = "Returns items that failed during the last sync")]
+    public class GetFailedItems : IReturn<List<FailedSyncItem>>
+    {
+    }
+
+    [Route("/XtreamTuner/Sync/RetryFailed", "POST", Summary = "Retries all items that failed during the last sync")]
+    public class RetryFailed : IReturn<SyncResult>
+    {
+    }
+
     [Route("/XtreamTuner/Logs", "GET", Summary = "Downloads sanitized plugin logs")]
     public class GetSanitizedLogs : IReturnVoid
     {
@@ -433,6 +443,31 @@ namespace Emby.Xtream.Plugin.Api
                     Failed = seriesProg.Failed,
                     IsRunning = seriesProg.IsRunning,
                 },
+            };
+        }
+
+        public object Get(GetFailedItems request)
+        {
+            return Plugin.Instance.StrmSyncService.FailedItems.ToList();
+        }
+
+        public async Task<object> Post(RetryFailed request)
+        {
+            var syncService = Plugin.Instance.StrmSyncService;
+            if (syncService.MovieProgress.IsRunning || syncService.SeriesProgress.IsRunning)
+                return new SyncResult { Success = false, Message = "A sync is already running." };
+            if (syncService.FailedItems.Count == 0)
+                return new SyncResult { Success = false, Message = "No failed items to retry." };
+
+            await syncService.RetryFailedAsync(CancellationToken.None).ConfigureAwait(false);
+            var p = syncService.MovieProgress;
+            return new SyncResult
+            {
+                Success = true,
+                Message = "Retry complete.",
+                Total = p.Total,
+                Completed = p.Completed,
+                Failed = p.Failed
             };
         }
 

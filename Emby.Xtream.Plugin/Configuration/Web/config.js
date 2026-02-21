@@ -193,6 +193,11 @@ function (BaseView, loading) {
             dashboardSyncAll(self);
         });
 
+        // Retry failed items button
+        view.querySelector('.btnRetryFailed').addEventListener('click', function () {
+            retryFailed(view);
+        });
+
         // Download sanitized log button
         view.querySelector('.btnDownloadLog').addEventListener('click', function () {
             window.open(ApiClient.getUrl('XtreamTuner/Logs') + '?api_key=' + ApiClient.accessToken(), '_blank');
@@ -1499,7 +1504,63 @@ function (BaseView, loading) {
             // Dashboard load failed silently
         });
 
+        loadFailedItems(view);
         checkForUpdate(view);
+    }
+
+    function loadFailedItems(view) {
+        var card = view.querySelector('.dashboardFailedItemsCard');
+        if (!card) return;
+
+        ApiClient.getJSON(ApiClient.getUrl('XtreamTuner/Sync/FailedItems')).then(function (items) {
+            if (!items || items.length === 0) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = '';
+            var content = view.querySelector('.dashboardFailedItemsContent');
+            var rows = items.map(function (item) {
+                var time = item.FailedAt ? formatTimeAgo(new Date(item.FailedAt)) : '';
+                return '<tr>' +
+                    '<td style="padding:0.4em 0.6em; opacity:0.7;">' + (item.ItemType || '') + '</td>' +
+                    '<td style="padding:0.4em 0.6em;">' + escHtml(item.Name || '') + '</td>' +
+                    '<td style="padding:0.4em 0.6em; opacity:0.7; font-size:0.85em;">' + escHtml(item.ErrorMessage || '') + '</td>' +
+                    '<td style="padding:0.4em 0.6em; opacity:0.6; font-size:0.85em; white-space:nowrap;">' + time + '</td>' +
+                    '</tr>';
+            }).join('');
+            content.innerHTML = '<table style="width:100%; border-collapse:collapse; font-size:0.9em;">' +
+                '<thead><tr>' +
+                '<th style="text-align:left; padding:0.4em 0.6em; opacity:0.6; border-bottom:1px solid rgba(128,128,128,0.2);">Type</th>' +
+                '<th style="text-align:left; padding:0.4em 0.6em; opacity:0.6; border-bottom:1px solid rgba(128,128,128,0.2);">Name</th>' +
+                '<th style="text-align:left; padding:0.4em 0.6em; opacity:0.6; border-bottom:1px solid rgba(128,128,128,0.2);">Error</th>' +
+                '<th style="text-align:left; padding:0.4em 0.6em; opacity:0.6; border-bottom:1px solid rgba(128,128,128,0.2);">When</th>' +
+                '</tr></thead><tbody>' + rows + '</tbody></table>';
+        }).catch(function () {
+            card.style.display = 'none';
+        });
+    }
+
+    function escHtml(str) {
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function retryFailed(view) {
+        var btn = view.querySelector('.btnRetryFailed');
+        var result = view.querySelector('.retryFailedResult');
+        if (btn) btn.disabled = true;
+        if (result) result.textContent = 'Retrying...';
+
+        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('XtreamTuner/Sync/RetryFailed') })
+            .then(function (data) {
+                if (result) result.textContent = data.Message || 'Done.';
+                loadFailedItems(view);
+                loadDashboard(view);
+                if (btn) btn.disabled = false;
+            })
+            .catch(function () {
+                if (result) result.textContent = 'Retry request failed.';
+                if (btn) btn.disabled = false;
+            });
     }
 
     function checkForUpdate(view) {
