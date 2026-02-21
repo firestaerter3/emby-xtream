@@ -31,7 +31,26 @@ dotnet test "$SCRIPT_DIR/../Emby.Xtream.Plugin.Tests/" --no-restore -v minimal
 echo ""
 echo "=== Building Emby.Xtream.Plugin ==="
 cd "$SCRIPT_DIR"
+
+# Stamp config.html's data-controller with an MD5 hash of config.js so the browser
+# always fetches a fresh JS file after each build.  The file is restored afterwards
+# so the working tree stays clean.
+JS_FILE="$SCRIPT_DIR/Configuration/Web/config.js"
+HTML_FILE="$SCRIPT_DIR/Configuration/Web/config.html"
+if command -v md5 >/dev/null 2>&1; then
+    JS_HASH=$(md5 -q "$JS_FILE" | cut -c1-8)
+else
+    JS_HASH=$(md5sum "$JS_FILE" | awk '{print substr($1,1,8)}')
+fi
+JS_NAME="xtreamconfigjs${JS_HASH}"
+cp "$HTML_FILE" "${HTML_FILE}.bak"
+trap 'mv "${HTML_FILE}.bak" "$HTML_FILE" 2>/dev/null || true' EXIT
+sed -i '' "s|data-controller=\"__plugin/xtreamconfigjs[^\"]*\"|data-controller=\"__plugin/${JS_NAME}\"|" "$HTML_FILE"
+
 dotnet publish -c Release -o "$OUT_DIR" --no-self-contained -p:Version="$VERSION"
+
+mv "${HTML_FILE}.bak" "$HTML_FILE"
+trap - EXIT
 
 echo ""
 echo "=== Build output ==="

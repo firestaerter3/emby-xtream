@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
 using Emby.Xtream.Plugin.Service;
 using MediaBrowser.Common;
 using MediaBrowser.Common.Configuration;
@@ -66,10 +67,38 @@ namespace Emby.Xtream.Plugin
                 },
                 new PluginPageInfo
                 {
-                    Name = "xtreamconfigjs",
+                    Name = GetJsPageName(),
                     EmbeddedResourcePath = "Emby.Xtream.Plugin.Configuration.Web.config.js",
                 },
             };
+        }
+
+        /// <summary>
+        /// Returns a stable JS page name derived from an 8-char MD5 hash of the embedded
+        /// config.js content. The build script stamps the same hash into config.html's
+        /// data-controller, so the browser always loads a fresh JS URL after each build.
+        /// </summary>
+        private static string GetJsPageName()
+        {
+            try
+            {
+                using (var stream = typeof(Plugin).Assembly.GetManifestResourceStream(
+                    "Emby.Xtream.Plugin.Configuration.Web.config.js"))
+                {
+                    if (stream == null) return "xtreamconfigjs";
+                    using (var md5 = MD5.Create())
+                    {
+                        var hash = md5.ComputeHash(stream);
+                        var slug = BitConverter.ToString(hash).Replace("-", string.Empty)
+                                               .Substring(0, 8).ToLowerInvariant();
+                        return "xtreamconfigjs" + slug;
+                    }
+                }
+            }
+            catch
+            {
+                return "xtreamconfigjs";
+            }
         }
     }
 }
