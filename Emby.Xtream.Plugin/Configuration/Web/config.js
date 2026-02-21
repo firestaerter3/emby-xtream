@@ -7,6 +7,14 @@ function (BaseView, loading) {
     function View(view, params) {
         BaseView.apply(this, arguments);
 
+        // Ensure spacing between path validation result and the next field.
+        // Done in JS so it is covered by the hash-based cache-busting on this file.
+        (function () {
+            var s = document.createElement('style');
+            s.textContent = '.strmPathValidationResult { margin-bottom: 0.8em !important; }';
+            document.head.appendChild(s);
+        }());
+
         this.loadedCategories = [];
         this.selectedCategoryIds = [];
         this.loadedVodCategories = [];
