@@ -506,9 +506,15 @@ namespace Emby.Xtream.Plugin.Api
                 var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");
                 if (Directory.Exists(showsRoot))
                 {
-                    var seriesDirs = Directory.GetDirectories(showsRoot, "*", SearchOption.TopDirectoryOnly);
-                    seriesCount = seriesDirs.Length;
-                    foreach (var seriesDir in seriesDirs)
+                    // In single mode: Shows/ShowName/Season XX/
+                    // In multiple/custom mode: Shows/Category/ShowName/Season XX/
+                    var isFlat = string.Equals(config.SeriesFolderMode, "single", StringComparison.OrdinalIgnoreCase);
+                    var topDirs = Directory.GetDirectories(showsRoot, "*", SearchOption.TopDirectoryOnly);
+                    var seriesDirList = isFlat
+                        ? topDirs
+                        : topDirs.SelectMany(cat => { try { return Directory.GetDirectories(cat, "*", SearchOption.TopDirectoryOnly); } catch { return new string[0]; } }).ToArray();
+                    seriesCount = seriesDirList.Length;
+                    foreach (var seriesDir in seriesDirList)
                     {
                         try
                         {

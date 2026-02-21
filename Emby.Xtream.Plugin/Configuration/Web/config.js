@@ -1514,6 +1514,7 @@ function (BaseView, loading) {
         var apiUrl = ApiClient.getUrl('XtreamTuner/Dashboard');
 
         ApiClient.getJSON(apiUrl).then(function (data) {
+            loadDashboard._retries = 0;
             renderDashboardStatus(view, data);
             renderLibraryStats(view, data);
             renderDashboardHistory(view, data);
@@ -1525,7 +1526,9 @@ function (BaseView, loading) {
                 view.querySelector('.dashboardLiveProgress').style.display = 'none';
             }
         }).catch(function () {
-            // Dashboard load failed silently
+            if ((loadDashboard._retries = (loadDashboard._retries || 0) + 1) <= 5) {
+                setTimeout(function () { loadDashboard(view); }, 4000);
+            }
         });
 
         loadFailedItems(view);
@@ -1805,8 +1808,8 @@ function (BaseView, loading) {
 
         var mAdded = movieEntry ? (movieEntry.MoviesAdded || 0) : 0;
         var mDeleted = movieEntry ? (movieEntry.MoviesDeleted || 0) : 0;
-        var sAdded = seriesEntry ? (seriesEntry.SeriesAdded || 0) : 0;
-        var sDeleted = seriesEntry ? (seriesEntry.SeriesDeleted || 0) : 0;
+        var sAdded = seriesEntry ? (seriesEntry.EpisodeAdded || 0) : 0;
+        var sDeleted = seriesEntry ? (seriesEntry.EpisodeDeleted || 0) : 0;
 
         // Single shared 5-column grid so Movies and Episodes tiles are always the same width
         var statsHtml = '';
@@ -1824,13 +1827,15 @@ function (BaseView, loading) {
             }
 
             if (seriesEntry) {
+                var epDiskTotal = (data.LibraryStats && data.LibraryStats.EpisodeCount) || 0;
+                var epUpToDate = Math.max(0, epDiskTotal - sAdded);
                 statsHtml += '<div style="grid-column:1/-1;">' + rowLabel('Episodes') + '</div>';
                 statsHtml +=
-                    statTile(seriesEntry.SeriesTotal, 'Total') +
-                    statTile(seriesEntry.SeriesSkipped, 'Up to date', '#aaa') +
+                    statTile(epDiskTotal, 'Total') +
+                    statTile(epUpToDate, 'Up to date', '#aaa') +
                     statTile(sAdded > 0 ? '+' + sAdded : '0', 'Added', sAdded > 0 ? '#52B54B' : '#aaa') +
                     statTile(sDeleted > 0 ? sDeleted : '0', 'Deleted', sDeleted > 0 ? '#e74c3c' : '#aaa') +
-                    statTile(seriesEntry.SeriesFailed, 'Failed', seriesEntry.SeriesFailed > 0 ? '#cc0000' : '#52B54B');
+                    statTile(seriesEntry.EpisodeFailed, 'Failed', seriesEntry.EpisodeFailed > 0 ? '#cc0000' : '#52B54B');
             }
 
             statsHtml += '</div>';
@@ -1930,12 +1935,12 @@ function (BaseView, loading) {
                 ')</span>';
         }
         function historySeriesCol(e) {
-            return e.SeriesTotal +
+            return (e.EpisodeTotal || 0) +
                 ' <span style="opacity:0.5;">(' +
-                '<span style="color:#52B54B; opacity:1;">+' + (e.SeriesAdded || 0) + '</span> ' +
-                '<span style="color:#e74c3c; opacity:1;">-' + (e.SeriesDeleted || 0) + '</span>, ' +
-                e.SeriesSkipped + ' skip, ' +
-                e.SeriesFailed + ' fail' +
+                '<span style="color:#52B54B; opacity:1;">+' + (e.EpisodeAdded || 0) + '</span> ' +
+                '<span style="color:#e74c3c; opacity:1;">-' + (e.EpisodeDeleted || 0) + '</span>, ' +
+                (e.EpisodeSkipped || 0) + ' skip, ' +
+                (e.EpisodeFailed || 0) + ' fail' +
                 ')</span>';
         }
 

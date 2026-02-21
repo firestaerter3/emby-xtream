@@ -64,6 +64,8 @@ namespace Emby.Xtream.Plugin
                     Name = GetHtmlPageName(),
                     EmbeddedResourcePath = "Emby.Xtream.Plugin.Configuration.Web.config.html",
                     IsMainConfigPage = true,
+                    EnableInMainMenu = true,
+                    MenuIcon = "live_tv",
                 },
                 new PluginPageInfo
                 {

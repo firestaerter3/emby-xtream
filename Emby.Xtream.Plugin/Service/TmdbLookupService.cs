@@ -51,6 +51,9 @@ namespace Emby.Xtream.Plugin.Service
                 var queryObj = Activator.CreateInstance(queryType);
                 queryType.GetProperty("SearchInfo").SetValue(queryObj, searchInfo);
                 queryType.GetProperty("IncludeDisabledProviders").SetValue(queryObj, true);
+                // Restrict to TMDb only — avoids fanning out to OMDB and other slow providers
+                var movieProviderProp = queryType.GetProperty("SearchProviderName");
+                if (movieProviderProp != null) movieProviderProp.SetValue(queryObj, "TheMovieDb");
 
                 // Invoke GetRemoteSearchResults<Movie, MovieInfo>
                 var task = (Task)_searchMethod.Invoke(_providerManager, new object[] { queryObj, cancellationToken });
@@ -117,6 +120,9 @@ namespace Emby.Xtream.Plugin.Service
                 var queryObj = Activator.CreateInstance(queryType);
                 queryType.GetProperty("SearchInfo").SetValue(queryObj, searchInfo);
                 queryType.GetProperty("IncludeDisabledProviders").SetValue(queryObj, true);
+                // Restrict to TVDb only — avoids fanning out to other providers
+                var seriesProviderProp = queryType.GetProperty("SearchProviderName");
+                if (seriesProviderProp != null) seriesProviderProp.SetValue(queryObj, "TheTVDB");
 
                 var task = (Task)_seriesSearchMethod.Invoke(_providerManager, new object[] { queryObj, cancellationToken });
                 await task.ConfigureAwait(false);

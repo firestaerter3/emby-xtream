@@ -44,6 +44,11 @@ namespace Emby.Xtream.Plugin.Service
         public int SeriesSkipped { get; set; }
         public int SeriesFailed { get; set; }
         public int SeriesDeleted { get; set; }
+        public int EpisodeTotal { get; set; }
+        public int EpisodeAdded { get; set; }
+        public int EpisodeSkipped { get; set; }
+        public int EpisodeFailed { get; set; }
+        public int EpisodeDeleted { get; set; }
         public bool WasMovieSync { get; set; }
         public bool WasSeriesSync { get; set; }
         public List<string> AddedMovieTitles { get; set; } = new List<string>();
@@ -90,6 +95,7 @@ namespace Emby.Xtream.Plugin.Service
 
         private SyncProgress _movieProgress = new SyncProgress();
         private SyncProgress _seriesProgress = new SyncProgress();
+        private SyncProgress _episodeProgress = new SyncProgress();
 
         public StrmSyncService(ILogger logger)
         {
@@ -484,6 +490,7 @@ namespace Emby.Xtream.Plugin.Service
         {
             var config = Plugin.Instance.Configuration;
             _seriesProgress = new SyncProgress { IsRunning = true, Phase = "Starting series sync" };
+            _episodeProgress = new SyncProgress { IsRunning = true };
             lock (_failedItemsLock) { _failedItems.RemoveAll(i => i.ItemType == "Series"); }
             var seriesSyncStart = DateTime.UtcNow;
             var seriesSyncSuccess = true;
@@ -681,6 +688,8 @@ namespace Emby.Xtream.Plugin.Service
                                 }
                                 Interlocked.Increment(ref _seriesProgress.Skipped);
                                 Interlocked.Increment(ref _seriesProgress.Completed);
+                                Interlocked.Add(ref _episodeProgress.Total, existingStrms.Length);
+                                Interlocked.Add(ref _episodeProgress.Skipped, existingStrms.Length);
                                 return;
                             }
                         }
@@ -714,8 +723,14 @@ namespace Emby.Xtream.Plugin.Service
                                     "{0}/series/{1}/{2}/{3}.{4}",
                                     config.BaseUrl, config.Username, config.Password, episode.Id, ext);
 
+                                var isNewEpisode = !File.Exists(strmPath);
                                 Directory.CreateDirectory(seasonDir);
                                 File.WriteAllText(strmPath, streamUrl);
+                                Interlocked.Increment(ref _episodeProgress.Total);
+                                if (isNewEpisode)
+                                    Interlocked.Increment(ref _episodeProgress.Added);
+                                else
+                                    Interlocked.Increment(ref _episodeProgress.Skipped);
 
                                 lock (writtenPaths)
                                 {
@@ -764,7 +779,9 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     _seriesProgress.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");
-                    _seriesProgress.Deleted = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold);
+                    var deletedEpisodes = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold);
+                    _seriesProgress.Deleted = deletedEpisodes;
+                    _episodeProgress.Deleted = deletedEpisodes;
                 }
 
                 // Persist the highest LastModified timestamp seen
@@ -801,6 +818,11 @@ namespace Emby.Xtream.Plugin.Service
                     SeriesSkipped = _seriesProgress.Skipped,
                     SeriesFailed = _seriesProgress.Failed,
                     SeriesDeleted = _seriesProgress.Deleted,
+                    EpisodeTotal = _episodeProgress.Total,
+                    EpisodeAdded = _episodeProgress.Added,
+                    EpisodeSkipped = _episodeProgress.Skipped,
+                    EpisodeFailed = _episodeProgress.Failed,
+                    EpisodeDeleted = _episodeProgress.Deleted,
                     AddedSeriesTitles = addedSeriesTitles,
                 });
             }
