@@ -184,9 +184,18 @@ function (BaseView, loading) {
             deleteContent(view, 'Series');
         });
 
+        view.querySelector('.chkCleanupOrphans').addEventListener('change', function () {
+            view.querySelector('.orphanThresholdContainer').style.display = this.checked ? '' : 'none';
+        });
+
         // Dashboard sync all button
         view.querySelector('.btnDashboardSyncAll').addEventListener('click', function () {
             dashboardSyncAll(self);
+        });
+
+        // Retry failed items button
+        view.querySelector('.btnRetryFailed').addEventListener('click', function () {
+            retryFailed(view);
         });
 
         // Download sanitized log button
@@ -336,6 +345,9 @@ function (BaseView, loading) {
             view.querySelector('.chkSmartSkipExisting').checked = config.SmartSkipExisting !== false;
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
             view.querySelector('.chkCleanupOrphans').checked = !!config.CleanupOrphans;
+            view.querySelector('.txtOrphanSafetyThreshold').value = Math.round((config.OrphanSafetyThreshold || 0.20) * 100);
+            view.querySelector('.orphanThresholdContainer').style.display = config.CleanupOrphans ? '' : 'none';
+            view.querySelector('.chkEnableNfoFiles').checked = !!config.EnableNfoFiles;
 
             // Auto-sync schedule
             view.querySelector('.chkAutoSyncEnabled').checked = !!config.AutoSyncEnabled;
@@ -428,6 +440,8 @@ function (BaseView, loading) {
             config.SmartSkipExisting = view.querySelector('.chkSmartSkipExisting').checked;
             config.SyncParallelism = parseInt(view.querySelector('.txtSyncParallelism').value, 10) || 3;
             config.CleanupOrphans = view.querySelector('.chkCleanupOrphans').checked;
+            config.OrphanSafetyThreshold = (parseInt(view.querySelector('.txtOrphanSafetyThreshold').value, 10) || 0) / 100;
+            config.EnableNfoFiles = view.querySelector('.chkEnableNfoFiles').checked;
 
             // Auto-sync schedule
             config.AutoSyncEnabled = view.querySelector('.chkAutoSyncEnabled').checked;
@@ -1490,7 +1504,63 @@ function (BaseView, loading) {
             // Dashboard load failed silently
         });
 
+        loadFailedItems(view);
         checkForUpdate(view);
+    }
+
+    function loadFailedItems(view) {
+        var apiUrl = ApiClient.getUrl('XtreamTuner/Sync/FailedItems');
+        ApiClient.getJSON(apiUrl).then(function (items) {
+            var card = view.querySelector('.dashboardFailedItemsCard');
+            var content = view.querySelector('.dashboardFailedItemsContent');
+            if (!items || items.length === 0) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = '';
+            var rows = items.map(function (item) {
+                return '<tr>' +
+                    '<td style="padding:0.4em 0.6em;">' + escapeHtml(item.ItemType) + '</td>' +
+                    '<td style="padding:0.4em 0.6em;">' + escapeHtml(item.Name || '') + '</td>' +
+                    '<td style="padding:0.4em 0.6em; opacity:0.7; font-size:0.85em;">' + escapeHtml(item.ErrorMessage || '') + '</td>' +
+                    '<td style="padding:0.4em 0.6em; opacity:0.6; font-size:0.8em;">' + (item.FailedAt ? formatTimeAgo(new Date(item.FailedAt)) : '') + '</td>' +
+                    '</tr>';
+            }).join('');
+            content.innerHTML = '<table style="width:100%; border-collapse:collapse; font-size:0.9em;">' +
+                '<thead><tr>' +
+                '<th style="text-align:left; padding:0.4em 0.6em; opacity:0.6; font-size:0.85em;">Type</th>' +
+                '<th style="text-align:left; padding:0.4em 0.6em; opacity:0.6; font-size:0.85em;">Name</th>' +
+                '<th style="text-align:left; padding:0.4em 0.6em; opacity:0.6; font-size:0.85em;">Error</th>' +
+                '<th style="text-align:left; padding:0.4em 0.6em; opacity:0.6; font-size:0.85em;">Time</th>' +
+                '</tr></thead><tbody>' + rows + '</tbody></table>';
+        }).catch(function () {
+            // Failed items load silently ignored
+        });
+    }
+
+    function retryFailed(view) {
+        var btn = view.querySelector('.btnRetryFailed');
+        var resultEl = view.querySelector('.dashboardRetryResult');
+        btn.disabled = true;
+        resultEl.innerHTML = '<span style="opacity:0.5;">Retrying failed items...</span>';
+
+        ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('XtreamTuner/Sync/RetryFailed'),
+            dataType: 'json'
+        }).then(function (result) {
+            if (result.Success) {
+                resultEl.innerHTML = '<span style="color:#52B54B;">' + escapeHtml(result.Message) +
+                    ' (' + result.Completed + ' completed, ' + result.Failed + ' failed)</span>';
+                loadFailedItems(view);
+            } else {
+                resultEl.innerHTML = '<span style="color:#cc0000;">' + escapeHtml(result.Message) + '</span>';
+            }
+            btn.disabled = false;
+        }).catch(function () {
+            resultEl.innerHTML = '<span style="color:#cc0000;">Retry request failed.</span>';
+            btn.disabled = false;
+        });
     }
 
     function checkForUpdate(view) {

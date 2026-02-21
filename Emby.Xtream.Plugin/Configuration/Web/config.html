@@ -275,6 +275,16 @@
                         <div class="dashboardSyncAllResult" style="margin-top:0.5em;"></div>
                     </div>
 
+                    <!-- Failed Items (hidden when empty) -->
+                    <div class="dashboard-card dashboardFailedItemsCard" style="display:none; margin-bottom:1.2em;">
+                        <h3 style="color:#c0392b;">Failed Items</h3>
+                        <div class="dashboardFailedItemsContent"></div>
+                        <button class="btnRetryFailed raised button-submit" is="emby-button" type="button" style="margin-top:0.8em; background:#c0392b !important; border-color:#c0392b !important;">
+                            <span>Retry Failed Items</span>
+                        </button>
+                        <div class="dashboardRetryResult" style="margin-top:0.5em;"></div>
+                    </div>
+
                     <!-- Sync History -->
                     <div class="dashboard-card">
                         <h3>Sync History</h3>
@@ -350,6 +360,22 @@
                         </label>
                         <div class="fieldDescription checkboxFieldDescription">
                             Remove STRM files that are no longer present in the source after sync.
+                        </div>
+                    </div>
+                    <div class="orphanThresholdContainer inputContainer" style="display:none;">
+                        <input class="txtOrphanSafetyThreshold" type="number" is="emby-input"
+                               label="Safety Threshold (%)" min="0" max="100" step="1" />
+                        <div class="fieldDescription">
+                            Skip cleanup if more than this % of files would be deleted (protects against provider outages). Set 0 to disable.
+                        </div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkEnableNfoFiles" type="checkbox" is="emby-checkbox" />
+                            <span>Write NFO Metadata Files (.nfo)</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Writes Kodi-compatible NFO sidecars with TMDb/TVDb IDs for instant Emby metadata matching. Skip-if-exists.
                         </div>
                     </div>
 

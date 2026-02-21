@@ -65,6 +65,9 @@ namespace Emby.Xtream.Plugin
         public bool EnableSeriesMetadataLookup { get; set; }
         public string TvdbFolderIdOverrides { get; set; } = string.Empty;
 
+        // NFO sidecar files
+        public bool EnableNfoFiles { get; set; }
+
         // Cached categories (JSON arrays, populated on refresh)
         public string CachedVodCategories { get; set; } = string.Empty;
         public string CachedSeriesCategories { get; set; } = string.Empty;
@@ -78,6 +81,9 @@ namespace Emby.Xtream.Plugin
         public bool SmartSkipExisting { get; set; } = true;
         public int SyncParallelism { get; set; } = 3;
         public bool CleanupOrphans { get; set; }
+
+        /// <summary>Fraction of existing STRMs that can be deleted in one cleanup pass. 0 = disabled.</summary>
+        public double OrphanSafetyThreshold { get; set; } = 0.20;
 
         // Auto-sync schedule
         public bool   AutoSyncEnabled       { get; set; } = false;

@@ -48,6 +48,16 @@ namespace Emby.Xtream.Plugin.Service
         public bool WasSeriesSync { get; set; }
     }
 
+    public class FailedSyncItem
+    {
+        public string ItemType { get; set; }   // "Movie" | "Series"
+        public int StreamId { get; set; }
+        public string Name { get; set; }
+        public int? CategoryId { get; set; }
+        public string ErrorMessage { get; set; }
+        public DateTime FailedAt { get; set; } = DateTime.UtcNow;
+    }
+
     public class StrmSyncService
     {
         private static readonly STJ.JsonSerializerOptions JsonOptions = new STJ.JsonSerializerOptions
@@ -71,6 +81,8 @@ namespace Emby.Xtream.Plugin.Service
         private readonly TmdbLookupService _tmdbLookupService;
         private readonly List<SyncHistoryEntry> _syncHistory = new List<SyncHistoryEntry>();
         private readonly object _historyLock = new object();
+        private readonly List<FailedSyncItem> _failedItems = new List<FailedSyncItem>();
+        private readonly object _failedItemsLock = new object();
 
         private SyncProgress _movieProgress = new SyncProgress();
         private SyncProgress _seriesProgress = new SyncProgress();
@@ -110,6 +122,11 @@ namespace Emby.Xtream.Plugin.Service
         public SyncProgress MovieProgress => _movieProgress;
         public SyncProgress SeriesProgress => _seriesProgress;
 
+        public IReadOnlyList<FailedSyncItem> FailedItems
+        {
+            get { lock (_failedItemsLock) { return _failedItems.ToList(); } }
+        }
+
         public List<SyncHistoryEntry> GetSyncHistory()
         {
             lock (_historyLock)
@@ -122,6 +139,7 @@ namespace Emby.Xtream.Plugin.Service
         {
             var config = Plugin.Instance.Configuration;
             _movieProgress = new SyncProgress { IsRunning = true, Phase = "Starting movie sync" };
+            lock (_failedItemsLock) { _failedItems.Clear(); }
             var movieSyncStart = DateTime.UtcNow;
             var movieSyncSuccess = true;
 
@@ -180,6 +198,14 @@ namespace Emby.Xtream.Plugin.Service
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
+
+                // Dispatcharr VOD client (shared across per-movie tasks; configured once, queried only for new movies)
+                Emby.Xtream.Plugin.Client.DispatcharrClient dispatcharrVodClient = null;
+                if (config.EnableDispatcharr && !string.IsNullOrEmpty(config.DispatcharrUrl))
+                {
+                    dispatcharrVodClient = new Emby.Xtream.Plugin.Client.DispatcharrClient(_logger);
+                    dispatcharrVodClient.Configure(config.DispatcharrUser, config.DispatcharrPass);
+                }
 
                 var tasks = allStreams.Select(async movie =>
                 {
@@ -270,20 +296,85 @@ namespace Emby.Xtream.Plugin.Service
                             "{0}/movie/{1}/{2}/{3}.{4}",
                             config.BaseUrl, config.Username, config.Password, movie.StreamId, ext);
 
-                        var isNewFile = !File.Exists(strmPath);
-                        Directory.CreateDirectory(movieDir);
-                        File.WriteAllText(strmPath, streamUrl);
-
-                        if (isNewFile) Interlocked.Increment(ref _movieProgress.Added);
-                        lock (writtenPaths)
+                        // Build STRM entries: multi-version (Dispatcharr VOD) or single.
+                        // Only query Dispatcharr here, after smart-skip, so we never hit the API for existing movies.
+                        var strmEntries = new List<Tuple<string, string>>();
+                        if (dispatcharrVodClient != null)
                         {
-                            writtenPaths.Add(strmPath);
+                            try
+                            {
+                                var vodDetail = await dispatcharrVodClient.GetVodMovieDetailAsync(
+                                    config.DispatcharrUrl, movie.StreamId, cancellationToken).ConfigureAwait(false);
+                                if (vodDetail != null && !string.IsNullOrEmpty(vodDetail.Uuid))
+                                {
+                                    var providers = await dispatcharrVodClient.GetVodMovieProvidersAsync(
+                                        config.DispatcharrUrl, movie.StreamId, cancellationToken).ConfigureAwait(false);
+                                    if (providers.Count > 1)
+                                    {
+                                        var providerIds = providers.Select(p => p.StreamId).Distinct().ToList();
+                                        for (int vi = 0; vi < providerIds.Count; vi++)
+                                        {
+                                            var providerUrl = string.Format(
+                                                CultureInfo.InvariantCulture,
+                                                "{0}/proxy/vod/movie/{1}?stream_id={2}",
+                                                config.DispatcharrUrl, vodDetail.Uuid, providerIds[vi]);
+                                            var vSuffix = vi == 0
+                                                ? string.Empty
+                                                : string.Format(CultureInfo.InvariantCulture, " - Version {0}", vi + 1);
+                                            strmEntries.Add(Tuple.Create(Path.Combine(movieDir, folderName + vSuffix + ".strm"), providerUrl));
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Debug("Dispatcharr VOD lookup failed for '{0}': {1}", movie.Name, ex.Message);
+                            }
                         }
+
+                        if (strmEntries.Count == 0)
+                        {
+                            strmEntries.Add(Tuple.Create(strmPath, streamUrl));
+                        }
+
+                        foreach (var strmEntry in strmEntries)
+                        {
+                            var isNewFile = !File.Exists(strmEntry.Item1);
+                            Directory.CreateDirectory(movieDir);
+                            File.WriteAllText(strmEntry.Item1, strmEntry.Item2);
+                            if (isNewFile) Interlocked.Increment(ref _movieProgress.Added);
+                            lock (writtenPaths) { writtenPaths.Add(strmEntry.Item1); }
+                        }
+
+                        if (config.EnableNfoFiles)
+                        {
+                            var nfoPath = Path.Combine(movieDir, folderName + ".nfo");
+                            var nfoYearMatch = YearInTitleRegex.Match(cleanedName);
+                            int? nfoYear = null;
+                            int nfoYearVal;
+                            if (nfoYearMatch.Success && int.TryParse(nfoYearMatch.Groups[1].Value,
+                                NumberStyles.None, CultureInfo.InvariantCulture, out nfoYearVal))
+                                nfoYear = nfoYearVal;
+                            try { NfoWriter.WriteMovieNfo(nfoPath, cleanedName, tmdbId, nfoYear); }
+                            catch (Exception nfoEx) { _logger.Debug("NFO write failed for '{0}': {1}", movie.Name, nfoEx.Message); }
+                        }
+
                         Interlocked.Increment(ref _movieProgress.Completed);
                     }
                     catch (Exception ex)
                     {
                         _logger.Error("Failed to write STRM for movie '{0}': [{1}] {2}", movie.Name, ex.GetType().Name, ex.Message);
+                        lock (_failedItemsLock)
+                        {
+                            _failedItems.Add(new FailedSyncItem
+                            {
+                                ItemType = "Movie",
+                                StreamId = movie.StreamId,
+                                Name = movie.Name,
+                                CategoryId = movie.CategoryId,
+                                ErrorMessage = ex.Message,
+                            });
+                        }
                         Interlocked.Increment(ref _movieProgress.Failed);
                         Interlocked.Increment(ref _movieProgress.Completed);
                     }
@@ -300,7 +391,7 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     _movieProgress.Phase = "Cleaning up orphaned files";
                     var moviesRoot = Path.Combine(config.StrmLibraryPath, "Movies");
-                    _movieProgress.Deleted = CleanupOrphans(moviesRoot, writtenPaths);
+                    _movieProgress.Deleted = CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold);
                 }
 
                 // Persist the highest Added timestamp seen so next sync can delta from here
@@ -349,6 +440,7 @@ namespace Emby.Xtream.Plugin.Service
         {
             var config = Plugin.Instance.Configuration;
             _seriesProgress = new SyncProgress { IsRunning = true, Phase = "Starting series sync" };
+            lock (_failedItemsLock) { _failedItems.Clear(); }
             var seriesSyncStart = DateTime.UtcNow;
             var seriesSyncSuccess = true;
 
@@ -491,6 +583,24 @@ namespace Emby.Xtream.Plugin.Service
                         var seriesDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
                         var isNewSeries = !Directory.Exists(seriesDir);
 
+                        if (config.EnableNfoFiles)
+                        {
+                            var showNfoPath = Path.Combine(seriesDir, "tvshow.nfo");
+                            // Extract IDs embedded in folder name by BuildSeriesFolderName
+                            var showTvdbMatch = System.Text.RegularExpressions.Regex.Match(folderName, @"\[tvdbid=(\d+)\]");
+                            var showTmdbMatch = System.Text.RegularExpressions.Regex.Match(folderName, @"\[tmdbid=(\d+)\]");
+                            var showTvdbId = showTvdbMatch.Success ? showTvdbMatch.Groups[1].Value : null;
+                            var showTmdbId = showTmdbMatch.Success
+                                ? showTmdbMatch.Groups[1].Value
+                                : (detail.Info != null ? detail.Info.TmdbId : null);
+                            try
+                            {
+                                Directory.CreateDirectory(seriesDir);
+                                NfoWriter.WriteShowNfo(showNfoPath, seriesName, showTvdbId, showTmdbId);
+                            }
+                            catch (Exception nfoEx) { _logger.Debug("Show NFO write failed for '{0}': {1}", seriesName, nfoEx.Message); }
+                        }
+
                         // Track max LastModified for delta state
                         long seriesLm = 0;
                         long.TryParse(series.LastModified, NumberStyles.None, CultureInfo.InvariantCulture, out seriesLm);
@@ -568,6 +678,17 @@ namespace Emby.Xtream.Plugin.Service
                     catch (Exception ex)
                     {
                         _logger.Error("Failed to write STRM for series '{0}' (id={1}): [{2}] {3}", series.Name, series.SeriesId, ex.GetType().Name, ex.Message);
+                        lock (_failedItemsLock)
+                        {
+                            _failedItems.Add(new FailedSyncItem
+                            {
+                                ItemType = "Series",
+                                StreamId = series.SeriesId,
+                                Name = series.Name,
+                                CategoryId = series.CategoryId,
+                                ErrorMessage = ex.Message,
+                            });
+                        }
                         Interlocked.Increment(ref _seriesProgress.Failed);
                         Interlocked.Increment(ref _seriesProgress.Completed);
                     }
@@ -584,7 +705,7 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     _seriesProgress.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");
-                    _seriesProgress.Deleted = CleanupOrphans(showsRoot, writtenPaths);
+                    _seriesProgress.Deleted = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold);
                 }
 
                 // Persist the highest LastModified timestamp seen
@@ -999,7 +1120,149 @@ namespace Emby.Xtream.Plugin.Service
             return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
         }
 
-        private int CleanupOrphans(string rootPath, HashSet<string> validPaths)
+        public async Task RetryFailedAsync(CancellationToken cancellationToken)
+        {
+            var config = Plugin.Instance.Configuration;
+            List<FailedSyncItem> items;
+            lock (_failedItemsLock) { items = _failedItems.ToList(); }
+            if (items.Count == 0) return;
+
+            _movieProgress = new SyncProgress { IsRunning = true, Phase = "Retrying failed items", Total = items.Count };
+
+            var categoryNames = new Dictionary<int, string>();
+            var folderMappings = FolderMappingParser.Parse(config.MovieFolderMappings);
+            var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var succeeded = new System.Collections.Concurrent.ConcurrentBag<FailedSyncItem>();
+
+            try
+            {
+                var retrySemaphore = new SemaphoreSlim(config.SyncParallelism);
+                var retryTasks = items.Select(async item =>
+                {
+                    await retrySemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        if (item.ItemType == "Movie")
+                            await RetryMovieItemAsync(item, config, categoryNames, folderMappings, writtenPaths, cancellationToken).ConfigureAwait(false);
+                        else if (item.ItemType == "Series")
+                            await RetrySeriesItemAsync(item, config, cancellationToken).ConfigureAwait(false);
+                        succeeded.Add(item);
+                        Interlocked.Increment(ref _movieProgress.Completed);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Error("Retry still failed for '{0}': {1}", item.Name, ex.Message);
+                        Interlocked.Increment(ref _movieProgress.Failed);
+                        Interlocked.Increment(ref _movieProgress.Completed);
+                    }
+                    finally { retrySemaphore.Release(); }
+                });
+
+                await Task.WhenAll(retryTasks).ConfigureAwait(false);
+
+                lock (_failedItemsLock)
+                {
+                    foreach (var s in succeeded)
+                        _failedItems.Remove(s);
+                }
+            }
+            finally
+            {
+                _movieProgress.IsRunning = false;
+                _movieProgress.Phase = "Retry complete";
+            }
+        }
+
+        private async Task RetryMovieItemAsync(
+            FailedSyncItem item, PluginConfiguration config,
+            Dictionary<int, string> categoryNames,
+            Dictionary<int, string> folderMappings,
+            HashSet<string> writtenPaths,
+            CancellationToken cancellationToken)
+        {
+            var cleanedName = config.EnableContentNameCleaning
+                ? ContentNameCleaner.CleanContentName(item.Name, config.ContentRemoveTerms)
+                : item.Name;
+
+            var folderName = BuildMovieFolderName(cleanedName, null);
+            if (string.IsNullOrWhiteSpace(folderName)) return;
+
+            var subFolder = BuildContentFolderPath(
+                config.MovieFolderMode, item.CategoryId, categoryNames, folderMappings, "Movies");
+            if (subFolder == null) return;
+
+            var movieDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
+            var strmPath = Path.Combine(movieDir, folderName + ".strm");
+            if (File.Exists(strmPath)) return;
+
+            var streamUrl = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}/movie/{1}/{2}/{3}.mp4",
+                config.BaseUrl, config.Username, config.Password, item.StreamId);
+
+            Directory.CreateDirectory(movieDir);
+            File.WriteAllText(strmPath, streamUrl);
+            lock (writtenPaths) { writtenPaths.Add(strmPath); }
+        }
+
+        private async Task RetrySeriesItemAsync(
+            FailedSyncItem item, PluginConfiguration config,
+            CancellationToken cancellationToken)
+        {
+            var detail = await FetchSeriesDetailAsync(item.StreamId, config, cancellationToken).ConfigureAwait(false);
+            if (detail == null || detail.Episodes == null || detail.Episodes.Count == 0) return;
+
+            var cleanedName = config.EnableContentNameCleaning
+                ? ContentNameCleaner.CleanContentName(item.Name, config.ContentRemoveTerms)
+                : item.Name;
+            var seriesName = SanitizeFileName(cleanedName);
+            if (string.IsNullOrWhiteSpace(seriesName)) return;
+
+            var seriesFolderMappings = FolderMappingParser.Parse(config.SeriesFolderMappings);
+            var subFolder = BuildContentFolderPath(
+                config.SeriesFolderMode, item.CategoryId, new Dictionary<int, string>(),
+                seriesFolderMappings, "Shows");
+            if (subFolder == null) return;
+
+            var seriesDir = Path.Combine(config.StrmLibraryPath, subFolder, seriesName);
+
+            foreach (var seasonEntry in detail.Episodes)
+            {
+                foreach (var episode in seasonEntry.Value)
+                {
+                    var seasonNum = episode.Season > 0 ? episode.Season : 1;
+                    var episodeNum = episode.EpisodeNum > 0 ? episode.EpisodeNum : 1;
+                    var seasonFolder = string.Format(CultureInfo.InvariantCulture, "Season {0:D2}", seasonNum);
+                    var seasonDir = Path.Combine(seriesDir, seasonFolder);
+
+                    var episodeTitle = !string.IsNullOrWhiteSpace(episode.Title)
+                        ? " - " + SanitizeFileName(episode.Title)
+                        : string.Empty;
+
+                    var fileName = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "{0} - S{1:D2}E{2:D2}{3}.strm",
+                        seriesName, seasonNum, episodeNum, episodeTitle);
+
+                    var strmPath = Path.Combine(seasonDir, fileName);
+                    if (File.Exists(strmPath)) continue;
+
+                    var ext = !string.IsNullOrEmpty(episode.ContainerExtension)
+                        ? episode.ContainerExtension
+                        : "mp4";
+
+                    var streamUrl = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "{0}/series/{1}/{2}/{3}.{4}",
+                        config.BaseUrl, config.Username, config.Password, episode.Id, ext);
+
+                    Directory.CreateDirectory(seasonDir);
+                    File.WriteAllText(strmPath, streamUrl);
+                }
+            }
+        }
+
+        private int CleanupOrphans(string rootPath, HashSet<string> validPaths, double safetyThreshold)
         {
             if (!Directory.Exists(rootPath))
             {
@@ -1007,6 +1270,20 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             var existingStrms = Directory.GetFiles(rootPath, "*.strm", SearchOption.AllDirectories);
+            var orphanCount = existingStrms.Count(s => !validPaths.Contains(s));
+
+            if (safetyThreshold > 0 && existingStrms.Length > 10 && orphanCount > 0)
+            {
+                double ratio = (double)orphanCount / existingStrms.Length;
+                if (ratio > safetyThreshold)
+                {
+                    _logger.Warn(
+                        "Orphan cleanup skipped: {0}/{1} ({2:P0}) exceeds safety threshold {3:P0} — possible provider issue",
+                        orphanCount, existingStrms.Length, ratio, safetyThreshold);
+                    return 0;
+                }
+            }
+
             var removed = 0;
 
             foreach (var strmFile in existingStrms)
