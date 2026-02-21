@@ -279,6 +279,22 @@ namespace Emby.Xtream.Plugin.Service
                         {
                             writtenPaths.Add(strmPath);
                         }
+
+                        if (config.EnableNfoFiles)
+                        {
+                            var nfoPath = Path.Combine(movieDir, folderName + ".nfo");
+                            var yearMatch = YearInTitleRegex.Match(cleanedName);
+                            int? nfoYear = null;
+                            if (yearMatch.Success)
+                            {
+                                int y;
+                                if (int.TryParse(yearMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out y))
+                                    nfoYear = y;
+                            }
+                            try { NfoWriter.WriteMovieNfo(nfoPath, cleanedName, tmdbId, nfoYear); }
+                            catch (Exception ex) { _logger.Debug("NFO write failed for '{0}': {1}", movie.Name, ex.Message); }
+                        }
+
                         Interlocked.Increment(ref _movieProgress.Completed);
                     }
                     catch (Exception ex)
@@ -490,6 +506,20 @@ namespace Emby.Xtream.Plugin.Service
 
                         var seriesDir = Path.Combine(config.StrmLibraryPath, subFolder, folderName);
                         var isNewSeries = !Directory.Exists(seriesDir);
+
+                        if (config.EnableNfoFiles)
+                        {
+                            var showNfoPath = Path.Combine(seriesDir, "tvshow.nfo");
+                            var tvdbIdMatch = Regex.Match(folderName, @"\[tvdbid=(\d+)\]");
+                            var tmdbIdMatch = Regex.Match(folderName, @"\[tmdbid=(\d+)\]");
+                            var showTvdbId = tvdbIdMatch.Success ? tvdbIdMatch.Groups[1].Value : null;
+                            var showTmdbId = tmdbIdMatch.Success ? tmdbIdMatch.Groups[1].Value : null;
+                            if (showTmdbId == null && detail?.Info?.TmdbId != null)
+                                showTmdbId = detail.Info.TmdbId.ToString();
+                            Directory.CreateDirectory(seriesDir);
+                            try { NfoWriter.WriteShowNfo(showNfoPath, seriesName, showTvdbId, showTmdbId); }
+                            catch (Exception ex) { _logger.Debug("Show NFO write failed for '{0}': {1}", seriesName, ex.Message); }
+                        }
 
                         // Track max LastModified for delta state
                         long seriesLm = 0;
