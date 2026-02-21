@@ -333,12 +333,14 @@
                     <!-- Quick Actions -->
                     <div class="dashboard-card" style="margin-bottom:1.2em;">
                         <h3>Quick Actions</h3>
-                        <button class="btnDashboardSyncAll raised button-submit" is="emby-button" type="button">
-                            <span>Sync Movies &amp; Series</span>
-                        </button>
-                        <button class="btnDownloadLog raised button-secondary" is="emby-button" type="button" style="margin-left:0.5em; margin-top:0.75em;">
-                            <span>Download Sanitized Log</span>
-                        </button>
+                        <div style="display:flex; align-items:center; gap:0.5em; flex-wrap:wrap;">
+                            <button class="btnDashboardSyncAll raised button-submit" is="emby-button" type="button">
+                                <span>Sync Movies &amp; Series</span>
+                            </button>
+                            <button class="btnDownloadLog raised button-secondary" is="emby-button" type="button">
+                                <span>Download Sanitized Log</span>
+                            </button>
+                        </div>
                         <div class="syncNoCTAHint" style="display:none; font-size:0.85em; opacity:0.6; margin-top:0.4em;">No sync has run yet — click to start</div>
                         <div class="dashboardSyncAllResult" style="margin-top:0.5em;"></div>
                         <div class="dashboardAutoSyncLine" style="font-size:0.85em; opacity:0.6; margin-top:0.4em;"></div>
