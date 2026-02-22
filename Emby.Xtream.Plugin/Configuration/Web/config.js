@@ -1519,6 +1519,24 @@ function (BaseView, loading) {
         ApiClient.getJSON(apiUrl).then(function (data) {
             loadDashboard._retries = 0;
             renderDashboardStatus(view, data);
+
+            // Auto-bust browser cache when plugin was updated.
+            // localStorage remembers the last-seen version; if the server
+            // reports a different one, pre-warm both resources and reload.
+            var prevVer = localStorage.getItem('xtream-plugin-version');
+            if (data.PluginVersion && prevVer && data.PluginVersion !== prevVer
+                && !sessionStorage.getItem('xtream-cache-bust')) {
+                sessionStorage.setItem('xtream-cache-bust', '1');
+                var v = document.documentElement.getAttribute('data-appversion') || '';
+                Promise.all([
+                    fetch('configurationpage?name=xtreamconfig&v=' + v, { cache: 'reload' }),
+                    fetch('configurationpage?name=xtreamconfigjs&v=' + v, { cache: 'reload' })
+                ]).then(function () { location.reload(); });
+                return;
+            }
+            if (data.PluginVersion) localStorage.setItem('xtream-plugin-version', data.PluginVersion);
+            sessionStorage.removeItem('xtream-cache-bust');
+
             renderLibraryStats(view, data);
             renderDashboardHistory(view, data);
 
@@ -1601,7 +1619,7 @@ function (BaseView, loading) {
             var banner = view.querySelector('.updateBanner');
             if (!banner) return;
 
-            // Always show current version on Dashboard
+            // Enhance version label with update status
             var versionEl = view.querySelector('.pluginVersion');
             if (versionEl && data.CurrentVersion) {
                 if (data.UpdateInstalled) {
@@ -1755,6 +1773,12 @@ function (BaseView, loading) {
     }
 
     function renderDashboardStatus(view, data) {
+        // Show plugin version from dashboard data (independent of update check)
+        var versionEl = view.querySelector('.pluginVersion');
+        if (versionEl && data.PluginVersion) {
+            versionEl.textContent = 'v' + data.PluginVersion;
+        }
+
         var container = view.querySelector('.dashboardStatusContent');
         var statsContainer = view.querySelector('.dashboardStatusStats');
 
@@ -1819,10 +1843,12 @@ function (BaseView, loading) {
             statsHtml += '<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:0.5em;">';
 
             if (movieEntry) {
+                var movDiskTotal = (data.LibraryStats && data.LibraryStats.MovieCount) || 0;
+                var movUpToDate = Math.max(0, movDiskTotal - mAdded);
                 statsHtml += '<div style="grid-column:1/-1;">' + rowLabel('Movies') + '</div>';
                 statsHtml +=
-                    statTile(movieEntry.MoviesTotal, 'Total') +
-                    statTile(movieEntry.MoviesSkipped, 'Up to date', '#aaa') +
+                    statTile(movDiskTotal, 'Total') +
+                    statTile(movUpToDate, 'Up to date', '#aaa') +
                     statTile(mAdded > 0 ? '+' + mAdded : '0', 'Added', mAdded > 0 ? '#52B54B' : '#aaa') +
                     statTile(mDeleted > 0 ? mDeleted : '0', 'Deleted', mDeleted > 0 ? '#e74c3c' : '#aaa') +
                     statTile(movieEntry.MoviesFailed, 'Failed', movieEntry.MoviesFailed > 0 ? '#cc0000' : '#52B54B');
@@ -1928,11 +1954,11 @@ function (BaseView, loading) {
         html += '<tbody>';
 
         function historyMovieCol(e) {
-            return e.MoviesTotal +
+            var finalTotal = (e.MoviesTotal || 0) - (e.MoviesDeleted || 0);
+            return finalTotal +
                 ' <span style="opacity:0.5;">(' +
                 '<span style="color:#52B54B; opacity:1;">+' + (e.MoviesAdded || 0) + '</span> ' +
                 '<span style="color:#e74c3c; opacity:1;">-' + (e.MoviesDeleted || 0) + '</span>, ' +
-                e.MoviesSkipped + ' skip, ' +
                 e.MoviesFailed + ' fail' +
                 ')</span>';
         }

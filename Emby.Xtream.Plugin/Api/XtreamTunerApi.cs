@@ -199,6 +199,7 @@ namespace Emby.Xtream.Plugin.Api
 
     public class DashboardResult
     {
+        public string PluginVersion { get; set; }
         public SyncHistoryEntry LastSync { get; set; }
         public List<SyncHistoryEntry> History { get; set; }
         public bool IsRunning { get; set; }
@@ -551,6 +552,7 @@ namespace Emby.Xtream.Plugin.Api
 
             return new DashboardResult
             {
+                PluginVersion = typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "0.0.0",
                 LastSync = history.Count > 0 ? history[0] : null,
                 History = history,
                 IsRunning = syncService.MovieProgress.IsRunning || syncService.SeriesProgress.IsRunning,
