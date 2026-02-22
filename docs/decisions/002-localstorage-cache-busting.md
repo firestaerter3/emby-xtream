@@ -146,6 +146,76 @@ If users report issues (infinite reloads, broken page after update, etc.):
    localStorage.removeItem('xtream-plugin-version');
    ```
 
+## Bugs Found During Deployment
+
+### Bug 1: `loadConfig` crash hid the update banner on all versions
+
+**Symptom**: Update banner never appeared, even though the API returned `UpdateAvailable: true`.
+No errors visible in the console (catch blocks swallowed them).
+
+**Root cause**: `renderAutoSyncDashboardLine()` called `.indexOf()` on
+`config.LastMovieSyncTimestamp`, which is a Unix epoch **number** (e.g. `1771625207`), not a
+date string. The resulting `TypeError` crashed `loadConfig`'s `.then()` callback, and
+`checkForUpdate()` — which was called inside that callback — never ran.
+
+**Fix**: Handle numeric timestamps: `typeof lastTs === 'number' ? new Date(lastTs * 1000) : new Date(lastTs)`.
+Also added the error object to all `.catch()` `console.error()` calls so future failures are
+visible in the browser console.
+
+**Lesson**: Never swallow errors silently in `.catch(function () {})`. Always log the error
+object. This bug existed since the auto-sync feature was introduced but was invisible because
+the catch block discarded the error.
+
+### Bug 2: `checkForUpdate` depended on `loadConfig` success
+
+**Symptom**: Same as Bug 1 — no update banner.
+
+**Root cause**: `checkForUpdate(view)` was called at the end of `loadConfig`'s `.then()`
+callback. When `loadConfig` crashed (Bug 1), `checkForUpdate` never executed.
+
+**Fix**: Call `checkForUpdate(this.view)` directly from `onResume`, alongside `loadConfig`
+and `loadDashboard`, so it runs independently. Also removed the DOM checkbox dependency for
+the beta channel — `checkForUpdate` no longer reads `.chkUseBetaChannel.checked` from the
+form (which requires `loadConfig` to have populated it). Instead, the server reads
+`UseBetaChannel` from its own persisted config via `Plugin.Instance.Configuration`.
+
+**Lesson**: Features that should always run (update check, cache bust) must not be nested
+inside unrelated async callbacks. Keep them as independent calls in `onResume`.
+
+### Bug 3: `LastInstalledVersion` suppressed the banner after testing
+
+**Symptom**: After manually clicking "Update Now" during a test session, the banner stopped
+appearing for that version even after reverting to an older DLL.
+
+**Root cause**: `UpdateChecker.CheckForUpdateAsync` compares `config.LastInstalledVersion`
+against the latest GitHub release version. If they match, it sets `UpdateAvailable = false`
+to prevent re-showing the banner for an already-installed update. During testing, clicking
+"Update Now" for v1.4.16 stored `LastInstalledVersion = "1.4.16"` in the config XML. When
+we later downgraded the DLL and tried to test the banner path, the suppression kicked in.
+
+**Fix**: Clear `<LastInstalledVersion>` in the config XML on the server. No code change
+needed — this is working as designed, it just tripped us up during testing.
+
+**Lesson**: When testing the update banner flow, remember that `LastInstalledVersion` persists
+across DLL swaps. Clear it in the config XML if you need to re-test the banner for the same
+version: `sed -i 's|<LastInstalledVersion>.*</LastInstalledVersion>|<LastInstalledVersion></LastInstalledVersion>|'`.
+
+### Bug 4: Cmd+Shift+R / hard refresh not enough for stale cache
+
+**Symptom**: After swapping DLLs (e.g. downgrading from v1.4.16 to v1.4.8), hard refresh
+still served the old JS. The page showed an "Error processing the request" dialog because
+the cached JS from one version tried to call APIs from another.
+
+**Root cause**: Emby's `Cache-Control: public` without `max-age` lets browsers apply
+heuristic freshness. Hard refresh (`Cmd+Shift+R`) sends `Cache-Control: no-cache` but
+Emby's response headers may still allow intermediate caches (or the browser itself) to
+serve a heuristically-fresh copy. The only reliable fix is "Empty Cache and Hard Reload"
+(right-click the reload button in Chrome DevTools) or incognito mode.
+
+**Lesson**: For testing across DLL version swaps, always use an incognito window to
+guarantee a clean cache. Regular hard refresh is not sufficient with Emby's cache headers.
+This is the exact user-facing problem the cache-bust mechanism solves for forward upgrades.
+
 ## Consequences
 
 - Every plugin update now triggers one automatic page reload on each user's first visit —
@@ -155,3 +225,19 @@ If users report issues (infinite reloads, broken page after update, etc.):
 - If this approach proves insufficient (e.g. the first-visit edge case matters), Solution 2
   (build-time stamp) can be layered on top without conflict — it replaces the localStorage
   check with an embedded version check but uses the same fetch + reload mechanism.
+
+## Testing Checklist
+
+When verifying the cache-bust and update banner in future releases:
+
+1. **Use incognito** for all testing across DLL version swaps
+2. **Clear `LastInstalledVersion`** in config XML if re-testing the banner for the same version
+3. **Check the browser console** for errors — both `loadConfig` and `checkForUpdate` now log
+   the actual error object
+4. **Verify the API directly** with curl if the banner doesn't appear:
+   ```bash
+   curl -s "http://<host>:8097/emby/XtreamTuner/CheckUpdate" \
+     -H "X-Emby-Token: <token>" | python3 -m json.tool
+   ```
+5. **Check `UpdateAvailable`**: if `false` despite a newer release, check `LastInstalledVersion`
+   in the config XML
