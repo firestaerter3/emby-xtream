@@ -427,9 +427,9 @@ function (BaseView, loading) {
 
             // Load cached categories from config (instant, no API call)
             loadCachedCategories(instance, config);
-        }).catch(function () {
+        }).catch(function (err) {
             loading.hide();
-            console.error('Xtream: failed to load plugin configuration');
+            console.error('Xtream: failed to load plugin configuration', err);
         });
     }
 
@@ -1677,8 +1677,8 @@ function (BaseView, loading) {
             } else {
                 banner.style.display = 'none';
             }
-        }).catch(function () {
-            // Update check failed silently
+        }).catch(function (err) {
+            console.error('Xtream: update check failed', err);
         });
     }
 
@@ -2286,8 +2286,8 @@ function (BaseView, loading) {
             var interval = config.AutoSyncIntervalHours || 24;
             var nextText = '';
             var lastTs = config.LastMovieSyncTimestamp;
-            if (lastTs && lastTs.indexOf('0001') !== 0) {
-                var lastDate = new Date(lastTs);
+            if (lastTs) {
+                var lastDate = typeof lastTs === 'number' ? new Date(lastTs * 1000) : new Date(lastTs);
                 if (!isNaN(lastDate.getTime())) {
                     var diff = new Date(lastDate.getTime() + interval * 3600000) - new Date();
                     if (diff > 0) {
