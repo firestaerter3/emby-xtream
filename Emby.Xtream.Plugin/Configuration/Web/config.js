@@ -308,6 +308,7 @@ function (BaseView, loading) {
         BaseView.prototype.onResume.apply(this, arguments);
         loadConfig(this);
         loadDashboard(this.view);
+        checkForUpdate(this.view);
     };
 
     View.prototype.onPause = function () {};
@@ -426,9 +427,6 @@ function (BaseView, loading) {
 
             // Load cached categories from config (instant, no API call)
             loadCachedCategories(instance, config);
-
-            // Check for updates after config is applied so UseBetaChannel is correct
-            checkForUpdate(view);
         }).catch(function () {
             loading.hide();
             console.error('Xtream: failed to load plugin configuration');
@@ -1611,9 +1609,9 @@ function (BaseView, loading) {
     }
 
     function checkForUpdate(view) {
-        var betaEl = view.querySelector('.chkUseBetaChannel');
-        var betaParam = betaEl ? ('?beta=' + (betaEl.checked ? 'true' : 'false')) : '';
-        var apiUrl = ApiClient.getUrl('XtreamTuner/CheckUpdate') + betaParam;
+        // No beta param — server reads UseBetaChannel from its own config.
+        // This lets checkForUpdate run independently of loadConfig.
+        var apiUrl = ApiClient.getUrl('XtreamTuner/CheckUpdate');
 
         ApiClient.getJSON(apiUrl).then(function (data) {
             var banner = view.querySelector('.updateBanner');
