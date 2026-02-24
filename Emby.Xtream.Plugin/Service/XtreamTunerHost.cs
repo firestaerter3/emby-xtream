@@ -130,6 +130,7 @@ namespace Emby.Xtream.Plugin.Service
                     IsLive = p.IsLive,
                     IsRepeat = p.IsPreviouslyShown,
                     IsPremiere = p.IsNew || p.IsPremiere,
+                    ImageUrl = string.IsNullOrEmpty(p.ImageUrl) ? null : p.ImageUrl,
                 });
             }
 

@@ -129,6 +129,12 @@ namespace Emby.Xtream.Plugin.Client
                 {
                     program.IsPremiere = true;
                 }
+                else if (string.Equals(name, "icon", StringComparison.OrdinalIgnoreCase))
+                {
+                    var src = reader.GetAttribute("src");
+                    if (!string.IsNullOrEmpty(src))
+                        program.ImageUrl = src;
+                }
             }
 
             return program;

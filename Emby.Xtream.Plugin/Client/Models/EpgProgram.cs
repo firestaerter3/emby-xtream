@@ -43,5 +43,6 @@ namespace Emby.Xtream.Plugin.Client.Models
         [JsonIgnore] public bool IsPreviouslyShown { get; set; }
         [JsonIgnore] public bool IsPremiere { get; set; }
         [JsonIgnore] public bool IsPlainText { get; set; }
+        [JsonIgnore] public string ImageUrl { get; set; }
     }
 }
