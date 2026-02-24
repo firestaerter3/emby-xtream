@@ -23,10 +23,10 @@ namespace Emby.Xtream.Plugin.Client.Models
 
     /// <summary>
     /// Channel object returned when fetching with include_streams=true.
-    /// The stream_id field inside embedded stream sources is unreliable — for URL-based sources
-    /// it contains the source's internal Dispatcharr ID rather than the Xtream provider stream_id.
-    /// Both UUID and stats maps are therefore keyed by ch.Id, which is the value Dispatcharr's
-    /// Xtream emulation always presents to Emby as the channel's stream_id.
+    /// UUID, tvg-id, station-id, and stats maps are keyed by stream.StreamId
+    /// (the Xtream provider's stream_id from the embedded stream objects), which is
+    /// what Emby stores and uses for playback lookups. ch.Id is Dispatcharr's own
+    /// internal channel ID and does not match the Xtream stream_id.
     /// </summary>
     public class DispatcharrChannelWithStreams
     {

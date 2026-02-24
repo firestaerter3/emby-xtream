@@ -18,5 +18,14 @@ namespace Emby.Xtream.Plugin.Client.Models
 
         [JsonPropertyName("ffmpeg_output_bitrate")]
         public double? Bitrate { get; set; }
+
+        [JsonPropertyName("audio_channels")]
+        public string AudioChannels { get; set; }
+
+        [JsonPropertyName("audio_bitrate")]
+        public double? AudioBitrate { get; set; }
+
+        [JsonPropertyName("sample_rate")]
+        public int? SampleRate { get; set; }
     }
 }

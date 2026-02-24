@@ -73,26 +73,59 @@ namespace Emby.Xtream.Plugin.Client
 
             foreach (var ch in channels)
             {
-                if (string.IsNullOrEmpty(ch.Uuid) || ch.Id == 0) continue;
+                if (string.IsNullOrEmpty(ch.Uuid)) continue;
 
-                // Key by ch.Id — Dispatcharr's Xtream emulation always uses ch.Id as the
-                // stream_id it presents to Emby.  The stream_id field inside embedded stream
-                // sources reflects the upstream provider's own ID (or, for URL-based sources,
-                // the source's internal Dispatcharr ID), neither of which reliably matches
-                // what Emby stores as the channel's stream_id.
-                uuidMap[ch.Id] = ch.Uuid;
+                // We need to key all maps by the stream_id that the plugin received from the
+                // Xtream API and stored as TunerChannelId.  There are two configurations:
+                //
+                // Config A: BaseUrl → upstream Xtream provider directly
+                //   The plugin's channel stream_ids are the provider's IDs (e.g. 69307).
+                //   Dispatcharr stores these as stream.StreamId in its embedded stream objects.
+                //   Key: stream.StreamId
+                //
+                // Config B: BaseUrl → Dispatcharr's Xtream emulation
+                //   The plugin's channel stream_ids are Dispatcharr's channel IDs (ch.Id).
+                //   Key: ch.Id
+                //
+                // We don't know which config the user has, so write both keys.  When they
+                // differ, stream.StreamId covers Config A; ch.Id covers Config B.
+                // ContainsKey guards prevent a later entry from overwriting an earlier one.
+                foreach (var stream in ch.Streams)
+                {
+                    if (!stream.StreamId.HasValue) continue;
+                    var sid = stream.StreamId.Value;
 
-                if (!string.IsNullOrEmpty(ch.TvgId))
+                    if (!uuidMap.ContainsKey(sid))
+                        uuidMap[sid] = ch.Uuid;
+
+                    if (!string.IsNullOrEmpty(ch.TvgId) && !tvgIdMap.ContainsKey(sid))
+                        tvgIdMap[sid] = ch.TvgId;
+
+                    if (!string.IsNullOrEmpty(ch.TvcGuideStationId) && !stationIdMap.ContainsKey(sid))
+                        stationIdMap[sid] = ch.TvcGuideStationId;
+
+                    if (stream.StreamStats?.VideoCodec != null && !statsMap.ContainsKey(sid))
+                        statsMap[sid] = stream.StreamStats;
+                }
+
+                // Also key by ch.Id (Dispatcharr's channel ID) so Config B works.
+                // These only write if no entry already exists for that key.
+                if (!uuidMap.ContainsKey(ch.Id))
+                    uuidMap[ch.Id] = ch.Uuid;
+
+                if (!string.IsNullOrEmpty(ch.TvgId) && !tvgIdMap.ContainsKey(ch.Id))
                     tvgIdMap[ch.Id] = ch.TvgId;
 
-                if (!string.IsNullOrEmpty(ch.TvcGuideStationId))
+                if (!string.IsNullOrEmpty(ch.TvcGuideStationId) && !stationIdMap.ContainsKey(ch.Id))
                     stationIdMap[ch.Id] = ch.TvcGuideStationId;
 
-                // Take stream stats from the first source that carries them.
                 foreach (var stream in ch.Streams)
                 {
                     if (stream.StreamStats?.VideoCodec != null && !statsMap.ContainsKey(ch.Id))
+                    {
                         statsMap[ch.Id] = stream.StreamStats;
+                        break;
+                    }
                 }
             }
 

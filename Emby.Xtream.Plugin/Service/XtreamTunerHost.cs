@@ -509,11 +509,19 @@ namespace Emby.Xtream.Plugin.Service
 
                 mediaStreams.Add(videoStream);
 
-                // Dispatcharr stream_stats does not include audio channel count.
-                // Apply broadcast defaults so Emby has complete stream info.
+                // Prefer the audio_channels field from stream_stats when present (Dispatcharr
+                // 0.19.0+ includes it as e.g. "5.1", "2.0", "stereo").  Fall back to
+                // codec-based broadcast defaults when the field is absent.
                 int? audioChannels = null;
                 string channelLayout = null;
-                if (audioCodecLower == "ac3" || audioCodecLower == "eac3")
+                if (!string.IsNullOrEmpty(stats.AudioChannels))
+                {
+                    audioChannels = ParseAudioChannelCount(stats.AudioChannels);
+                    channelLayout = stats.AudioChannels.Contains(".")
+                        ? stats.AudioChannels  // e.g. "5.1", "7.1"
+                        : stats.AudioChannels; // e.g. "stereo", "mono"
+                }
+                else if (audioCodecLower == "ac3" || audioCodecLower == "eac3")
                 {
                     audioChannels = 6;
                     channelLayout = "5.1(side)";
@@ -564,6 +572,29 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             return mediaSource;
+        }
+
+        /// <summary>
+        /// Parses an ffmpeg-style audio channel layout string ("5.1", "7.1", "stereo",
+        /// "mono", "2.0") into a channel count.  Returns null for unrecognised values.
+        /// </summary>
+        internal static int? ParseAudioChannelCount(string layout)
+        {
+            if (string.IsNullOrEmpty(layout)) return null;
+            var lower = layout.ToLowerInvariant().Trim();
+            if (lower == "mono") return 1;
+            if (lower == "stereo") return 2;
+            // "X.Y" format: total = X + Y  (e.g. "5.1" → 6, "7.1" → 8, "2.0" → 2)
+            var dot = lower.IndexOf('.');
+            if (dot > 0 &&
+                int.TryParse(lower.Substring(0, dot), NumberStyles.None, CultureInfo.InvariantCulture, out int main) &&
+                int.TryParse(lower.Substring(dot + 1), NumberStyles.None, CultureInfo.InvariantCulture, out int lfe))
+            {
+                return main + lfe;
+            }
+            if (int.TryParse(lower, NumberStyles.None, CultureInfo.InvariantCulture, out int plain))
+                return plain;
+            return null;
         }
 
         private static string MapVideoCodec(string dispatcharrCodec)
