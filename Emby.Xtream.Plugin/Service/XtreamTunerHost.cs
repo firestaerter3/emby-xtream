@@ -40,6 +40,7 @@ namespace Emby.Xtream.Plugin.Service
         private volatile Dictionary<int, string> _channelUuidMap = new Dictionary<int, string>();
         private volatile Dictionary<int, string> _tvgIdMap = new Dictionary<int, string>();
         private volatile Dictionary<int, string> _stationIdMap = new Dictionary<int, string>();
+        private volatile Dictionary<string, int> _tunerChannelIdToStreamId = new Dictionary<string, int>();
         private volatile bool _dispatcharrDataLoaded;
         private List<ChannelInfo> _cachedChannels;
         private DateTime _cacheTime = DateTime.MinValue;
@@ -86,7 +87,12 @@ namespace Emby.Xtream.Plugin.Service
             DateTimeOffset startDateUtc, DateTimeOffset endDateUtc,
             CancellationToken cancellationToken)
         {
-            if (!int.TryParse(tunerChannelId, NumberStyles.None, CultureInfo.InvariantCulture, out int streamId))
+            int streamId;
+            if (_tunerChannelIdToStreamId.TryGetValue(tunerChannelId, out streamId))
+            {
+                // Translated station ID → stream ID via mapping
+            }
+            else if (!int.TryParse(tunerChannelId, NumberStyles.None, CultureInfo.InvariantCulture, out streamId))
             {
                 Logger.Warn("GetProgramsInternal: cannot parse tunerChannelId '{0}'", tunerChannelId);
                 return new List<ProgramInfo>();
@@ -155,9 +161,9 @@ namespace Emby.Xtream.Plugin.Service
                 // Re-apply from _stationIdMap on every cache hit so the field is always correct.
                 foreach (var ch in _cachedChannels)
                 {
-                    if (config.EnableGracenoteMatching
-                        && int.TryParse(ch.TunerChannelId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var sid)
-                        && _stationIdMap.TryGetValue(sid, out var stId)
+                    if (config.EnableDispatcharr
+                        && _tunerChannelIdToStreamId.TryGetValue(ch.TunerChannelId, out var streamIdForLookup)
+                        && _stationIdMap.TryGetValue(streamIdForLookup, out var stId)
                         && !string.IsNullOrEmpty(stId))
                         ch.ListingsChannelId = stId;
                     else
@@ -234,6 +240,9 @@ namespace Emby.Xtream.Plugin.Service
             var categoryMap = categoriesTask.Result;
             int statsCount = newStats.Count;
 
+            var usedStationIds = new HashSet<string>(StringComparer.Ordinal);
+            var newTunerChannelIdToStreamId = new Dictionary<string, int>();
+
             var result = channels.Select(channel =>
             {
                 var cleanName = ChannelNameCleaner.CleanChannelName(
@@ -251,18 +260,35 @@ namespace Emby.Xtream.Plugin.Service
                     tags = new[] { groupTitle };
                 }
 
+                // Determine TunerChannelId: use Gracenote station ID for guide matching
+                // when available, otherwise use stream ID. Emby's matching waterfall uses
+                // TunerChannelId (not ListingsChannelId) to correlate channels with guide data.
+                string tunerChannelId = streamIdStr;
                 string listingsChannelId = null;
-                if (config.EnableGracenoteMatching
-                    && _stationIdMap.TryGetValue(channel.StreamId, out var stationId))
+                if (config.EnableDispatcharr
+                    && _stationIdMap.TryGetValue(channel.StreamId, out var stationId)
+                    && !string.IsNullOrEmpty(stationId))
                 {
-                    listingsChannelId = stationId;
-                    Logger.Debug("Stream {0} ({1}): ListingsChannelId = {2}", channel.StreamId, cleanName, stationId);
+                    if (usedStationIds.Add(stationId))
+                    {
+                        tunerChannelId = stationId;
+                        listingsChannelId = stationId;
+                        Logger.Debug("Stream {0} ({1}): TunerChannelId = {2} (Gracenote station ID)",
+                            channel.StreamId, cleanName, stationId);
+                    }
+                    else
+                    {
+                        Logger.Warn("Stream {0} ({1}): duplicate station ID {2}, falling back to stream ID as TunerChannelId",
+                            channel.StreamId, cleanName, stationId);
+                    }
                 }
+
+                newTunerChannelIdToStreamId[tunerChannelId] = channel.StreamId;
 
                 return new ChannelInfo
                 {
                     Id = CreateEmbyChannelId(tuner, streamIdStr),
-                    TunerChannelId = streamIdStr,
+                    TunerChannelId = tunerChannelId,
                     Name = cleanName,
                     Number = channel.Num.ToString(CultureInfo.InvariantCulture),
                     ImageUrl = string.IsNullOrEmpty(channel.StreamIcon) ? null : channel.StreamIcon,
@@ -274,6 +300,7 @@ namespace Emby.Xtream.Plugin.Service
             }).ToList();
 
             _streamStats = newStats;
+            _tunerChannelIdToStreamId = newTunerChannelIdToStreamId;
             _cachedChannels = result;
             _cacheTime = DateTime.UtcNow;
             var gracenoteCount = result.Count(c => c.ListingsChannelId != null);
@@ -302,7 +329,7 @@ namespace Emby.Xtream.Plugin.Service
             TunerHostInfo tuner, MediaBrowser.Controller.Entities.BaseItem dbChannel,
             ChannelInfo tunerChannel, CancellationToken cancellationToken)
         {
-            if (!TryParseStreamId(tunerChannel, out int streamId))
+            if (!TryResolveStreamId(tunerChannel, out int streamId))
             {
                 return new List<MediaSourceInfo>();
             }
@@ -328,7 +355,7 @@ namespace Emby.Xtream.Plugin.Service
             ChannelInfo tunerChannel, string mediaSourceId,
             CancellationToken cancellationToken)
         {
-            if (!TryParseStreamId(tunerChannel, out int streamId))
+            if (!TryResolveStreamId(tunerChannel, out int streamId))
             {
                 throw new System.IO.FileNotFoundException(
                     string.Format("Channel {0} not found in Xtream tuner", tunerChannel?.Id));
@@ -363,6 +390,7 @@ namespace Emby.Xtream.Plugin.Service
             _channelUuidMap = new Dictionary<int, string>();
             _tvgIdMap = new Dictionary<int, string>();
             _stationIdMap = new Dictionary<int, string>();
+            _tunerChannelIdToStreamId = new Dictionary<string, int>();
             _dispatcharrDataLoaded = false;
             Logger.Info("Xtream tuner caches cleared");
         }
@@ -411,12 +439,18 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        private static bool TryParseStreamId(ChannelInfo tunerChannel, out int streamId)
+        private bool TryResolveStreamId(ChannelInfo tunerChannel, out int streamId)
         {
             streamId = 0;
             if (tunerChannel == null) return false;
 
             var id = tunerChannel.TunerChannelId ?? tunerChannel.Id;
+
+            // Check authoritative mapping first (handles station ID → stream ID translation)
+            if (_tunerChannelIdToStreamId.TryGetValue(id, out streamId))
+                return true;
+
+            // Fallback: parse directly (before channel list is loaded)
             return int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out streamId);
         }
 

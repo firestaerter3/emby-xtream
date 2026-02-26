@@ -657,26 +657,15 @@
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0.5em;">
                             <label>
-                                <input class="chkEnableGracenoteMatching" type="checkbox" is="emby-checkbox" />
-                                <span>Use Gracenote guide matching</span>
-                            </label>
-                            <div class="fieldDescription checkboxFieldDescription">
-                                Match tuner channels to guide data using the Gracenote Station ID from
-                                Dispatcharr. Enable this if you use Channel Identifiarr, Emby Premiere
-                                Guide Data, or any other Gracenote-based guide source. This is the
-                                primary option for guide matching.
-                            </div>
-                        </div>
-                        <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0.5em;">
-                            <label>
                                 <input class="chkEnableGracenoteTvgId" type="checkbox" is="emby-checkbox" />
                                 <span>Use Gracenote Station ID as tvg-id</span>
                             </label>
                             <div class="fieldDescription checkboxFieldDescription">
                                 Override the tvg-id in the M3U output with the Gracenote Station ID
-                                from Dispatcharr. Only needed if you feed the plugin's M3U to an
-                                external tool (e.g. Plex, or a separate M3U tuner). Not needed for
-                                Xtream tuner guide matching — use the option above for that.
+                                from Dispatcharr. Only needed if you use Channel Identifiarr, or feed
+                                the plugin's M3U to an external tool that matches by tvg-id (e.g. Plex).
+                                Not required for Emby guide matching — Emby uses tvc-guide-stationid,
+                                which is always included when a station ID is available.
                             </div>
                         </div>
                         <button class="btnTestDispatcharr raised button-secondary" is="emby-button" type="button">

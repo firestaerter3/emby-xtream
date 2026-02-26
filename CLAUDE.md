@@ -27,7 +27,7 @@ If the Emby guide grid shows no channels despite having channel data, check brow
 
 ### SupportsGuideData controls whether Emby polls the tuner for EPG
 
-When `SupportsGuideData()` returns `true`, Emby calls `GetProgramsInternal` on the tuner host for each channel. The `tunerChannelId` parameter is the raw stream ID (e.g. `"12345"`), not the Emby-prefixed form.
+When `SupportsGuideData()` returns `true`, Emby calls `GetProgramsInternal` on the tuner host for each channel. The `tunerChannelId` parameter is whatever was set in `ChannelInfo.TunerChannelId` — the Gracenote station ID (e.g. `"51529"`) when Dispatcharr is enabled and a station ID exists for the channel, or the raw stream ID (e.g. `"12345"`) otherwise. Use `_tunerChannelIdToStreamId` to translate either form back to a stream ID.
 
 ### Emby probes MediaSource.Path directly — disable for Dispatcharr
 
