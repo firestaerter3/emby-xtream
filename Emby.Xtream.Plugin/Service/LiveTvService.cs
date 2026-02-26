@@ -40,10 +40,8 @@ namespace Emby.Xtream.Plugin.Service
         private Dictionary<int, string> _epgChannelIdByStreamId = new Dictionary<int, string>();
 
         private string _cachedM3U;
-        private string _cachedCatchupM3U;
         private string _cachedEpgXml;
         private DateTime _m3uCacheTime = DateTime.MinValue;
-        private DateTime _catchupCacheTime = DateTime.MinValue;
         private DateTime _epgCacheTime = DateTime.MinValue;
         private bool _disposed;
 
@@ -89,62 +87,12 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 var channels = channelsTask.Result;
-                var m3u = GenerateM3U(channels, config, categoryMap, catchupOnly: false,
+                var m3u = GenerateM3U(channels, config, categoryMap,
                     XtreamTunerHost.Instance?.TvgIdMap,
                     XtreamTunerHost.Instance?.StationIdMap);
 
                 _cachedM3U = m3u;
                 _m3uCacheTime = DateTime.UtcNow;
-
-                return m3u;
-            }
-            finally
-            {
-                _m3uLock.Release();
-            }
-        }
-
-        /// <summary>
-        /// Gets the M3U playlist for catch-up enabled channels only.
-        /// </summary>
-        public async Task<string> GetCatchupM3UPlaylistAsync(CancellationToken cancellationToken)
-        {
-            var config = Plugin.Instance.Configuration;
-
-            await _m3uLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                if (_cachedCatchupM3U != null && DateTime.UtcNow - _catchupCacheTime < TimeSpan.FromMinutes(config.M3UCacheMinutes))
-                {
-                    _logger.Debug("Returning cached Catchup M3U playlist");
-                    return _cachedCatchupM3U;
-                }
-
-                _logger.Info("Generating Catchup M3U playlist");
-                if (XtreamTunerHost.Instance != null)
-                    await XtreamTunerHost.Instance.EnsureStatsLoadedAsync(cancellationToken).ConfigureAwait(false);
-                var channelsTask = GetFilteredChannelsAsync(cancellationToken);
-                var categoriesTask = GetLiveCategoriesAsync(cancellationToken);
-                Dictionary<int, string> categoryMap;
-                try
-                {
-                    await Task.WhenAll(channelsTask, categoriesTask).ConfigureAwait(false);
-                    categoryMap = categoriesTask.Result.ToDictionary(c => c.CategoryId, c => c.CategoryName);
-                }
-                catch (Exception ex)
-                {
-                    _logger.Warn("Failed to fetch live categories for catchup M3U group-title; categories will be omitted: {0}", ex.Message);
-                    await channelsTask.ConfigureAwait(false);
-                    categoryMap = new Dictionary<int, string>();
-                }
-
-                var channels = channelsTask.Result;
-                var m3u = GenerateM3U(channels, config, categoryMap, catchupOnly: true,
-                    XtreamTunerHost.Instance?.TvgIdMap,
-                    XtreamTunerHost.Instance?.StationIdMap);
-
-                _cachedCatchupM3U = m3u;
-                _catchupCacheTime = DateTime.UtcNow;
 
                 return m3u;
             }
@@ -211,10 +159,8 @@ namespace Emby.Xtream.Plugin.Service
         public void InvalidateCache()
         {
             _cachedM3U = null;
-            _cachedCatchupM3U = null;
             _cachedEpgXml = null;
             _m3uCacheTime = DateTime.MinValue;
-            _catchupCacheTime = DateTime.MinValue;
             _epgCacheTime = DateTime.MinValue;
             lock (_perChannelEpgLock)
             {
@@ -337,18 +283,13 @@ namespace Emby.Xtream.Plugin.Service
             List<LiveStreamInfo> channels,
             PluginConfiguration config,
             Dictionary<int, string> categoryNames,
-            bool catchupOnly,
             IReadOnlyDictionary<int, string> tvgIdMap = null,
             IReadOnlyDictionary<int, string> stationIdMap = null)
         {
             var sb = new StringBuilder();
             sb.AppendLine("#EXTM3U");
 
-            var filteredChannels = catchupOnly
-                ? channels.Where(c => c.HasTvArchive && c.TvArchiveDuration > 0).ToList()
-                : channels;
-
-            foreach (var channel in filteredChannels.OrderBy(c => c.Num))
+            foreach (var channel in channels.OrderBy(c => c.Num))
             {
                 var cleanName = ChannelNameCleaner.CleanChannelName(
                     channel.Name,
@@ -397,17 +338,6 @@ namespace Emby.Xtream.Plugin.Service
                     extinf.AppendFormat(CultureInfo.InvariantCulture, " tvc-guide-stationid=\"{0}\"", EscapeAttribute(stationId));
                 }
 
-                // Add catch-up attributes if enabled and channel supports it
-                if (config.EnableCatchup && channel.HasTvArchive && channel.TvArchiveDuration > 0)
-                {
-                    var catchupDays = Math.Min(config.CatchupDays, channel.TvArchiveDuration);
-                    extinf.Append(" catchup=\"default\"");
-                    extinf.AppendFormat(CultureInfo.InvariantCulture, " catchup-days=\"{0}\"", catchupDays);
-
-                    var catchupSource = BuildCatchupUrl(config, channel);
-                    extinf.AppendFormat(CultureInfo.InvariantCulture, " catchup-source=\"{0}\"", EscapeAttribute(catchupSource));
-                }
-
                 extinf.AppendFormat(CultureInfo.InvariantCulture, ",{0}", cleanName);
 
                 sb.AppendLine(extinf.ToString());
@@ -423,13 +353,6 @@ namespace Emby.Xtream.Plugin.Service
             return string.Format(CultureInfo.InvariantCulture,
                 "{0}/live/{1}/{2}/{3}.{4}",
                 config.BaseUrl, config.Username, config.Password, channel.StreamId, extension);
-        }
-
-        private static string BuildCatchupUrl(PluginConfiguration config, LiveStreamInfo channel)
-        {
-            return string.Format(CultureInfo.InvariantCulture,
-                "{0}/timeshift/{1}/{2}/{{duration}}/{{start}}/{3}.ts",
-                config.BaseUrl, config.Username, config.Password, channel.StreamId);
         }
 
         private async Task<string> GenerateXmltvAsync(List<LiveStreamInfo> channels, PluginConfiguration config, CancellationToken cancellationToken)

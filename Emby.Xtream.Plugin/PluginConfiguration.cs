@@ -20,10 +20,6 @@ namespace Emby.Xtream.Plugin
         public int EpgDaysToFetch { get; set; } = 2;
         public int M3UCacheMinutes { get; set; } = 15;
 
-        // Catch-up / Timeshift
-        public bool EnableCatchup { get; set; }
-        public int CatchupDays { get; set; } = 7;
-
         // Category filtering
         public int[] SelectedLiveCategoryIds { get; set; } = new int[0];
         public bool IncludeAdultChannels { get; set; }

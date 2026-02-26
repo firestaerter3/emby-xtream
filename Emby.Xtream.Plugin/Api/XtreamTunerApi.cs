@@ -25,11 +25,6 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
-    [Route("/XtreamTuner/Catchup", "GET", Summary = "Gets M3U playlist for catch-up enabled channels")]
-    public class GetCatchupM3U : IReturnVoid
-    {
-    }
-
     [Route("/XtreamTuner/Categories/Live", "GET", Summary = "Gets Live TV categories from Xtream API")]
     public class GetLiveCategories : IReturn<List<Category>>
     {
@@ -234,15 +229,6 @@ namespace Emby.Xtream.Plugin.Api
         {
             var liveTvService = Plugin.Instance.LiveTvService;
             var m3u = await liveTvService.GetM3UPlaylistAsync(CancellationToken.None).ConfigureAwait(false);
-
-            var stream = new MemoryStream(Encoding.UTF8.GetBytes(m3u));
-            return ResultFactory.GetResult(Request, stream, "audio/x-mpegurl", new Dictionary<string, string>());
-        }
-
-        public async Task<object> Get(GetCatchupM3U request)
-        {
-            var liveTvService = Plugin.Instance.LiveTvService;
-            var m3u = await liveTvService.GetCatchupM3UPlaylistAsync(CancellationToken.None).ConfigureAwait(false);
 
             var stream = new MemoryStream(Encoding.UTF8.GetBytes(m3u));
             return ResultFactory.GetResult(Request, stream, "audio/x-mpegurl", new Dictionary<string, string>());
