@@ -48,10 +48,6 @@ function (BaseView, loading) {
             updateEpgVisibility(view);
         });
 
-        view.querySelector('.chkEnableCatchup').addEventListener('change', function () {
-            updateCatchupVisibility(view);
-        });
-
         view.querySelector('.chkSyncMovies').addEventListener('change', function () {
             updateVodMovieVisibility(view);
         });
@@ -331,9 +327,6 @@ function (BaseView, loading) {
             view.querySelector('.txtEpgDaysToFetch').value = config.EpgDaysToFetch || 2;
             view.querySelector('.txtM3UCacheMinutes').value = config.M3UCacheMinutes || 15;
 
-            view.querySelector('.chkEnableCatchup').checked = !!config.EnableCatchup;
-            view.querySelector('.txtCatchupDays').value = config.CatchupDays || 7;
-
             instance.selectedCategoryIds = config.SelectedLiveCategoryIds || [];
 
             // Unified name cleaning (drives both content + channel cleaning)
@@ -410,7 +403,6 @@ function (BaseView, loading) {
             updateNameCleaningVisibility(view);
             updateDispatcharrVisibility(view);
             updateEpgVisibility(view);
-            updateCatchupVisibility(view);
             updateVodMovieVisibility(view);
             updateSeriesVisibility(view);
             updateFoldersVisibility(view, 'movie');
@@ -452,9 +444,6 @@ function (BaseView, loading) {
             config.EpgCacheMinutes = parseInt(view.querySelector('.txtEpgCacheMinutes').value, 10) || 30;
             config.EpgDaysToFetch = parseInt(view.querySelector('.txtEpgDaysToFetch').value, 10) || 2;
             config.M3UCacheMinutes = parseInt(view.querySelector('.txtM3UCacheMinutes').value, 10) || 15;
-
-            config.EnableCatchup = view.querySelector('.chkEnableCatchup').checked;
-            config.CatchupDays = parseInt(view.querySelector('.txtCatchupDays').value, 10) || 7;
 
             config.SelectedLiveCategoryIds = getSelectedCategoryIds(instance);
 
@@ -565,11 +554,6 @@ function (BaseView, loading) {
     function updateEpgVisibility(view) {
         var enabled = view.querySelector('.chkEnableEpg').checked;
         view.querySelector('.epgSettings').style.display = enabled ? '' : 'none';
-    }
-
-    function updateCatchupVisibility(view) {
-        var enabled = view.querySelector('.chkEnableCatchup').checked;
-        view.querySelector('.catchupSettings').style.display = enabled ? '' : 'none';
     }
 
     function updateNameCleaningVisibility(view) {
