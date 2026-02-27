@@ -68,6 +68,14 @@ namespace Emby.Xtream.Plugin
                 },
                 new PluginPageInfo
                 {
+                    // Alias: Emby's Admin Plugins page derives the settings URL from
+                    // Plugin.Name with spaces stripped → "XtreamTuner". Registering that
+                    // name here ensures the Plugins management page links work as well.
+                    Name = "XtreamTuner",
+                    EmbeddedResourcePath = "Emby.Xtream.Plugin.Configuration.Web.config.html",
+                },
+                new PluginPageInfo
+                {
                     Name = GetJsPageName(),
                     EmbeddedResourcePath = "Emby.Xtream.Plugin.Configuration.Web.config.js",
                 },
