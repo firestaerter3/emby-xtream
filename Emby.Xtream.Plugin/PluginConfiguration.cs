@@ -36,6 +36,8 @@ namespace Emby.Xtream.Plugin
         public bool DispatcharrFallbackToXtream { get; set; } = true;
         public bool ForceAudioTranscode { get; set; }
         public bool EnableGracenoteTvgId { get; set; }
+        public int[] SelectedDispatcharrProfileIds { get; set; } = new int[0];
+        public string CachedDispatcharrProfiles { get; set; } = string.Empty;
 
         // VOD Movies
         public bool SyncMovies { get; set; }

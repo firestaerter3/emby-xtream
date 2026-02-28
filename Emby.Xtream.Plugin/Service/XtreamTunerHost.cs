@@ -42,6 +42,7 @@ namespace Emby.Xtream.Plugin.Service
         private volatile Dictionary<int, string> _stationIdMap = new Dictionary<int, string>();
         private volatile Dictionary<string, int> _tunerChannelIdToStreamId = new Dictionary<string, int>();
         private volatile bool _dispatcharrDataLoaded;
+        private volatile HashSet<int> _allowedStreamIds;
         private List<ChannelInfo> _cachedChannels;
         private DateTime _cacheTime = DateTime.MinValue;
 
@@ -224,12 +225,34 @@ namespace Emby.Xtream.Plugin.Service
                 try
                 {
                     _dispatcharrClient.Configure(config.DispatcharrUser, config.DispatcharrPass);
-                    var (uuidMap, statsMap, tvgIdMap, stationIdMap) = await _dispatcharrClient.GetChannelDataAsync(
-                        config.DispatcharrUrl, cancellationToken).ConfigureAwait(false);
+
+                    // Profile filtering: build the set of allowed Dispatcharr channel IDs.
+                    HashSet<int> enabledChannelIds = null;
+                    if (config.SelectedDispatcharrProfileIds != null && config.SelectedDispatcharrProfileIds.Length > 0)
+                    {
+                        var profiles = await _dispatcharrClient.GetProfilesAsync(
+                            config.DispatcharrUrl, cancellationToken).ConfigureAwait(false);
+                        enabledChannelIds = new HashSet<int>();
+                        foreach (var profile in profiles)
+                        {
+                            if (Array.IndexOf(config.SelectedDispatcharrProfileIds, profile.Id) >= 0)
+                            {
+                                foreach (var chId in profile.Channels)
+                                    enabledChannelIds.Add(chId);
+                            }
+                        }
+                        Logger.Info("Profile filter active: {0} profile(s), {1} enabled Dispatcharr channel IDs",
+                            config.SelectedDispatcharrProfileIds.Length, enabledChannelIds.Count);
+                    }
+
+                    var (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds) =
+                        await _dispatcharrClient.GetChannelDataAsync(
+                            config.DispatcharrUrl, cancellationToken, enabledChannelIds).ConfigureAwait(false);
                     newStats = statsMap;
                     _channelUuidMap = uuidMap;
                     _tvgIdMap = tvgIdMap;
                     _stationIdMap = stationIdMap;
+                    _allowedStreamIds = allowedStreamIds;
                     _dispatcharrDataLoaded = true;
                 }
                 catch (Exception ex)
@@ -247,6 +270,17 @@ namespace Emby.Xtream.Plugin.Service
             var channels = channelsTask.Result;
             var categoryMap = categoriesTask.Result;
             int statsCount = newStats.Count;
+
+            // Profile filtering: if a profile filter is active, restrict the Xtream channel list
+            // to only those channels whose stream ID is in the allowed set.
+            var allowedIds = _allowedStreamIds;
+            if (allowedIds != null)
+            {
+                var before = channels.Count;
+                channels = channels.Where(c => allowedIds.Contains(c.StreamId)).ToList();
+                Logger.Info("Profile filter applied: {0} → {1} channels ({2} excluded)",
+                    before, channels.Count, before - channels.Count);
+            }
 
             var usedStationIds = new HashSet<string>(StringComparer.Ordinal);
             var newTunerChannelIdToStreamId = new Dictionary<string, int>();
@@ -415,6 +449,7 @@ namespace Emby.Xtream.Plugin.Service
             _tvgIdMap = new Dictionary<int, string>();
             _stationIdMap = new Dictionary<int, string>();
             _tunerChannelIdToStreamId = new Dictionary<string, int>();
+            _allowedStreamIds = null;
             _dispatcharrDataLoaded = false;
             Logger.Info("Xtream tuner caches cleared");
         }
@@ -447,12 +482,31 @@ namespace Emby.Xtream.Plugin.Service
 
             try
             {
-                var (uuidMap, statsMap, tvgIdMap, stationIdMap) = await _dispatcharrClient.GetChannelDataAsync(
-                    config.DispatcharrUrl, cancellationToken).ConfigureAwait(false);
+                // Profile filtering on-demand: re-compute the enabled channel set if profiles are selected.
+                HashSet<int> enabledChannelIds = null;
+                if (config.SelectedDispatcharrProfileIds != null && config.SelectedDispatcharrProfileIds.Length > 0)
+                {
+                    var profiles = await _dispatcharrClient.GetProfilesAsync(
+                        config.DispatcharrUrl, cancellationToken).ConfigureAwait(false);
+                    enabledChannelIds = new HashSet<int>();
+                    foreach (var profile in profiles)
+                    {
+                        if (Array.IndexOf(config.SelectedDispatcharrProfileIds, profile.Id) >= 0)
+                        {
+                            foreach (var chId in profile.Channels)
+                                enabledChannelIds.Add(chId);
+                        }
+                    }
+                }
+
+                var (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds) =
+                    await _dispatcharrClient.GetChannelDataAsync(
+                        config.DispatcharrUrl, cancellationToken, enabledChannelIds).ConfigureAwait(false);
                 if (statsMap.Count > 0) _streamStats = statsMap;
                 if (uuidMap.Count > 0) _channelUuidMap = uuidMap;
                 if (tvgIdMap.Count > 0) _tvgIdMap = tvgIdMap;
                 if (stationIdMap.Count > 0) _stationIdMap = stationIdMap;
+                _allowedStreamIds = allowedStreamIds;
                 _dispatcharrDataLoaded = true;
                 Logger.Info("Loaded {0} UUIDs and {1} stream stats from Dispatcharr on-demand",
                     uuidMap.Count, statsMap.Count);

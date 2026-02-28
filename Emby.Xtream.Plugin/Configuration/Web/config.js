@@ -24,6 +24,8 @@ function (BaseView, loading) {
         this.selectedVodCategoryIds = [];
         this.loadedSeriesCategories = [];
         this.selectedSeriesCategoryIds = [];
+        this.loadedDispatcharrProfiles = [];
+        this.selectedDispatcharrProfileIds = [];
 
         var self = this;
 
@@ -119,6 +121,18 @@ function (BaseView, loading) {
 
         view.querySelector('.btnTestDispatcharr').addEventListener('click', function () {
             testDispatcharrConnection(self);
+        });
+
+        view.querySelector('.btnRefreshProfiles').addEventListener('click', function () {
+            loadDispatcharrProfiles(self);
+        });
+
+        view.querySelector('.btnSelectAllProfiles').addEventListener('click', function () {
+            toggleAllProfiles(view, true);
+        });
+
+        view.querySelector('.btnDeselectAllProfiles').addEventListener('click', function () {
+            toggleAllProfiles(view, false);
         });
 
         view.querySelector('.btnLoadCategories').addEventListener('click', function () {
@@ -346,6 +360,9 @@ function (BaseView, loading) {
             view.querySelector('.chkForceAudioTranscode').checked = !!config.ForceAudioTranscode;
             view.querySelector('.chkEnableGracenoteTvgId').checked = !!config.EnableGracenoteTvgId;
 
+            instance.selectedDispatcharrProfileIds = config.SelectedDispatcharrProfileIds || [];
+            loadCachedDispatcharrProfiles(instance, config);
+
             // Pre-parse cached categories so folder cards render correctly from the start
             var cachedVodCats = null;
             if (config.CachedVodCategories) {
@@ -462,6 +479,7 @@ function (BaseView, loading) {
             config.DispatcharrFallbackToXtream = view.querySelector('.chkDispatcharrFallback').checked;
             config.ForceAudioTranscode = view.querySelector('.chkForceAudioTranscode').checked;
             config.EnableGracenoteTvgId = view.querySelector('.chkEnableGracenoteTvgId').checked;
+            config.SelectedDispatcharrProfileIds = getSelectedDispatcharrProfileIds(instance);
 
             // VOD Movies
             config.SyncMovies = view.querySelector('.chkSyncMovies').checked;
@@ -959,6 +977,112 @@ function (BaseView, loading) {
         }).catch(function () {
             setPillResult(resultEl, false, 'Test request failed. Check server logs.');
         });
+    }
+
+    // ---- Dispatcharr Channel Profiles ----
+
+    function loadCachedDispatcharrProfiles(instance, config) {
+        if (!config.CachedDispatcharrProfiles) return;
+        try {
+            var profiles = JSON.parse(config.CachedDispatcharrProfiles);
+            if (profiles && profiles.length > 0) {
+                instance.loadedDispatcharrProfiles = profiles;
+                renderProfileList(instance.view, profiles, instance.selectedDispatcharrProfileIds);
+            }
+        } catch (e) {}
+    }
+
+    function loadDispatcharrProfiles(instance) {
+        var view = instance.view;
+        var listEl = view.querySelector('.dispatcharrProfilesList');
+        var loadingEl = view.querySelector('.dispatcharrProfilesLoading');
+
+        loadingEl.style.display = 'block';
+        listEl.innerHTML = '';
+        listEl.appendChild(loadingEl);
+
+        var apiUrl = ApiClient.getUrl('XtreamTuner/DispatcharrProfiles');
+        ApiClient.getJSON(apiUrl).then(function (profiles) {
+            loadingEl.style.display = 'none';
+            instance.loadedDispatcharrProfiles = profiles;
+
+            if (!profiles || profiles.length === 0) {
+                listEl.innerHTML = '<div style="opacity:0.5;">No profiles found. Check Dispatcharr connection settings.</div>';
+                return;
+            }
+
+            renderProfileList(view, profiles, instance.selectedDispatcharrProfileIds);
+            view.querySelector('.btnSelectAllProfiles').disabled = false;
+            view.querySelector('.btnDeselectAllProfiles').disabled = false;
+            updateProfileCountBadge(view);
+        }).catch(function () {
+            loadingEl.style.display = 'none';
+            listEl.innerHTML = '<div style="color:#cc4444;">Failed to load profiles. Save Dispatcharr settings first.</div>';
+        });
+    }
+
+    function renderProfileList(view, profiles, selectedIds) {
+        var listEl = view.querySelector('.dispatcharrProfilesList');
+        var html = '';
+        for (var i = 0; i < profiles.length; i++) {
+            var p = profiles[i];
+            var checked = (selectedIds || []).indexOf(p.Id) >= 0 ? ' checked' : '';
+            html += '<div class="checkboxContainer" style="margin:0.15em 0;">';
+            html += '<label style="display:flex; align-items:center; cursor:pointer;">';
+            html += '<input type="checkbox" class="dispatcharrProfileCheckbox" data-profile-id="' + p.Id + '"' + checked + ' style="margin-right:0.5em;" onchange="(function(el){var v=el.closest(\'.dispatcharrProfilesList\');v&&v.dispatchEvent(new Event(\'change\',{bubbles:true}));})(this)" />';
+            html += '<span>' + escapeHtml(p.Name || ('Profile ' + p.Id)) + '</span>';
+            html += '</label>';
+            html += '</div>';
+        }
+        listEl.innerHTML = html;
+
+        view.querySelector('.btnSelectAllProfiles').disabled = profiles.length === 0;
+        view.querySelector('.btnDeselectAllProfiles').disabled = profiles.length === 0;
+
+        // Update count badge whenever a checkbox changes
+        listEl.addEventListener('change', function () {
+            updateProfileCountBadge(view);
+        });
+
+        updateProfileCountBadge(view);
+    }
+
+    function toggleAllProfiles(view, checked) {
+        var checkboxes = view.querySelectorAll('.dispatcharrProfileCheckbox');
+        for (var i = 0; i < checkboxes.length; i++) {
+            checkboxes[i].checked = checked;
+        }
+        updateProfileCountBadge(view);
+    }
+
+    function updateProfileCountBadge(view) {
+        var checkboxes = view.querySelectorAll('.dispatcharrProfileCheckbox');
+        var selected = 0;
+        for (var i = 0; i < checkboxes.length; i++) {
+            if (checkboxes[i].checked) selected++;
+        }
+        var badge = view.querySelector('.dispatcharrProfileCountBadge');
+        if (badge) {
+            badge.style.display = checkboxes.length > 0 ? '' : 'none';
+            badge.querySelector('.profileCountSelected').textContent = selected;
+            badge.querySelector('.profileCountTotal').textContent = checkboxes.length;
+        }
+    }
+
+    function getSelectedDispatcharrProfileIds(instance) {
+        var view = instance.view;
+        var checkboxes = view.querySelectorAll('.dispatcharrProfileCheckbox');
+        var ids = [];
+        for (var i = 0; i < checkboxes.length; i++) {
+            if (checkboxes[i].checked) {
+                ids.push(parseInt(checkboxes[i].getAttribute('data-profile-id'), 10));
+            }
+        }
+        // If no checkboxes rendered (page reloaded without refresh), preserve last known selection
+        if (checkboxes.length === 0) {
+            return instance.selectedDispatcharrProfileIds;
+        }
+        return ids;
     }
 
     // ---- Cached category loading (instant from config) ----

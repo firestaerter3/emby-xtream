@@ -48,4 +48,20 @@ namespace Emby.Xtream.Plugin.Client.Models
         [JsonPropertyName("streams")]
         public List<DispatcharrChannel> Streams { get; set; } = new List<DispatcharrChannel>();
     }
+
+    /// <summary>
+    /// Represents a Dispatcharr Channel Profile.
+    /// The <see cref="Channels"/> list contains only Dispatcharr channel IDs where the membership is enabled.
+    /// </summary>
+    public class DispatcharrProfile
+    {
+        [JsonPropertyName("id")]
+        public int Id { get; set; }
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("channels")]
+        public List<int> Channels { get; set; } = new List<int>();
+    }
 }

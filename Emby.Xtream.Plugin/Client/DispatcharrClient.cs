@@ -50,30 +50,55 @@ namespace Emby.Xtream.Plugin.Client
         }
 
         /// <summary>
+        /// Fetches channel profiles from Dispatcharr. Each profile contains the list of
+        /// Dispatcharr channel IDs where the membership is enabled.
+        /// </summary>
+        public async Task<List<DispatcharrProfile>> GetProfilesAsync(string baseUrl, CancellationToken cancellationToken)
+        {
+            var json = await GetAuthenticatedAsync(
+                baseUrl + "/api/channels/profiles/",
+                baseUrl, cancellationToken).ConfigureAwait(false);
+            if (json == null) return new List<DispatcharrProfile>();
+            return JsonSerializer.Deserialize<List<DispatcharrProfile>>(json, JsonOptions)
+                   ?? new List<DispatcharrProfile>();
+        }
+
+        /// <summary>
         /// Fetches channels with embedded stream sources in a single API call and returns the
-        /// UUID map, stream stats map, TVG-ID map, and Gracenote station ID map, all keyed by
-        /// the Xtream provider's stream_id (ch.Id).
+        /// UUID map, stream stats map, TVG-ID map, Gracenote station ID map, and the set of
+        /// allowed Xtream stream IDs (when profile filtering is active).
         /// Requires Dispatcharr v0.19.0+ (stream_id field in stream objects).
         /// </summary>
-        public async Task<(Dictionary<int, string> UuidMap, Dictionary<int, StreamStatsInfo> StatsMap, Dictionary<int, string> TvgIdMap, Dictionary<int, string> StationIdMap)>
-            GetChannelDataAsync(string baseUrl, CancellationToken cancellationToken)
+        /// <param name="baseUrl">Dispatcharr base URL.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <param name="enabledChannelIds">
+        /// Optional set of Dispatcharr channel IDs (ch.Id) to include.
+        /// When null, all channels are included (no profile filtering).
+        /// </param>
+        public async Task<(Dictionary<int, string> UuidMap, Dictionary<int, StreamStatsInfo> StatsMap, Dictionary<int, string> TvgIdMap, Dictionary<int, string> StationIdMap, HashSet<int> AllowedStreamIds)>
+            GetChannelDataAsync(string baseUrl, CancellationToken cancellationToken, HashSet<int> enabledChannelIds = null)
         {
             var uuidMap = new Dictionary<int, string>();
             var statsMap = new Dictionary<int, StreamStatsInfo>();
             var tvgIdMap = new Dictionary<int, string>();
             var stationIdMap = new Dictionary<int, string>();
+            HashSet<int> allowedStreamIds = enabledChannelIds != null ? new HashSet<int>() : null;
 
             var json = await GetAuthenticatedAsync(
                 baseUrl + "/api/channels/channels/?include_streams=true&limit=2000",
                 baseUrl, cancellationToken).ConfigureAwait(false);
-            if (json == null) return (uuidMap, statsMap, tvgIdMap, stationIdMap);
+            if (json == null) return (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds);
 
             var channels = JsonSerializer.Deserialize<List<DispatcharrChannelWithStreams>>(json, JsonOptions);
-            if (channels == null) return (uuidMap, statsMap, tvgIdMap, stationIdMap);
+            if (channels == null) return (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds);
 
             foreach (var ch in channels)
             {
                 if (string.IsNullOrEmpty(ch.Uuid)) continue;
+
+                // Profile filtering: skip channels not in the enabled set.
+                if (enabledChannelIds != null && !enabledChannelIds.Contains(ch.Id))
+                    continue;
 
                 // We need to key all maps by the stream_id that the plugin received from the
                 // Xtream API and stored as TunerChannelId.  There are two configurations:
@@ -106,6 +131,8 @@ namespace Emby.Xtream.Plugin.Client
 
                     if (stream.StreamStats?.VideoCodec != null && !statsMap.ContainsKey(sid))
                         statsMap[sid] = stream.StreamStats;
+
+                    allowedStreamIds?.Add(sid);
                 }
 
                 // Also key by ch.Id (Dispatcharr's channel ID) so Config B works.
@@ -127,6 +154,8 @@ namespace Emby.Xtream.Plugin.Client
                         break;
                     }
                 }
+
+                allowedStreamIds?.Add(ch.Id);
             }
 
             if (uuidMap.Count == 0)
@@ -140,7 +169,7 @@ namespace Emby.Xtream.Plugin.Client
                     uuidMap.Count, statsMap.Count, tvgIdMap.Count, stationIdMap.Count);
             }
 
-            return (uuidMap, statsMap, tvgIdMap, stationIdMap);
+            return (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds);
         }
 
         /// <summary>Returns the Dispatcharr VOD movie detail (UUID) for a given Xtream stream ID.</summary>

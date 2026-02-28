@@ -607,8 +607,8 @@
                         faster channel switching via FFprobe bypass, stream proxying, reconnect handling, and multiple
                         quality versions per movie (when multiple provider streams exist).
                         <br /><br />
-                        <strong>Requires Streamflow:</strong> Per-channel codec and resolution metadata is only
-                        available when <a href="https://github.com/krinkuto11/streamflow" target="_blank" rel="noopener" style="color:#52B54B;">Streamflow</a> is enabled and configured inside Dispatcharr.
+                        <strong><a href="https://github.com/krinkuto11/streamflow" target="_blank" rel="noopener" style="color:#52B54B;">Streamflow</a> advantage:</strong> Per-channel codec and resolution metadata is only
+                        available when Streamflow is enabled and configured inside Dispatcharr.
                         Without it, stream stats will not be populated and FFprobe bypass will not apply.
                     </div>
                     <div class="checkboxContainer checkboxContainer-withDescription">
@@ -634,6 +634,41 @@
                             <input class="txtDispatcharrPass" type="password" is="emby-input"
                                    label="Dispatcharr Password" />
                         </div>
+                        <button class="btnTestDispatcharr raised button-secondary" is="emby-button" type="button">
+                            <span>Test Dispatcharr Connection</span>
+                        </button>
+                        <div class="dispatcharrTestResult" style="margin-top:0.5em;"></div>
+
+                        <hr style="border:none; border-top:1px solid rgba(128,128,128,0.15); margin:1em 0;" />
+
+                        <h3 class="sectionTitle" style="margin-top:0; font-size:1em;">Channel Profiles</h3>
+                        <div class="fieldDescription" style="margin-bottom:0.75em;">
+                            Select one or more Dispatcharr Channel Profiles. Only channels that are
+                            <strong>enabled</strong> in at least one selected profile will appear in Emby.
+                            Leave all unselected to show all channels (no filtering).
+                        </div>
+                        <div style="margin-bottom:0.5em; display:flex; flex-wrap:wrap; gap:0.4em; align-items:center;">
+                            <button class="btnRefreshProfiles raised button-secondary" is="emby-button" type="button">
+                                <span>Refresh Profiles</span>
+                            </button>
+                            <button class="btnSelectAllProfiles raised button-secondary" is="emby-button" type="button"
+                                    style="margin-left:0.5em;" disabled>
+                                <span>Select All</span>
+                            </button>
+                            <button class="btnDeselectAllProfiles raised button-secondary" is="emby-button" type="button"
+                                    style="margin-left:0.5em;" disabled>
+                                <span>Deselect All</span>
+                            </button>
+                            <span class="dispatcharrProfileCountBadge" style="margin-left:0.75em; opacity:0.7; font-size:0.85em; display:none;">
+                                <span class="profileCountSelected">0</span> / <span class="profileCountTotal">0</span> selected
+                            </span>
+                        </div>
+                        <div class="dispatcharrProfilesList" style="max-height:250px; overflow-y:auto; border:1px solid rgba(128,128,128,0.15); border-radius:4px; padding:0.5em;">
+                            <div class="dispatcharrProfilesLoading" style="display:none; opacity:0.5;">Loading profiles...</div>
+                        </div>
+
+                        <hr style="border:none; border-top:1px solid rgba(128,128,128,0.15); margin:1em 0;" />
+
                         <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0.5em;">
                             <label>
                                 <input class="chkDispatcharrFallback" type="checkbox" is="emby-checkbox" />
@@ -668,10 +703,6 @@
                                 which is always included when a station ID is available.
                             </div>
                         </div>
-                        <button class="btnTestDispatcharr raised button-secondary" is="emby-button" type="button">
-                            <span>Test Dispatcharr Connection</span>
-                        </button>
-                        <div class="dispatcharrTestResult" style="margin-top:0.5em;"></div>
                     </div>
                 </div>
 

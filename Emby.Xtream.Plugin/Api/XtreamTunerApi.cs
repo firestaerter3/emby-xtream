@@ -105,6 +105,11 @@ namespace Emby.Xtream.Plugin.Api
         public string Password { get; set; }
     }
 
+    [Route("/XtreamTuner/DispatcharrProfiles", "GET", Summary = "Gets Channel Profiles from Dispatcharr")]
+    public class GetDispatcharrProfiles : IReturn<List<Client.Models.DispatcharrProfile>>
+    {
+    }
+
     [Route("/XtreamTuner/CheckUpdate", "GET", Summary = "Checks GitHub for a newer plugin release")]
     public class CheckForUpdate : IReturn<UpdateCheckResult>
     {
@@ -983,6 +988,35 @@ namespace Emby.Xtream.Plugin.Api
             }
 
             return result;
+        }
+
+        public async Task<object> Get(GetDispatcharrProfiles request)
+        {
+            var config = Plugin.Instance?.Configuration;
+            if (config == null || !config.EnableDispatcharr || string.IsNullOrEmpty(config.DispatcharrUrl))
+                return new List<Client.Models.DispatcharrProfile>();
+
+            try
+            {
+                var logManager = Plugin.Instance.ApplicationHost.Resolve<ILogManager>();
+                var client = new DispatcharrClient(logManager.GetLogger("XtreamTuner.DispatcharrProfiles"));
+                client.Configure(config.DispatcharrUser, config.DispatcharrPass);
+
+                var profiles = await client.GetProfilesAsync(config.DispatcharrUrl, CancellationToken.None)
+                    .ConfigureAwait(false);
+
+                // Cache for instant UI loading on next page open
+                config.CachedDispatcharrProfiles = System.Text.Json.JsonSerializer.Serialize(
+                    profiles.Select(p => new { p.Id, p.Name }).ToList());
+                Plugin.Instance.SaveConfiguration();
+
+                return profiles;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Failed to fetch Dispatcharr profiles: {0}", ex.Message);
+                return new List<Client.Models.DispatcharrProfile>();
+            }
         }
 
         public async Task<object> Get(CheckForUpdate request)

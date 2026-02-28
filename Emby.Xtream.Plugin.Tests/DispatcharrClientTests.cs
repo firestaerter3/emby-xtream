@@ -239,7 +239,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(uuidMap.ContainsKey(69307), "Config A: UUID must be reachable via Xtream stream_id");
             Assert.Equal("41f6df70-4531-4555-bb13-e4a39c2c242b", uuidMap[69307]);
@@ -262,7 +262,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(uuidMap.ContainsKey(42), "Config B: UUID must be reachable via ch.Id");
             Assert.Equal("uuid-config-b", uuidMap[42]);
@@ -287,7 +287,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(uuidMap.ContainsKey(69307), "Config A key (stream_id) must be present");
             Assert.True(uuidMap.ContainsKey(5398),  "Config B key (ch.Id) must be present");
@@ -329,7 +329,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (_, statsMap, _, _) = await RunGetChannelData(channelsJson);
+            var (_, statsMap, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(statsMap.ContainsKey(69307), "Stats must be reachable via Xtream stream_id");
             var stats = statsMap[69307];
@@ -360,7 +360,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(uuidMap.ContainsKey(100), "First stream_id must map to UUID");
             Assert.True(uuidMap.ContainsKey(200), "Second stream_id must map to UUID");
@@ -387,7 +387,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(uuidMap.ContainsKey(7), "ch.Id fallback must be written when stream_id is null");
             Assert.Equal("uuid-null-stream-id", uuidMap[7]);
@@ -404,7 +404,7 @@ namespace Emby.Xtream.Plugin.Tests
                 new { id = 2, uuid = "valid-uuid", name = "OK", streams = new object[0] }
             });
 
-            var (uuidMap, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.False(uuidMap.ContainsKey(1), "Channel without UUID must be skipped");
             Assert.True(uuidMap.ContainsKey(2));
@@ -448,7 +448,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (_, statsMap, _, _) = await RunGetChannelData(channelsJson);
+            var (_, statsMap, _, _, _) = await RunGetChannelData(channelsJson);
 
             // stream_id=300 gets the first (h264) stats
             Assert.True(statsMap.ContainsKey(300));
@@ -498,7 +498,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, tvgIdMap, stationIdMap) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, tvgIdMap, stationIdMap, _) = await RunGetChannelData(channelsJson);
 
             Assert.Equal(3, uuidMap.Count);
 
@@ -601,7 +601,8 @@ namespace Emby.Xtream.Plugin.Tests
             System.Collections.Generic.Dictionary<int, string> UuidMap,
             System.Collections.Generic.Dictionary<int, StreamStatsInfo> StatsMap,
             System.Collections.Generic.Dictionary<int, string> TvgIdMap,
-            System.Collections.Generic.Dictionary<int, string> StationIdMap)>
+            System.Collections.Generic.Dictionary<int, string> StationIdMap,
+            System.Collections.Generic.HashSet<int> AllowedStreamIds)>
             RunGetChannelData(string channelsJson)
         {
             var handler = new MockHandler(request =>
