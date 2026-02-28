@@ -48,8 +48,9 @@ export async function login(page: Page): Promise<void> {
     await page.click('button[type="submit"], .btnSubmit, button:has-text("Sign in"), button:has-text("Login")');
   }
 
-  // Wait for the dashboard to confirm successful login.
-  await page.waitForURL(/#!/, { timeout: 15_000 });
+  // Wait for the home page — not just any URL containing #! (which would match the
+  // intermediate #!/startup/manuallogin.html page and return before login completes).
+  await page.waitForURL(url => url.href.includes('#!/home'), { timeout: 15_000 });
 }
 
 /** Resolve the current plugin version for tagging result files. */
@@ -74,6 +75,59 @@ function resolveCommit(): string {
 export interface TimingPair {
   infoTime: number;
   streamTime: number;
+}
+
+export interface StreamSession {
+  playSessionId: string | null;
+  openToken: string | null;
+  mediaSourceId: string | null;
+  itemId: string | null;
+}
+
+/**
+ * Close an active Emby live stream via the server API.
+ *
+ * Mirrors the three-step `close_stream()` in tools/benchmark_livetv.py:
+ *   1. LiveStreams/Close   — disposes the ILiveStream (drops Dispatcharr connection)
+ *   2. Sessions/Playing/Stopped — releases tuner locks
+ *   3. Videos/ActiveEncodings DELETE — kills transcoding processes for this browser device
+ *
+ * All calls are fire-and-forget; failures are silently ignored so the benchmark
+ * continues even if Emby is in a bad state.
+ */
+export async function closeActiveStream(
+  page: Page,
+  session: StreamSession,
+): Promise<void> {
+  const apiKey = process.env.EMBY_API_KEY;
+  const baseUrl = process.env.EMBY_URL || 'http://localhost:8096';
+  if (!apiKey) return; // no API key → skip server-side cleanup
+
+  if (session.openToken) {
+    await page.request.post(
+      `${baseUrl}/emby/LiveStreams/Close?api_key=${apiKey}`,
+      { data: { LiveStreamId: session.openToken } },
+    ).catch(() => {});
+  }
+
+  if (session.playSessionId) {
+    await page.request.post(
+      `${baseUrl}/emby/Sessions/Playing/Stopped?api_key=${apiKey}`,
+      { data: {
+        ItemId: session.itemId ?? '',
+        MediaSourceId: session.mediaSourceId ?? '',
+        PlaySessionId: session.playSessionId,
+      } },
+    ).catch(() => {});
+  }
+
+  // Belt-and-suspenders: kill all active encodings for this browser's DeviceId.
+  const deviceId = await page.evaluate(
+    () => localStorage.getItem('_deviceId2') ?? 'unknown',
+  ).catch(() => 'unknown');
+  await page.request.delete(
+    `${baseUrl}/emby/Videos/ActiveEncodings?DeviceId=${deviceId}&api_key=${apiKey}`,
+  ).catch(() => {});
 }
 
 export interface ChannelBenchmark {

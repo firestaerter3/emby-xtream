@@ -21,13 +21,14 @@ test.describe('guide load', () => {
     });
 
     const t0 = performance.now();
-    await page.goto('#!/livetv/guide');
+    // Click the Guide tab from the Live TV section on the home page.
+    await page.click('a:has-text("Guide"), link:has-text("Guide"), button:has-text("Guide")');
 
     // Wait for at least one channel row to appear in the guide grid.
     // The guide renders a table/grid; rows carry data-id or similar attributes.
     // Adjust the selector if the Emby guide structure differs.
     await page.waitForSelector(
-      '.guideTable .guideProgramName, .channelName, [data-type="Program"]',
+      '.channelCell, .guideChannelText',
       { state: 'visible', timeout: 10_000 },
     );
     const guideLoadTime = (performance.now() - t0) / 1000;

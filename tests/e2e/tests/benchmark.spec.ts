@@ -21,7 +21,7 @@
  */
 
 import { test, type Page } from '@playwright/test';
-import { login, saveBenchmarkResults, ChannelBenchmark, TimingPair } from './helpers';
+import { login, saveBenchmarkResults, ChannelBenchmark, TimingPair, StreamSession, closeActiveStream } from './helpers';
 
 const VALID_MODES = ['baseline', 'with-stats', 'no-stats'] as const;
 type BenchmarkMode = typeof VALID_MODES[number];
@@ -49,6 +49,22 @@ test.setTimeout(600_000);
  * the tab bar is scrolled out of view after video playback).
  */
 let channelsUrl: string | null = null;
+
+/**
+ * Emby session tokens captured from the most recent PlaybackInfo response.
+ * Updated by the response interceptor in the test body; consumed and reset by
+ * measureChannel (and by returnToChannels as a safety net) via closeActiveStream.
+ */
+let lastSession: StreamSession = {
+  playSessionId: null,
+  openToken: null,
+  mediaSourceId: null,
+  itemId: null,
+};
+
+function emptySession(): StreamSession {
+  return { playSessionId: null, openToken: null, mediaSourceId: null, itemId: null };
+}
 
 /** Navigate to the Live TV Channels tab (non-virtualized grid). */
 async function goToChannels(page: Page): Promise<void> {
@@ -109,6 +125,10 @@ async function dismissOverlays(page: Page): Promise<void> {
 
 /** Stop any active video and return to the Channels grid. */
 async function returnToChannels(page: Page): Promise<void> {
+  // Safety net: close any server-side stream that measureChannel may have missed.
+  await closeActiveStream(page, lastSession);
+  lastSession = emptySession();
+
   await dismissOverlays(page);
   await goToChannels(page);
 
@@ -228,6 +248,11 @@ async function measureChannel(page: Page, channel: string): Promise<TimingPair> 
     console.log(`  [WARN] stream failed for ${channel} — recorded streamTime = -1`);
   }
 
+  // Close the server-side live stream regardless of success or failure.
+  // This prevents Dispatcharr connection slots from being consumed by phantom clients.
+  await closeActiveStream(page, lastSession);
+  lastSession = emptySession();
+
   return { infoTime, streamTime };
 }
 
@@ -239,6 +264,23 @@ test.describe('channel switch benchmark', () => {
 
   test(`benchmark [${BENCHMARK_MODE ?? 'unset'}]`, async ({ page }) => {
     const mode = BENCHMARK_MODE!;
+
+    // Capture session tokens from PlaybackInfo responses so closeActiveStream()
+    // can tear down each stream properly via the Emby API (not just the UI).
+    page.on('response', async (response) => {
+      if (response.url().includes('/PlaybackInfo') && response.ok()) {
+        try {
+          const json = await response.json();
+          const urlMatch = response.url().match(/\/Items\/([^/?]+)\/PlaybackInfo/);
+          lastSession = {
+            playSessionId: json.PlaySessionId ?? null,
+            openToken: json.MediaSources?.[0]?.OpenToken ?? null,
+            mediaSourceId: json.MediaSources?.[0]?.Id ?? null,
+            itemId: urlMatch?.[1] ?? null,
+          };
+        } catch { /* ignore parse errors */ }
+      }
+    });
 
     await login(page);
     await goToChannels(page);
