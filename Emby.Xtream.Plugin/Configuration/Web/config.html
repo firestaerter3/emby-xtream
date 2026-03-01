@@ -966,6 +966,18 @@
                         </div>
                     </div>
                     <div class="epgSettings">
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label>
+                                <input class="chkDeferEpgToGuideData" type="checkbox" is="emby-checkbox" />
+                                <span>Use Emby Guide Data (Emby Premier only)</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">
+                                When enabled, channels matched to a Gracenote station ID via Dispatcharr will use
+                                Emby Guide Data for their program guide instead of the Xtream EPG feed.
+                                Requires an active Emby Premier subscription. Disable this if you do not have
+                                Emby Premier — the Xtream/Dispatcharr EPG feed will be used for all channels instead.
+                            </div>
+                        </div>
                         <div class="inputContainer">
                             <input class="txtEpgCacheMinutes" type="number" is="emby-input"
                                    label="EPG Cache Duration (minutes)" min="5" max="1440" step="5" />

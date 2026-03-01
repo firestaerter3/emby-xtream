@@ -16,6 +16,7 @@ namespace Emby.Xtream.Plugin
 
         // EPG / Guide Data
         public bool EnableEpg { get; set; } = true;
+        public bool DeferEpgToGuideData { get; set; } = true;
         public int EpgCacheMinutes { get; set; } = 30;
         public int EpgDaysToFetch { get; set; } = 2;
         public int M3UCacheMinutes { get; set; } = 15;

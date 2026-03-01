@@ -337,6 +337,7 @@ function (BaseView, loading) {
             view.querySelector('.chkIncludeAdult').checked = !!config.IncludeAdultChannels;
 
             view.querySelector('.chkEnableEpg').checked = config.EnableEpg !== false;
+            view.querySelector('.chkDeferEpgToGuideData').checked = config.DeferEpgToGuideData !== false;
             view.querySelector('.txtEpgCacheMinutes').value = config.EpgCacheMinutes || 30;
             view.querySelector('.txtEpgDaysToFetch').value = config.EpgDaysToFetch || 2;
             view.querySelector('.txtM3UCacheMinutes').value = config.M3UCacheMinutes || 15;
@@ -457,6 +458,7 @@ function (BaseView, loading) {
             config.IncludeAdultChannels = view.querySelector('.chkIncludeAdult').checked;
 
             config.EnableEpg = view.querySelector('.chkEnableEpg').checked;
+            config.DeferEpgToGuideData = view.querySelector('.chkDeferEpgToGuideData').checked;
             config.EpgCacheMinutes = parseInt(view.querySelector('.txtEpgCacheMinutes').value, 10) || 30;
             config.EpgDaysToFetch = parseInt(view.querySelector('.txtEpgDaysToFetch').value, 10) || 2;
             config.M3UCacheMinutes = parseInt(view.querySelector('.txtM3UCacheMinutes').value, 10) || 15;

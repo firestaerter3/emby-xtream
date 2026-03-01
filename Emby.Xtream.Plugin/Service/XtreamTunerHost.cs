@@ -102,8 +102,11 @@ namespace Emby.Xtream.Plugin.Service
             // If this channel has a Gracenote station ID it is mapped to a listings provider
             // (e.g. Emby Guide Data). Return no tuner EPG so Emby's guide data takes priority
             // and the Xtream "dummy" EPG doesn't overwrite the rich metadata.
+            // Only do this when DeferEpgToGuideData is enabled — users without an Emby Guide
+            // Data subscription should disable this so channels still get Xtream EPG.
             var stationMap = _stationIdMap;
-            if (stationMap != null && stationMap.ContainsKey(streamId))
+            if (stationMap != null && stationMap.ContainsKey(streamId)
+                && Plugin.Instance.Configuration.DeferEpgToGuideData)
             {
                 Logger.Debug("GetProgramsInternal: stream {0} has Gracenote station ID, deferring to listings provider", streamId);
                 return new List<ProgramInfo>();
