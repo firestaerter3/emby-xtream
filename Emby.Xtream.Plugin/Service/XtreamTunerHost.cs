@@ -610,6 +610,8 @@ namespace Emby.Xtream.Plugin.Service
                 SupportsDirectStream = !suppressDirectStream,
                 SupportsTranscoding = true,
                 AnalyzeDurationMs = suppressProbing ? 0 : (int?)500,
+                RequiresOpening = true,
+                RequiresClosing = true,
             };
 
             if (hasStats)
@@ -677,7 +679,7 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     Type = MediaStreamType.Audio,
                     Index = 1,
-                    Codec = audioCodecLower,
+                    Codec = audioCodecLower ?? "aac",
                     Channels = audioChannels,
                     ChannelLayout = channelLayout,
                 });
@@ -694,12 +696,16 @@ namespace Emby.Xtream.Plugin.Service
             else
             {
                 // No stats — provide defaults so hardware decoding can still be attempted.
+                // Codec must be non-null: Emby's RecordingRequiresEncoding accesses it
+                // directly and throws NullReferenceException when it is null.  H.264/AAC
+                // are the most common IPTV codecs and serve as safe fallbacks.
                 mediaSource.MediaStreams = new List<MediaStream>
                 {
                     new MediaStream
                     {
                         Type = MediaStreamType.Video,
                         Index = 0,
+                        Codec = "h264",
                         IsInterlaced = false,
                         PixelFormat = "yuv420p",
                     },
@@ -707,6 +713,7 @@ namespace Emby.Xtream.Plugin.Service
                     {
                         Type = MediaStreamType.Audio,
                         Index = 1,
+                        Codec = "aac",
                     },
                 };
                 Logger.Debug("Stream {0}: no stats available, will probe", streamId);
