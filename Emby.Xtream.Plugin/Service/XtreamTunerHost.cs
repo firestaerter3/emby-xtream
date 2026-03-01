@@ -128,6 +128,9 @@ namespace Emby.Xtream.Plugin.Service
             var startUnix = startDateUtc.ToUnixTimeSeconds();
             var endUnix = endDateUtc.ToUnixTimeSeconds();
 
+            const long MinTimestamp = 946684800L;   // 2000-01-01
+            const long MaxTimestamp = 4102444800L;  // 2100-01-01
+
             var result = new List<ProgramInfo>();
             foreach (var p in programs)
             {
@@ -136,30 +139,48 @@ namespace Emby.Xtream.Plugin.Service
                     continue;
                 }
 
+                if (p.StartTimestamp < MinTimestamp || p.StartTimestamp > MaxTimestamp
+                    || p.StopTimestamp < MinTimestamp || p.StopTimestamp > MaxTimestamp)
+                {
+                    Logger.Debug("GetProgramsInternal: skipping program with out-of-range timestamps " +
+                        "(start={0}, stop={1}) on channel {2}", p.StartTimestamp, p.StopTimestamp, streamId);
+                    continue;
+                }
+
                 var title = p.IsPlainText ? p.Title : LiveTvService.DecodeBase64(p.Title);
                 var description = p.IsPlainText ? p.Description : LiveTvService.DecodeBase64(p.Description);
 
                 var cats = p.Categories;
-                result.Add(new ProgramInfo
+                try
                 {
-                    Id = string.Format(CultureInfo.InvariantCulture, "xtream_epg_{0}_{1}", streamId, p.StartTimestamp),
-                    ChannelId = tunerChannelId,
-                    StartDate = DateTimeOffset.FromUnixTimeSeconds(p.StartTimestamp).UtcDateTime,
-                    EndDate = DateTimeOffset.FromUnixTimeSeconds(p.StopTimestamp).UtcDateTime,
-                    Name = string.IsNullOrEmpty(title) ? "Unknown" : title,
-                    Overview = string.IsNullOrEmpty(description) ? null : description,
-                    EpisodeTitle = string.IsNullOrEmpty(p.SubTitle) ? null : p.SubTitle,
-                    IsLive = p.IsLive,
-                    IsRepeat = p.IsPreviouslyShown,
-                    IsPremiere = p.IsNew || p.IsPremiere,
-                    ImageUrl = string.IsNullOrEmpty(p.ImageUrl) ? null : p.ImageUrl,
-                    Genres = cats,
-                    IsSports = cats != null && cats.Exists(c => c.IndexOf("sport", System.StringComparison.OrdinalIgnoreCase) >= 0),
-                    IsNews = cats != null && cats.Exists(c => c.IndexOf("news", System.StringComparison.OrdinalIgnoreCase) >= 0),
-                    IsMovie = cats != null && cats.Exists(c => c.IndexOf("movie", System.StringComparison.OrdinalIgnoreCase) >= 0 || c.IndexOf("film", System.StringComparison.OrdinalIgnoreCase) >= 0),
-                    IsKids = cats != null && cats.Exists(c => c.IndexOf("children", System.StringComparison.OrdinalIgnoreCase) >= 0 || c.IndexOf("kids", System.StringComparison.OrdinalIgnoreCase) >= 0),
-                    IsSeries = cats != null && cats.Exists(c => c.IndexOf("series", System.StringComparison.OrdinalIgnoreCase) >= 0),
-                });
+                    result.Add(new ProgramInfo
+                    {
+                        Id = string.Format(CultureInfo.InvariantCulture, "xtream_epg_{0}_{1}", streamId, p.StartTimestamp),
+                        ChannelId = tunerChannelId,
+                        StartDate = DateTimeOffset.FromUnixTimeSeconds(p.StartTimestamp).UtcDateTime,
+                        EndDate = DateTimeOffset.FromUnixTimeSeconds(p.StopTimestamp).UtcDateTime,
+                        Name = string.IsNullOrEmpty(title) ? "Unknown" : title,
+                        Overview = string.IsNullOrEmpty(description) ? null : description,
+                        EpisodeTitle = string.IsNullOrEmpty(p.SubTitle) ? null : p.SubTitle,
+                        IsLive = p.IsLive,
+                        IsRepeat = p.IsPreviouslyShown,
+                        IsPremiere = p.IsNew || p.IsPremiere,
+                        ImageUrl = IsValidHttpUrl(p.ImageUrl) ? p.ImageUrl : null,
+                        Genres = cats,
+                        IsSports = cats != null && cats.Exists(c => c.IndexOf("sport", System.StringComparison.OrdinalIgnoreCase) >= 0),
+                        IsNews = cats != null && cats.Exists(c => c.IndexOf("news", System.StringComparison.OrdinalIgnoreCase) >= 0),
+                        IsMovie = cats != null && cats.Exists(c => c.IndexOf("movie", System.StringComparison.OrdinalIgnoreCase) >= 0 || c.IndexOf("film", System.StringComparison.OrdinalIgnoreCase) >= 0),
+                        IsKids = cats != null && cats.Exists(c => c.IndexOf("children", System.StringComparison.OrdinalIgnoreCase) >= 0 || c.IndexOf("kids", System.StringComparison.OrdinalIgnoreCase) >= 0),
+                        IsSeries = cats != null && cats.Exists(c => c.IndexOf("series", System.StringComparison.OrdinalIgnoreCase) >= 0),
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("GetProgramsInternal: skipping program on channel {0} " +
+                        "(start={1}, stop={2}, title='{3}'): {4}",
+                        streamId, p.StartTimestamp, p.StopTimestamp,
+                        p.IsPlainText ? p.Title : "(base64)", ex.Message);
+                }
             }
 
             // No EPG data — return a dummy entry spanning the requested window so the channel
@@ -765,6 +786,14 @@ namespace Emby.Xtream.Plugin.Service
             if (int.TryParse(lower, NumberStyles.None, CultureInfo.InvariantCulture, out int plain))
                 return plain;
             return null;
+        }
+
+        private static bool IsValidHttpUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            Uri uri;
+            return Uri.TryCreate(url, UriKind.Absolute, out uri)
+                && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
         }
 
         private static string MapVideoCodec(string dispatcharrCodec)
