@@ -147,6 +147,17 @@ namespace Emby.Xtream.Plugin.Service
                     continue;
                 }
 
+                // Skip zero-duration or reversed programs — Emby's GetProgram throws when
+                // EndDate <= StartDate, which causes the entire channel to be rejected.
+                if (p.StopTimestamp <= p.StartTimestamp)
+                {
+                    Logger.Warn("GetProgramsInternal: skipping zero-duration or reversed program " +
+                        "(start={0}, stop={1}, title='{2}') on channel {3}",
+                        p.StartTimestamp, p.StopTimestamp,
+                        p.IsPlainText ? (p.Title ?? string.Empty) : "(base64)", streamId);
+                    continue;
+                }
+
                 var title = p.IsPlainText ? p.Title : LiveTvService.DecodeBase64(p.Title);
                 var description = p.IsPlainText ? p.Description : LiveTvService.DecodeBase64(p.Description);
 
@@ -200,6 +211,14 @@ namespace Emby.Xtream.Plugin.Service
                     });
                     Logger.Debug("GetProgramsInternal: no EPG for channel {0}, returning dummy entry", streamId);
                 }
+            }
+
+            if (result.Count > 0 && result.Count <= 15)
+            {
+                // Low program count — log first entry to help diagnose EPG quality issues.
+                var first = result[0];
+                Logger.Debug("GetProgramsInternal: channel {0} first program: start={1:u}, end={2:u}, name='{3}'",
+                    streamId, first.StartDate, first.EndDate, first.Name);
             }
 
             Logger.Debug("GetProgramsInternal: returning {0} programs for channel {1}", result.Count, streamId);
