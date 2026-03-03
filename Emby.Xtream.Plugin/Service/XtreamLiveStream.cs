@@ -18,6 +18,7 @@ namespace Emby.Xtream.Plugin.Service
         private HttpResponseMessage _response;
         private Stream _stream;
         private bool _disposed;
+        private bool _needsReconnect;
 
         public XtreamLiveStream(MediaSourceInfo mediaSource, string tunerHostId, HttpClient httpClient, ILogger logger = null)
         {
@@ -60,10 +61,35 @@ namespace Emby.Xtream.Plugin.Service
             return Task.CompletedTask;
         }
 
+        // Reopen the HTTP connection to the upstream source. Called when a prior CopyToAsync
+        // was cancelled mid-read, which aborts the underlying SSL connection and leaves _stream
+        // in a disposed state. RequiresOpening=true means the same XtreamLiveStream is reused
+        // across the iOS/Apple TV player's probe connection (~500 ms) and its real playback
+        // connection, so we must be able to reconnect after the probe disconnects.
+        private async Task ReopenStreamAsync(CancellationToken cancellationToken)
+        {
+            _stream?.Dispose();
+            _response?.Dispose();
+            _stream = null;
+            _response = null;
+            _needsReconnect = false;
+
+            _response = await _httpClient.GetAsync(
+                MediaSource.Path,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken).ConfigureAwait(false);
+            _response.EnsureSuccessStatusCode();
+            _stream = await _response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+            _logger?.Info("[stream-timing] Reconnected to upstream after client disconnect");
+        }
+
         public async Task CopyToAsync(PipeWriter writer, CancellationToken cancellationToken)
         {
-            if (_stream == null)
+            if (_stream == null && !_needsReconnect)
                 throw new InvalidOperationException("Stream not opened. Call Open() first.");
+
+            if (_needsReconnect)
+                await ReopenStreamAsync(cancellationToken).ConfigureAwait(false);
 
             var buffer = new byte[262144];
             try
@@ -82,6 +108,14 @@ namespace Emby.Xtream.Plugin.Service
                     var flushResult = await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
                     if (flushResult.IsCompleted) break;
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                // Client disconnected mid-read. Mark for reconnect so the next CopyToAsync
+                // call (e.g. the player's real connection after a probe) opens a fresh
+                // upstream connection instead of reading from the now-aborted SSL stream.
+                _needsReconnect = true;
+                throw;
             }
             finally
             {
