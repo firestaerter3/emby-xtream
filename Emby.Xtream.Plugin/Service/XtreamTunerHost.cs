@@ -715,6 +715,9 @@ namespace Emby.Xtream.Plugin.Service
 
                     if (width > 0) videoStream.Width = width;
                     if (height > 0) videoStream.Height = height;
+                    videoStream.DisplayTitle = height > 0
+                        ? $"{height}p {videoCodec.ToUpperInvariant()}"
+                        : videoCodec.ToUpperInvariant();
                     if (stats.SourceFps.HasValue)
                     {
                         videoStream.RealFrameRate = (float)stats.SourceFps.Value;
@@ -766,9 +769,24 @@ namespace Emby.Xtream.Plugin.Service
                     else if (stats.Bitrate.HasValue)
                         audioStream.BitRate = (int)(stats.Bitrate.Value * 1000);
                 }
+                else
+                {
+                    if (stats.AudioBitrate.HasValue)
+                        audioStream.BitRate = (int)(stats.AudioBitrate.Value * 1000);
+                    else if (audioCodecLower == "ac3") audioStream.BitRate = 384000;
+                    else if (audioCodecLower == "eac3") audioStream.BitRate = 640000;
+                    else if (audioCodecLower == "aac") audioStream.BitRate = 128000;
+                    else if (audioCodecLower == "mp2" || audioCodecLower == "mp1") audioStream.BitRate = 256000;
+                }
+
+                audioStream.DisplayTitle = channelLayout != null
+                    ? $"{(audioCodecLower ?? "aac").ToUpperInvariant()} {channelLayout}"
+                    : (audioCodecLower ?? "aac").ToUpperInvariant();
+
                 mediaStreams.Add(audioStream);
 
                 mediaSource.MediaStreams = mediaStreams;
+                mediaSource.DefaultAudioStreamIndex = isAudioOnly ? 0 : 1;
 
                 if (isAudioOnly)
                 {
@@ -813,14 +831,17 @@ namespace Emby.Xtream.Plugin.Service
                         Codec = "h264",
                         IsInterlaced = false,
                         PixelFormat = "yuv420p",
+                        DisplayTitle = "H264",
                     },
                     new MediaStream
                     {
                         Type = MediaStreamType.Audio,
                         Index = 1,
                         Codec = "aac",
+                        DisplayTitle = "AAC",
                     },
                 };
+                mediaSource.DefaultAudioStreamIndex = 1;
                 Logger.Debug("Stream {0}: no stats available, will probe", streamId);
             }
 
