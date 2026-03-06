@@ -177,7 +177,7 @@ namespace Emby.Xtream.Plugin.Service
                         IsRepeat = p.IsPreviouslyShown,
                         IsPremiere = p.IsNew || p.IsPremiere,
                         ImageUrl = IsValidHttpUrl(p.ImageUrl) ? p.ImageUrl : null,
-                        Genres = cats,
+                        Genres = cats ?? new List<string>(),
                         IsSports = cats != null && cats.Exists(c => c.IndexOf("sport", System.StringComparison.OrdinalIgnoreCase) >= 0),
                         IsNews = cats != null && cats.Exists(c => c.IndexOf("news", System.StringComparison.OrdinalIgnoreCase) >= 0),
                         IsMovie = cats != null && cats.Exists(c => c.IndexOf("movie", System.StringComparison.OrdinalIgnoreCase) >= 0 || c.IndexOf("film", System.StringComparison.OrdinalIgnoreCase) >= 0),
