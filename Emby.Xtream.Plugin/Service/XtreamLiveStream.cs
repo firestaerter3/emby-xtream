@@ -40,19 +40,30 @@ namespace Emby.Xtream.Plugin.Service
         public DateTimeOffset DateOpened { get; }
         public bool SupportsCopyTo => true;
 
-        public async Task Open(CancellationToken openCancellationToken)
+        // Open() is a no-op: Emby calls it to register the tuner host lifecycle
+        // (RequiresOpening/RequiresClosing), but for browser HLS playback ffmpeg
+        // opens its own connection directly. Connecting here would create a second
+        // idle connection in Dispatcharr. The actual HTTP connection is deferred to
+        // the first CopyToAsync() call via ConnectAsync().
+        public Task Open(CancellationToken openCancellationToken)
+        {
+            _logger?.Info("[XtreamLiveStream] Open called (deferred connect)");
+            return Task.CompletedTask;
+        }
+
+        private async Task ConnectAsync(CancellationToken cancellationToken)
         {
             var sw = Stopwatch.StartNew();
             _response = await _httpClient.GetAsync(
                 MediaSource.Path,
                 HttpCompletionOption.ResponseHeadersRead,
-                openCancellationToken).ConfigureAwait(false);
-            _logger?.Info("[stream-timing] Open.HttpGet={0}ms status={1}", sw.ElapsedMilliseconds, (int)_response.StatusCode);
+                cancellationToken).ConfigureAwait(false);
+            _logger?.Info("[stream-timing] Connect.HttpGet={0}ms status={1}", sw.ElapsedMilliseconds, (int)_response.StatusCode);
             sw.Restart();
 
             _response.EnsureSuccessStatusCode();
             _stream = await _response.Content.ReadAsStreamAsync().ConfigureAwait(false);
-            _logger?.Info("[stream-timing] Open.StreamReady={0}ms", sw.ElapsedMilliseconds);
+            _logger?.Info("[stream-timing] Connect.StreamReady={0}ms", sw.ElapsedMilliseconds);
         }
 
         public Task Close()
@@ -86,7 +97,7 @@ namespace Emby.Xtream.Plugin.Service
         public async Task CopyToAsync(PipeWriter writer, CancellationToken cancellationToken)
         {
             if (_stream == null && !_needsReconnect)
-                throw new InvalidOperationException("Stream not opened. Call Open() first.");
+                await ConnectAsync(cancellationToken).ConfigureAwait(false);
 
             if (_needsReconnect)
                 await ReopenStreamAsync(cancellationToken).ConfigureAwait(false);
@@ -130,7 +141,7 @@ namespace Emby.Xtream.Plugin.Service
             CancellationToken cancellationToken)
         {
             if (_stream == null)
-                throw new InvalidOperationException("Stream not opened. Call Open() first.");
+                await ConnectAsync(cancellationToken).ConfigureAwait(false);
 
             await _stream.CopyToAsync(writer, 262144, cancellationToken).ConfigureAwait(false);
         }
