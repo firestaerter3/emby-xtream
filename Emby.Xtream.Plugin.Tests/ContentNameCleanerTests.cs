@@ -94,5 +94,28 @@ namespace Emby.Xtream.Plugin.Tests
             var result = ContentNameCleaner.CleanContentName("\u2503UK\u2502 The Movie");
             Assert.Equal("The Movie", result);
         }
+
+        [Theory]
+        [InlineData("EN - Adventure Time", "Adventure Time")]
+        [InlineData("US - Breaking Bad", "Breaking Bad")]
+        [InlineData("FR - Lupin", "Lupin")]
+        [InlineData("DE - Dark", "Dark")]
+        public void RemovesTwoLetterCountryCodeDashPrefix(string input, string expected)
+        {
+            Assert.Equal(expected, ContentNameCleaner.CleanContentName(input));
+        }
+
+        [Theory]
+        [InlineData("FBI - Most Wanted")]   // 3-letter acronym — preserved
+        [InlineData("CSI - Vegas")]          // 3-letter acronym — preserved
+        [InlineData("NCIS - Los Angeles")]   // 4-letter acronym — preserved
+        [InlineData("4K-NF - Arcane")]       // quality tag with digit/hyphen — preserved (use ContentRemoveTerms)
+        [InlineData("FHD - The Crown")]      // 3-letter quality tag — preserved
+        [InlineData("A - Show")]             // single char — too short
+        [InlineData("The - Show")]           // lowercase — not matched
+        public void PreservesNonCountryCodeDashPatterns(string input)
+        {
+            Assert.Equal(input, ContentNameCleaner.CleanContentName(input));
+        }
     }
 }

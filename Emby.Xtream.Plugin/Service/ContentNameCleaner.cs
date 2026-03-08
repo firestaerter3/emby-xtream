@@ -19,6 +19,14 @@ namespace Emby.Xtream.Plugin.Service
             @"\s*[\u2503\u2502|][^\u2503\u2502|]+[\u2503\u2502|]\s*",
             RegexOptions.Compiled);
 
+        // Matches exactly 2-letter uppercase country-code prefix labels like "EN - ", "US - ", "FR - ".
+        // Deliberately limited to 2-letter alpha only to avoid false-positives on show acronyms
+        // (FBI, CSI, NCIS, etc.) that providers may format as "FBI - Most Wanted".
+        // Applied once per call (single prefix strip).
+        private static readonly Regex DashPrefixRegex = new Regex(
+            @"^[A-Z]{2}\s+-\s+",
+            RegexOptions.Compiled);
+
         private static readonly Regex MultipleSpacesRegex = new Regex(
             @"\s{2,}",
             RegexOptions.Compiled);
@@ -39,6 +47,9 @@ namespace Emby.Xtream.Plugin.Service
 
             // Also remove any remaining ┃XX┃ tags in the middle/end of the string
             result = BoxTagAnywhereRegex.Replace(result, " ");
+
+            // Remove plain dash-style prefix labels like "EN - ", "4K-NF - ", "US - "
+            result = DashPrefixRegex.Replace(result, string.Empty);
 
             // Remove user-specified terms (one per line)
             if (!string.IsNullOrWhiteSpace(userRemoveTerms))
