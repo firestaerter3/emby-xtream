@@ -1068,7 +1068,7 @@ namespace Emby.Xtream.Plugin.Service
 
                         if (!fileExists)
                         {
-                            Interlocked.Increment(ref _seriesProgress.Added);
+                            Interlocked.Increment(ref _episodeProgress.Added);
                         }
                     }
                 }
