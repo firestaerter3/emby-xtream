@@ -102,6 +102,12 @@ namespace Emby.Xtream.Plugin
         public long LastSeriesSyncTimestamp { get; set; }
         public int StrmNamingVersion { get; set; }  // default 0; bumped when naming logic changes to force re-sync
         public string SyncHistoryJson { get; set; } = string.Empty;
+
+        /// <summary>
+        /// JSON dictionary mapping series_id → SHA256 hash of episode URLs.
+        /// Used to skip per-episode file I/O when the episode list hasn't changed.
+        /// </summary>
+        public string SeriesEpisodeHashesJson { get; set; } = string.Empty;
     }
 
     public enum EpgSourceMode

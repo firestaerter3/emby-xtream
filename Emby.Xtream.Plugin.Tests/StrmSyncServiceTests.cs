@@ -219,17 +219,131 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         // -----------------------------------------------------------------
+        // ComputeSeriesEpisodeHash
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public void ComputeSeriesEpisodeHash_SameEpisodesDifferentOrder_SameHash()
+        {
+            var a = new Dictionary<string, List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>>
+            {
+                ["1"] = new List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>
+                {
+                    new Emby.Xtream.Plugin.Client.Models.EpisodeInfo { Id = 101, Season = 1, EpisodeNum = 1, ContainerExtension = "mp4" },
+                    new Emby.Xtream.Plugin.Client.Models.EpisodeInfo { Id = 102, Season = 1, EpisodeNum = 2, ContainerExtension = "mp4" },
+                }
+            };
+            var b = new Dictionary<string, List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>>
+            {
+                ["1"] = new List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>
+                {
+                    new Emby.Xtream.Plugin.Client.Models.EpisodeInfo { Id = 102, Season = 1, EpisodeNum = 2, ContainerExtension = "mp4" },
+                    new Emby.Xtream.Plugin.Client.Models.EpisodeInfo { Id = 101, Season = 1, EpisodeNum = 1, ContainerExtension = "mp4" },
+                }
+            };
+            Assert.Equal(StrmSyncService.ComputeSeriesEpisodeHash(a), StrmSyncService.ComputeSeriesEpisodeHash(b));
+        }
+
+        [Fact]
+        public void ComputeSeriesEpisodeHash_DifferentEpisodeId_DifferentHash()
+        {
+            var a = new Dictionary<string, List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>>
+            {
+                ["1"] = new List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>
+                {
+                    new Emby.Xtream.Plugin.Client.Models.EpisodeInfo { Id = 101, Season = 1, EpisodeNum = 1, ContainerExtension = "mp4" },
+                }
+            };
+            var b = new Dictionary<string, List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>>
+            {
+                ["1"] = new List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>
+                {
+                    new Emby.Xtream.Plugin.Client.Models.EpisodeInfo { Id = 999, Season = 1, EpisodeNum = 1, ContainerExtension = "mp4" },
+                }
+            };
+            Assert.NotEqual(StrmSyncService.ComputeSeriesEpisodeHash(a), StrmSyncService.ComputeSeriesEpisodeHash(b));
+        }
+
+        [Fact]
+        public void ComputeSeriesEpisodeHash_DifferentExtension_DifferentHash()
+        {
+            var a = new Dictionary<string, List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>>
+            {
+                ["1"] = new List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>
+                {
+                    new Emby.Xtream.Plugin.Client.Models.EpisodeInfo { Id = 101, Season = 1, EpisodeNum = 1, ContainerExtension = "mp4" },
+                }
+            };
+            var b = new Dictionary<string, List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>>
+            {
+                ["1"] = new List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>
+                {
+                    new Emby.Xtream.Plugin.Client.Models.EpisodeInfo { Id = 101, Season = 1, EpisodeNum = 1, ContainerExtension = "mkv" },
+                }
+            };
+            Assert.NotEqual(StrmSyncService.ComputeSeriesEpisodeHash(a), StrmSyncService.ComputeSeriesEpisodeHash(b));
+        }
+
+        [Fact]
+        public void ComputeSeriesEpisodeHash_EmptyEpisodes_ReturnsStableHash()
+        {
+            var empty = new Dictionary<string, List<Emby.Xtream.Plugin.Client.Models.EpisodeInfo>>();
+            var h1 = StrmSyncService.ComputeSeriesEpisodeHash(empty);
+            var h2 = StrmSyncService.ComputeSeriesEpisodeHash(empty);
+            Assert.Equal(h1, h2);
+            Assert.NotEmpty(h1);
+        }
+
+        // -----------------------------------------------------------------
+        // DeserializeEpisodeHashes / SerializeEpisodeHashes
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public void DeserializeEpisodeHashes_NullOrEmpty_ReturnsEmptyDict()
+        {
+            Assert.Empty(StrmSyncService.DeserializeEpisodeHashes(null));
+            Assert.Empty(StrmSyncService.DeserializeEpisodeHashes(""));
+            Assert.Empty(StrmSyncService.DeserializeEpisodeHashes("   "));
+        }
+
+        [Fact]
+        public void DeserializeEpisodeHashes_InvalidJson_ReturnsEmptyDict()
+        {
+            Assert.Empty(StrmSyncService.DeserializeEpisodeHashes("not json"));
+        }
+
+        [Fact]
+        public void DeserializeEpisodeHashes_ValidJson_ReturnsDict()
+        {
+            var dict = StrmSyncService.DeserializeEpisodeHashes("{\"1\":\"abc\",\"2\":\"def\"}");
+            Assert.Equal(2, dict.Count);
+            Assert.Equal("abc", dict["1"]);
+            Assert.Equal("def", dict["2"]);
+        }
+
+        [Fact]
+        public void SerializeEpisodeHashes_Roundtrip()
+        {
+            var original = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
+            original["42"] = "hashvalue";
+            var json = StrmSyncService.SerializeEpisodeHashes(original);
+            var deserialized = StrmSyncService.DeserializeEpisodeHashes(json);
+            Assert.Equal("hashvalue", deserialized["42"]);
+        }
+
+        // -----------------------------------------------------------------
         // CheckAndUpgradeNamingVersion
         // -----------------------------------------------------------------
 
         [Fact]
-        public void CheckAndUpgradeNamingVersion_OldVersion_ResetsTimestamps()
+        public void CheckAndUpgradeNamingVersion_OldVersion_ResetsTimestampsAndHashes()
         {
             var config = new PluginConfiguration
             {
                 StrmNamingVersion       = 0,
                 LastMovieSyncTimestamp  = 999,
                 LastSeriesSyncTimestamp = 888,
+                SeriesEpisodeHashesJson = "{\"1\":\"oldhash\"}",
             };
             var saveCount = 0;
             var svc = new StrmSyncService(new NullLogger());
@@ -237,6 +351,7 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.True(upgraded);
             Assert.Equal(0, config.LastMovieSyncTimestamp);
             Assert.Equal(0, config.LastSeriesSyncTimestamp);
+            Assert.Equal(string.Empty, config.SeriesEpisodeHashesJson);
             Assert.Equal(StrmSyncService.CurrentStrmNamingVersion, config.StrmNamingVersion);
             Assert.Equal(1, saveCount);
         }

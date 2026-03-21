@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -117,6 +118,32 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         /// <summary>
+        /// Computes a stable hash of a series' episode URLs for change detection.
+        /// The hash covers episode ID + extension for each episode, sorted by season+episode
+        /// to be order-independent of the JSON layout.
+        /// </summary>
+        internal static string ComputeSeriesEpisodeHash(Dictionary<string, List<EpisodeInfo>> episodes)
+        {
+            var sb = new StringBuilder();
+            foreach (var seasonEntry in episodes.OrderBy(e => e.Key))
+            {
+                foreach (var ep in seasonEntry.Value.OrderBy(e => e.Season).ThenBy(e => e.EpisodeNum))
+                {
+                    sb.Append(ep.Id);
+                    sb.Append('.');
+                    sb.Append(ep.ContainerExtension ?? "mp4");
+                    sb.Append('|');
+                }
+            }
+
+            using (var sha = SHA256.Create())
+            {
+                var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
+                return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
+            }
+        }
+
+        /// <summary>
         /// Computes a stable hash of the channel list for change detection.
         /// </summary>
         internal static string ComputeChannelListHash(List<LiveStreamInfo> channels)
@@ -140,6 +167,28 @@ namespace Emby.Xtream.Plugin.Service
                 var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
                 return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
             }
+        }
+
+        internal static Dictionary<string, string> DeserializeEpisodeHashes(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return new Dictionary<string, string>();
+            try
+            {
+                return STJ.JsonSerializer.Deserialize<Dictionary<string, string>>(json)
+                       ?? new Dictionary<string, string>();
+            }
+            catch
+            {
+                return new Dictionary<string, string>();
+            }
+        }
+
+        internal static string SerializeEpisodeHashes(ConcurrentDictionary<string, string> hashes)
+        {
+            if (hashes == null || hashes.IsEmpty)
+                return string.Empty;
+            return STJ.JsonSerializer.Serialize(hashes);
         }
 
         public SyncProgress MovieProgress => _movieProgress;
@@ -198,6 +247,7 @@ namespace Emby.Xtream.Plugin.Service
             config.StrmNamingVersion = CurrentStrmNamingVersion;
             config.LastMovieSyncTimestamp = 0;
             config.LastSeriesSyncTimestamp = 0;
+            config.SeriesEpisodeHashesJson = string.Empty;
             saveConfig?.Invoke();
             return true;
         }
@@ -593,6 +643,11 @@ namespace Emby.Xtream.Plugin.Service
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semaphore = new SemaphoreSlim(config.SyncParallelism);
 
+                // Episode hash cache: load stored hashes so we can skip file I/O for unchanged series
+                var storedHashes = DeserializeEpisodeHashes(config.SeriesEpisodeHashesJson);
+                var updatedHashes = new ConcurrentDictionary<string, string>();
+                int hashSkippedCount = 0;
+
                 var tasks = allSeries.Select(async series =>
                 {
                     await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -732,6 +787,42 @@ namespace Emby.Xtream.Plugin.Service
                                 Interlocked.Increment(ref _seriesProgress.Completed);
                                 Interlocked.Add(ref _episodeProgress.Total, existingStrms.Length);
                                 Interlocked.Add(ref _episodeProgress.Skipped, existingStrms.Length);
+                                // Carry forward the stored hash (unchanged series)
+                                var seriesKey = series.SeriesId.ToString(CultureInfo.InvariantCulture);
+                                string carryHash;
+                                if (storedHashes.TryGetValue(seriesKey, out carryHash))
+                                    updatedHashes[seriesKey] = carryHash;
+                                return;
+                            }
+                        }
+
+                        // Episode hash skip: compare episode ID+ext hash to detect unchanged content
+                        // even when the provider bumped last_modified globally.
+                        var currentEpHash = ComputeSeriesEpisodeHash(detail.Episodes);
+                        var epHashKey = series.SeriesId.ToString(CultureInfo.InvariantCulture);
+                        updatedHashes[epHashKey] = currentEpHash;
+
+                        string previousHash;
+                        if (config.SmartSkipExisting
+                            && storedHashes.TryGetValue(epHashKey, out previousHash)
+                            && previousHash == currentEpHash
+                            && Directory.Exists(seriesDir))
+                        {
+                            var existingStrms = Directory.GetFiles(seriesDir, "*.strm", SearchOption.AllDirectories);
+                            if (existingStrms.Length > 0)
+                            {
+                                foreach (var existingStrm in existingStrms)
+                                {
+                                    lock (writtenPaths)
+                                    {
+                                        writtenPaths.Add(existingStrm);
+                                    }
+                                }
+                                Interlocked.Increment(ref _seriesProgress.Skipped);
+                                Interlocked.Increment(ref _seriesProgress.Completed);
+                                Interlocked.Add(ref _episodeProgress.Total, existingStrms.Length);
+                                Interlocked.Add(ref _episodeProgress.Skipped, existingStrms.Length);
+                                Interlocked.Increment(ref hashSkippedCount);
                                 return;
                             }
                         }
@@ -848,6 +939,13 @@ namespace Emby.Xtream.Plugin.Service
                     config.LastSeriesSyncTimestamp = maxSeriesTs;
                     saveConfig?.Invoke();
                 }
+
+                // Persist episode hashes for next run
+                config.SeriesEpisodeHashesJson = SerializeEpisodeHashes(updatedHashes);
+                saveConfig?.Invoke();
+
+                if (hashSkippedCount > 0)
+                    _logger.Info("Episode hash skip: {0} series unchanged (episode IDs identical to previous sync)", hashSkippedCount);
 
                 _logger.Info("Series STRM sync completed: {0} written, {1} skipped, {2} failed",
                     _seriesProgress.Completed - _seriesProgress.Skipped, _seriesProgress.Skipped, _seriesProgress.Failed);

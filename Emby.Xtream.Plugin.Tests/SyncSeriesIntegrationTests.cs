@@ -69,8 +69,8 @@ namespace Emby.Xtream.Plugin.Tests
             // URL format: {BaseUrl}/series/{Username}/{Password}/{episodeId}.{ext}
             Assert.Equal("http://fake-xtream/series/user/pass/101.mp4", content);
 
-            // Timestamp (2000) > 0 → saved
-            Assert.Equal(1, SaveConfigCallCount);
+            // Timestamp (2000) > 0 → saved; episode hashes also saved → 2 saves
+            Assert.Equal(2, SaveConfigCallCount);
         }
 
         // -----------------------------------------------------------------
@@ -224,8 +224,9 @@ namespace Emby.Xtream.Plugin.Tests
 
             var strmPath = EpisodeStrmPath("Test Show", season: 1, episode: 1, title: "Ep One");
             Assert.True(File.Exists(strmPath), $"Expected STRM file at: {strmPath}");
-            // maxSeriesTs (0) is NOT > LastSeriesSyncTimestamp (100) → saveConfig not called for timestamp
-            Assert.Equal(0, SaveConfigCallCount);
+            // maxSeriesTs (0) is NOT > LastSeriesSyncTimestamp (100) → no timestamp save,
+            // but episode hashes are always saved → 1 save
+            Assert.Equal(1, SaveConfigCallCount);
         }
 
         // -----------------------------------------------------------------
@@ -301,7 +302,128 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         // -----------------------------------------------------------------
-        // Test 9: MultiSeason_WritesFilesInCorrectSubdirs
+        // Test 9: EpisodeHashSkip_UnchangedEpisodes_NoFileIO
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public async Task EpisodeHashSkip_UnchangedEpisodes_NoFileIO()
+        {
+            // First run: write the episode and populate the hash
+            var config = DefaultConfig();
+            config.SmartSkipExisting = true;
+
+            var list = SeriesListJson(Series(seriesId: 1, name: "Test Show", lastModified: "2000"));
+            var detail = SeriesDetailJson(seriesId: 1, seasonNum: 1, episodeNum: 1,
+                title: "Episode Title", ext: "mp4");
+            RegisterSeriesResponses(list, detail, seriesId: 1);
+
+            await MakeService().SyncSeriesAsync(config, None, SaveConfig);
+
+            var strmPath = EpisodeStrmPath("Test Show", season: 1, episode: 1, title: "Episode Title");
+            Assert.True(File.Exists(strmPath));
+
+            // config now has SeriesEpisodeHashesJson populated from the first run
+            Assert.False(string.IsNullOrEmpty(config.SeriesEpisodeHashesJson),
+                "Episode hashes should be persisted after first sync");
+
+            // Overwrite with sentinel to prove file I/O is skipped on second run
+            File.WriteAllText(strmPath, "SENTINEL");
+
+            // Second run: provider bumps lastModified globally → isChangedSeries = true
+            // but episode hash matches → skip file I/O
+            config.LastSeriesSyncTimestamp = 2000;
+            var list2 = SeriesListJson(Series(seriesId: 1, name: "Test Show", lastModified: "9999"));
+            RegisterSeriesResponses(list2, detail, seriesId: 1);
+
+            Handler.ReceivedUrls.Clear();
+            await MakeService().SyncSeriesAsync(config, None, SaveConfig);
+
+            // File must NOT be overwritten (sentinel survives)
+            Assert.Equal("SENTINEL", File.ReadAllText(strmPath));
+
+            // get_series_info IS still called (we need the data to compute the hash)
+            Assert.Contains(Handler.ReceivedUrls, u => u.Contains("get_series_info"));
+        }
+
+        // -----------------------------------------------------------------
+        // Test 10: EpisodeHashMiss_NewEpisode_FileWritten
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public async Task EpisodeHashMiss_NewEpisode_FileWritten()
+        {
+            // First run: write one episode
+            var config = DefaultConfig();
+            config.SmartSkipExisting = true;
+
+            var list = SeriesListJson(Series(seriesId: 1, name: "Test Show", lastModified: "2000"));
+            var detail1ep = SeriesDetailJson(seriesId: 1, seasonNum: 1, episodeNum: 1,
+                title: "Episode Title", ext: "mp4");
+            RegisterSeriesResponses(list, detail1ep, seriesId: 1);
+
+            await MakeService().SyncSeriesAsync(config, None, SaveConfig);
+
+            Assert.False(string.IsNullOrEmpty(config.SeriesEpisodeHashesJson));
+
+            // Second run: provider adds a second episode (different hash)
+            config.LastSeriesSyncTimestamp = 2000;
+            var list2 = SeriesListJson(Series(seriesId: 1, name: "Test Show", lastModified: "5000"));
+            var detail2ep = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                info = new { series_id = 1, name = "Test Show", tmdb = "" },
+                seasons = new object[0],
+                episodes = new System.Collections.Generic.Dictionary<string, object[]>
+                {
+                    ["1"] = new object[]
+                    {
+                        new { id = 101, episode_num = 1, title = "Episode Title",
+                              container_extension = "mp4", season = 1 },
+                        new { id = 102, episode_num = 2, title = "New Episode",
+                              container_extension = "mp4", season = 1 }
+                    }
+                }
+            });
+            Handler.RespondWith("action=get_series", list2);
+            Handler.RespondWith("action=get_series_info&series_id=1", detail2ep);
+
+            await MakeService().SyncSeriesAsync(config, None, SaveConfig);
+
+            // New episode must be written (hash mismatch → file I/O happens)
+            var newEpPath = EpisodeStrmPath("Test Show", season: 1, episode: 2, title: "New Episode");
+            Assert.True(File.Exists(newEpPath), $"Expected new episode at: {newEpPath}");
+            Assert.Equal("http://fake-xtream/series/user/pass/102.mp4", File.ReadAllText(newEpPath));
+        }
+
+        // -----------------------------------------------------------------
+        // Test 11: NamingVersionUpgrade_ClearsEpisodeHashes
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public async Task NamingVersionUpgrade_ClearsEpisodeHashes()
+        {
+            // Pre-populate hashes to simulate a previous sync
+            var config = DefaultConfig();
+            config.SmartSkipExisting = true;
+            config.SeriesEpisodeHashesJson = "{\"1\":\"abc123\"}";
+            config.StrmNamingVersion = 0; // stale → triggers upgrade
+
+            var list = SeriesListJson(Series(seriesId: 1, name: "Test Show", lastModified: "2000"));
+            var detail = SeriesDetailJson(seriesId: 1, seasonNum: 1, episodeNum: 1,
+                title: "Episode Title", ext: "mp4");
+            RegisterSeriesResponses(list, detail, seriesId: 1);
+
+            await MakeService().SyncSeriesAsync(config, None, SaveConfig);
+
+            // After naming version upgrade, old hashes must have been cleared
+            // The sync then writes fresh hashes for the series it processed
+            var hashes = StrmSyncService.DeserializeEpisodeHashes(config.SeriesEpisodeHashesJson);
+            // Old dummy hash "abc123" must be gone; replaced by real computed hash
+            Assert.DoesNotContain("abc123", config.SeriesEpisodeHashesJson);
+            Assert.True(hashes.ContainsKey("1"), "Fresh hash should exist for series_id=1");
+        }
+
+        // -----------------------------------------------------------------
+        // Test 12: MultiSeason_WritesFilesInCorrectSubdirs
         // -----------------------------------------------------------------
 
         [Fact]
