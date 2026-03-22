@@ -291,7 +291,7 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     return await liveTvService.GetFilteredChannelsAsync(cancellationToken).ConfigureAwait(false);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (!(ex is TaskCanceledException) && !(ex is OperationCanceledException))
                 {
                     Logger.Warn("LiveTvService channel fetch failed, falling back to direct API: {0}", ex.Message);
                     return await FetchAllChannelsDirectAsync(config).ConfigureAwait(false);
@@ -465,7 +465,7 @@ namespace Emby.Xtream.Plugin.Service
 
         private static async Task<List<Client.Models.LiveStreamInfo>> FetchAllChannelsDirectAsync(PluginConfiguration config)
         {
-            using (var httpClient = Plugin.CreateHttpClient())
+            using (var httpClient = Plugin.CreateHttpClient(30))
             {
                 var url = string.Format(
                     CultureInfo.InvariantCulture,

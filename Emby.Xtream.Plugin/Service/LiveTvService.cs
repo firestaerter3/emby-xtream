@@ -247,7 +247,7 @@ namespace Emby.Xtream.Plugin.Service
                 "{0}/player_api.php?username={1}&password={2}&action=get_live_streams",
                 config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty));
 
-            using (var httpClient = Plugin.CreateHttpClient())
+            using (var httpClient = Plugin.CreateHttpClient(30))
             {
                 var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
                 return STJ.JsonSerializer.Deserialize<List<LiveStreamInfo>>(json, JsonOptions)
@@ -263,7 +263,7 @@ namespace Emby.Xtream.Plugin.Service
                 "{0}/player_api.php?username={1}&password={2}&action=get_live_streams&category_id={3}",
                 config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), categoryId);
 
-            using (var httpClient = Plugin.CreateHttpClient())
+            using (var httpClient = Plugin.CreateHttpClient(30))
             {
                 try
                 {
