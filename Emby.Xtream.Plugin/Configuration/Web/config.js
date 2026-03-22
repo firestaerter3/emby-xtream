@@ -337,7 +337,9 @@ function (BaseView, loading) {
             view.querySelector('.selOutputFormat').value = config.LiveTvOutputFormat || 'ts';
             view.querySelector('.chkIncludeAdult').checked = !!config.IncludeAdultChannels;
 
-            view.querySelector('.selectEpgSource').value = (config.EpgSource || 0).toString();
+            var epgVal = config.EpgSource;
+            var epgNameToInt = { 'XtreamServer': '0', 'CustomUrl': '1', 'Disabled': '2' };
+            view.querySelector('.selectEpgSource').value = epgNameToInt[epgVal] || (epgVal || 0).toString();
             view.querySelector('.txtCustomEpgUrl').value = config.CustomEpgUrl || '';
             view.querySelector('.chkDeferEpgToGuideData').checked = config.DeferEpgToGuideData !== false;
             view.querySelector('.txtEpgCacheMinutes').value = config.EpgCacheMinutes || 30;
