@@ -148,7 +148,7 @@ namespace Emby.Xtream.Plugin.Api
         public int? Year { get; set; }
     }
 
-    [Route("/XtreamTuner/SyncGuideMappings", "POST", Summary = "Maps tuner channels to Emby Guide Data using Gracenote station IDs from Dispatcharr")]
+    [Route("/XtreamTuner/SyncGuideMappings", "POST", Summary = "Detaches listing providers from the Xtream tuner so Gracenote EPG is fetched by the tuner directly")]
     public class SyncGuideMappings : IReturn<SyncGuideMappingsResult>
     {
     }
@@ -157,8 +157,7 @@ namespace Emby.Xtream.Plugin.Api
     {
         public bool Success { get; set; }
         public string Message { get; set; }
-        public int MappedCount { get; set; }
-        public int ClearedCount { get; set; }
+        public int ProvidersUpdated { get; set; }
     }
 
     public class TestConnectionResult
@@ -1181,7 +1180,7 @@ namespace Emby.Xtream.Plugin.Api
             catch { }
         }
 
-        public async Task<object> Post(SyncGuideMappings request)
+        public object Post(SyncGuideMappings request)
         {
             var result = new SyncGuideMappingsResult();
 
@@ -1194,17 +1193,16 @@ namespace Emby.Xtream.Plugin.Api
 
             try
             {
-                var (mapped, cleared) = await tunerHost.SyncGuideMappingsAsync(CancellationToken.None).ConfigureAwait(false);
+                var updated = tunerHost.DetachListingProviders();
                 result.Success = true;
-                result.MappedCount = mapped;
-                result.ClearedCount = cleared;
-                result.Message = mapped > 0 || cleared > 0
-                    ? string.Format("{0} channels mapped to Gracenote, {1} cleared for tuner EPG.", mapped, cleared)
-                    : "No channels were mapped. Ensure Dispatcharr is enabled with Gracenote station IDs and a guide data provider is configured.";
+                result.ProvidersUpdated = updated;
+                result.Message = updated > 0
+                    ? string.Format("Detached Xtream tuner from {0} listing provider(s). Gracenote EPG is now fetched by the tuner directly for channels with station IDs; all other channels use Xtream EPG.", updated)
+                    : "Xtream tuner is already detached from all listing providers. Gracenote EPG will be fetched by the tuner for channels with station IDs.";
             }
             catch (Exception ex)
             {
-                result.Message = "Sync failed: " + ex.Message;
+                result.Message = "Failed: " + ex.Message;
             }
 
             return result;

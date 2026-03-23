@@ -101,17 +101,36 @@ namespace Emby.Xtream.Plugin.Service
                 return new List<ProgramInfo>();
             }
 
-            // If this channel has a Gracenote station ID it is mapped to a listings provider
-            // (e.g. Emby Guide Data). Return no tuner EPG so Emby's guide data takes priority
-            // and the Xtream "dummy" EPG doesn't overwrite the rich metadata.
-            // Only do this when DeferEpgToGuideData is enabled — users without an Emby Guide
-            // Data subscription should disable this so channels still get Xtream EPG.
+            // If this channel has a Gracenote station ID, fetch programs directly from the
+            // listings provider rather than returning Xtream EPG. This gives the channel
+            // rich Gracenote metadata (artwork, descriptions, genres) without relying on
+            // Emby's auto-mapper — which would incorrectly match other channels too.
             var stationMap = _stationIdMap;
-            if (stationMap != null && stationMap.ContainsKey(streamId)
+            if (stationMap != null && stationMap.TryGetValue(streamId, out var stationId)
+                && !string.IsNullOrEmpty(stationId)
                 && Plugin.Instance.Configuration.DeferEpgToGuideData)
             {
-                Logger.Debug("GetProgramsInternal: stream {0} has Gracenote station ID, deferring to listings provider", streamId);
-                return new List<ProgramInfo>();
+                try
+                {
+                    var gracenotePrograms = await FetchGracenotePrograms(
+                        stationId, tunerChannelId, startDateUtc, endDateUtc, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (gracenotePrograms != null && gracenotePrograms.Count > 0)
+                    {
+                        Logger.Debug("GetProgramsInternal: stream {0} using {1} Gracenote programs (station {2})",
+                            streamId, gracenotePrograms.Count, stationId);
+                        return gracenotePrograms;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("GetProgramsInternal: Gracenote fetch failed for stream {0} (station {1}): {2}",
+                        streamId, stationId, ex.Message);
+                }
+
+                Logger.Debug("GetProgramsInternal: stream {0} has station ID {1} but no Gracenote data, falling back to Xtream EPG",
+                    streamId, stationId);
             }
 
             var liveTvService = Plugin.Instance.LiveTvService;
@@ -472,20 +491,19 @@ namespace Emby.Xtream.Plugin.Service
 
             if (config.DeferEpgToGuideData && gracenoteCount > 0)
             {
-                _ = Task.Run(async () =>
+                _ = Task.Run(() =>
                 {
                     try
                     {
-                        await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
-                        var (mapped, cleared) = await SyncGuideMappingsAsync(cancellationToken).ConfigureAwait(false);
-                        Logger.Info("Auto guide-mapping sync completed: {0} mapped to Gracenote, {1} cleared for tuner EPG", mapped, cleared);
+                        var updated = DetachListingProviders();
+                        if (updated > 0)
+                            Logger.Info("Auto-detached Xtream tuner from {0} listing provider(s) — Gracenote EPG will be fetched by the tuner directly", updated);
                     }
-                    catch (OperationCanceledException) { }
                     catch (Exception ex)
                     {
-                        Logger.Warn("Auto guide-mapping sync failed: {0}", ex.Message);
+                        Logger.Warn("Auto detach listing providers failed: {0}", ex.Message);
                     }
-                }, cancellationToken);
+                });
             }
 
             return result;
@@ -595,40 +613,23 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         /// <summary>
-        /// Programmatically maps tuner channels to Emby Guide Data (Gracenote) entries
-        /// using the station IDs from Dispatcharr. Channels WITH a Gracenote station ID
-        /// are mapped to the correct guide entry; channels WITHOUT one are mapped to an
-        /// empty provider channel to prevent Emby's auto-mapper from assigning a wrong
-        /// match by channel-number heuristic (which would override the tuner's Xtream EPG).
+        /// Removes the Xtream tuner from all listing providers' enabled-tuner lists so
+        /// that Emby's auto-mapper does not assign (wrong) Gracenote entries to our
+        /// channels. Instead, <see cref="GetProgramsInternal"/> fetches Gracenote programs
+        /// directly for channels that have a station ID and returns Xtream EPG for the rest.
         /// </summary>
-        /// <returns>Tuple of (mapped to Gracenote, cleared for tuner EPG).</returns>
-        public async Task<(int Mapped, int Cleared)> SyncGuideMappingsAsync(CancellationToken cancellationToken)
+        /// <returns>Number of listing providers updated.</returns>
+        public int DetachListingProviders()
         {
-            var channels = _cachedChannels;
-            if (channels == null || channels.Count == 0)
-            {
-                Logger.Info("SyncGuideMappings: no cached channels, skipping");
-                return (0, 0);
-            }
-
-            var gracenoteCount = channels.Count(c => !string.IsNullOrEmpty(c.ListingsChannelId));
-            if (gracenoteCount == 0)
-            {
-                Logger.Info("SyncGuideMappings: no channels with Gracenote station IDs, skipping");
-                return (0, 0);
-            }
-
-            ILiveTvManager liveTvManager;
             IConfigurationManager configManager;
             try
             {
-                liveTvManager = _applicationHost.Resolve<ILiveTvManager>();
                 configManager = _applicationHost.Resolve<IConfigurationManager>();
             }
             catch (Exception ex)
             {
-                Logger.Warn("SyncGuideMappings: failed to resolve Emby services: {0}", ex.Message);
-                return (0, 0);
+                Logger.Warn("DetachListingProviders: failed to resolve IConfigurationManager: {0}", ex.Message);
+                return 0;
             }
 
             LiveTvOptions liveTvOptions;
@@ -638,65 +639,176 @@ namespace Emby.Xtream.Plugin.Service
             }
             catch (Exception ex)
             {
-                Logger.Warn("SyncGuideMappings: failed to read LiveTvOptions: {0}", ex.Message);
-                return (0, 0);
+                Logger.Warn("DetachListingProviders: failed to read LiveTvOptions: {0}", ex.Message);
+                return 0;
             }
 
             if (liveTvOptions?.ListingProviders == null || liveTvOptions.ListingProviders.Length == 0)
             {
-                Logger.Info("SyncGuideMappings: no listing providers configured, skipping");
-                return (0, 0);
+                Logger.Info("DetachListingProviders: no listing providers configured");
+                return 0;
             }
 
-            int totalMapped = 0;
-            int totalCleared = 0;
+            var xtreamTunerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (liveTvOptions.TunerHosts != null)
+            {
+                foreach (var th in liveTvOptions.TunerHosts)
+                {
+                    if (string.Equals(th.Type, TunerType, StringComparison.OrdinalIgnoreCase)
+                        && !string.IsNullOrEmpty(th.Id))
+                    {
+                        xtreamTunerIds.Add(th.Id);
+                    }
+                }
+            }
+
+            if (xtreamTunerIds.Count == 0)
+            {
+                Logger.Info("DetachListingProviders: no Xtream tuner hosts found in config");
+                return 0;
+            }
+
+            var allTunerIds = liveTvOptions.TunerHosts?
+                .Where(t => !string.IsNullOrEmpty(t.Id))
+                .Select(t => t.Id)
+                .ToArray() ?? Array.Empty<string>();
+
+            int updated = 0;
+            bool configChanged = false;
 
             foreach (var provider in liveTvOptions.ListingProviders)
             {
                 if (string.IsNullOrEmpty(provider.Id))
                     continue;
 
-                Logger.Info("SyncGuideMappings: syncing {0} channels ({1} with Gracenote ID) to provider '{2}' (type={3}, id={4})",
-                    channels.Count, gracenoteCount, provider.Name ?? provider.ListingsId, provider.Type, provider.Id);
-
-                int mapped = 0;
-                int cleared = 0;
-                int failed = 0;
-
-                foreach (var ch in channels)
+                bool coversXtream;
+                if (provider.EnableAllTuners)
                 {
-                    if (cancellationToken.IsCancellationRequested) break;
-
-                    var hasStationId = !string.IsNullOrEmpty(ch.ListingsChannelId);
-                    var providerChannelId = hasStationId ? ch.ListingsChannelId : string.Empty;
-
-                    try
-                    {
-                        await liveTvManager.SetChannelMapping(
-                            provider.Id, ch.Number, providerChannelId, cancellationToken)
-                            .ConfigureAwait(false);
-
-                        if (hasStationId)
-                            mapped++;
-                        else
-                            cleared++;
-                    }
-                    catch (Exception ex)
-                    {
-                        if (failed == 0)
-                            Logger.Warn("SyncGuideMappings: first failure for ch {0} ({1}): {2}",
-                                ch.Number, ch.Name, ex.Message);
-                        failed++;
-                    }
+                    coversXtream = true;
+                }
+                else
+                {
+                    coversXtream = provider.EnabledTuners != null
+                        && provider.EnabledTuners.Any(id => xtreamTunerIds.Contains(id));
                 }
 
-                Logger.Info("SyncGuideMappings: provider {0}: {1} mapped to Gracenote, {2} cleared (using tuner EPG), {3} failed",
-                    provider.Id, mapped, cleared, failed);
-                totalMapped += mapped;
-                totalCleared += cleared;
+                if (!coversXtream)
+                    continue;
+
+                if (provider.EnableAllTuners)
+                {
+                    provider.EnableAllTuners = false;
+                    provider.EnabledTuners = allTunerIds
+                        .Where(id => !xtreamTunerIds.Contains(id))
+                        .ToArray();
+                }
+                else
+                {
+                    provider.EnabledTuners = provider.EnabledTuners
+                        .Where(id => !xtreamTunerIds.Contains(id))
+                        .ToArray();
+                }
+
+                Logger.Info("DetachListingProviders: removed Xtream tuner from provider '{0}' (id={1}), remaining tuners: [{2}]",
+                    provider.Name ?? provider.ListingsId, provider.Id,
+                    string.Join(", ", provider.EnabledTuners));
+                updated++;
+                configChanged = true;
             }
 
-            return (totalMapped, totalCleared);
+            if (configChanged)
+            {
+                try
+                {
+                    configManager.SaveConfiguration("livetv", liveTvOptions);
+                    Logger.Info("DetachListingProviders: saved config, {0} providers updated", updated);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("DetachListingProviders: failed to save config: {0}", ex.Message);
+                    return 0;
+                }
+            }
+            else
+            {
+                Logger.Info("DetachListingProviders: Xtream tuner already detached from all providers");
+            }
+
+            return updated;
+        }
+
+        /// <summary>
+        /// Fetches Gracenote programs from the first listing provider that returns data
+        /// for the given station ID. Returns null if no provider has programs.
+        /// </summary>
+        private async Task<List<ProgramInfo>> FetchGracenotePrograms(
+            string stationId, string tunerChannelId,
+            DateTimeOffset startDateUtc, DateTimeOffset endDateUtc,
+            CancellationToken cancellationToken)
+        {
+            ILiveTvManager liveTvManager;
+            IConfigurationManager configManager;
+            try
+            {
+                liveTvManager = _applicationHost.Resolve<ILiveTvManager>();
+                configManager = _applicationHost.Resolve<IConfigurationManager>();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("FetchGracenotePrograms: failed to resolve services: {0}", ex.Message);
+                return null;
+            }
+
+            LiveTvOptions liveTvOptions;
+            try
+            {
+                liveTvOptions = configManager.GetConfiguration("livetv") as LiveTvOptions;
+            }
+            catch
+            {
+                return null;
+            }
+
+            if (liveTvOptions?.ListingProviders == null)
+                return null;
+
+            var providers = liveTvManager.ListingProviders;
+            if (providers == null || providers.Length == 0)
+                return null;
+
+            foreach (var listingsProvider in providers)
+            {
+                var info = liveTvOptions.ListingProviders
+                    .FirstOrDefault(p => string.Equals(p.Type, listingsProvider.Type, StringComparison.OrdinalIgnoreCase)
+                                         && !string.IsNullOrEmpty(p.Id));
+                if (info == null)
+                    continue;
+
+                try
+                {
+                    var programs = await listingsProvider.GetProgramsAsync(
+                        info, stationId, startDateUtc, endDateUtc, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (programs != null && programs.Count > 0)
+                    {
+                        var result = new List<ProgramInfo>(programs.Count);
+                        foreach (var p in programs)
+                        {
+                            p.ChannelId = tunerChannelId;
+                            result.Add(p);
+                        }
+                        return result;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug("FetchGracenotePrograms: provider '{0}' returned no data for station {1}: {2}",
+                        info.Name ?? info.ListingsId, stationId, ex.Message);
+                }
+            }
+
+            return null;
         }
 
         /// <summary>
