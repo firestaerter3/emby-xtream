@@ -52,6 +52,8 @@ namespace Emby.Xtream.Plugin.Service
 
         public IReadOnlyDictionary<int, string> TvgIdMap => _tvgIdMap;
         public IReadOnlyDictionary<int, string> StationIdMap => _stationIdMap;
+        public IReadOnlyDictionary<string, int> TunerChannelIdToStreamId => _tunerChannelIdToStreamId;
+        public IReadOnlyList<ChannelInfo> CachedChannelList => _cachedChannels;
 
         public XtreamTunerHost(IServerApplicationHost applicationHost)
             : base(applicationHost)
@@ -285,8 +287,7 @@ namespace Emby.Xtream.Plugin.Service
                 // Re-apply from _stationIdMap on every cache hit so the field is always correct.
                 foreach (var ch in _cachedChannels)
                 {
-                    if (config.EnableDispatcharr
-                        && _tunerChannelIdToStreamId.TryGetValue(ch.TunerChannelId, out var streamIdForLookup)
+                    if (_tunerChannelIdToStreamId.TryGetValue(ch.TunerChannelId, out var streamIdForLookup)
                         && _stationIdMap.TryGetValue(streamIdForLookup, out var stId)
                         && !string.IsNullOrEmpty(stId))
                         ch.ListingsChannelId = stId;
@@ -366,7 +367,8 @@ namespace Emby.Xtream.Plugin.Service
                     newStats = statsMap;
                     _channelUuidMap = uuidMap;
                     _tvgIdMap = tvgIdMap;
-                    _stationIdMap = stationIdMap;
+                    // Station IDs now come from Gracenote DB matching, not Dispatcharr.
+                    // _stationIdMap is populated later via GracenoteDbService.
                     _channelNumberMap = channelNumberMap;
                     _allowedStreamIds = allowedStreamIds;
                     _dispatcharrDataLoaded = true;
@@ -398,6 +400,39 @@ namespace Emby.Xtream.Plugin.Service
                     before, channels.Count, before - channels.Count);
             }
 
+            // ── Gracenote DB matching ──
+            // Build channel name list for matching, then populate _stationIdMap
+            // from the Channel Identifiarr SQLite database.
+            var newStationIdMap = new Dictionary<int, string>();
+            var channelPairs = channels.Select(c => (
+                c.StreamId,
+                ChannelNameCleaner.CleanChannelName(c.Name, config.ChannelRemoveTerms, config.EnableChannelNameCleaning)
+            )).ToList();
+
+            if (!string.IsNullOrEmpty(config.GracenoteDbPath))
+            {
+                try
+                {
+                    var overrides = ParseStationOverrides(config.GracenoteStationOverrides);
+                    var gracenoteDb = Plugin.Instance.GracenoteDbService;
+                    var matches = gracenoteDb.MatchChannels(
+                        config.GracenoteDbPath,
+                        string.IsNullOrEmpty(config.SelectedLineupId) ? null : config.SelectedLineupId,
+                        channelPairs,
+                        config.GracenoteMatchThreshold,
+                        overrides);
+
+                    foreach (var kvp in matches)
+                        newStationIdMap[kvp.Key] = kvp.Value.StationId;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("Gracenote DB matching failed: {0}", ex.Message);
+                }
+            }
+
+            _stationIdMap = newStationIdMap;
+
             var usedStationIds = new HashSet<string>(StringComparer.Ordinal);
             var newTunerChannelIdToStreamId = new Dictionary<string, int>();
 
@@ -423,8 +458,7 @@ namespace Emby.Xtream.Plugin.Service
                 // TunerChannelId (not ListingsChannelId) to correlate channels with guide data.
                 string tunerChannelId = streamIdStr;
                 string listingsChannelId = null;
-                if (config.EnableDispatcharr
-                    && _stationIdMap.TryGetValue(channel.StreamId, out var stationId)
+                if (_stationIdMap.TryGetValue(channel.StreamId, out var stationId)
                     && !string.IsNullOrEmpty(stationId))
                 {
                     if (usedStationIds.Add(stationId))
@@ -597,6 +631,34 @@ namespace Emby.Xtream.Plugin.Service
             return liveStream;
         }
 
+        /// <summary>
+        /// Parses the JSON overrides string (stream_id → station_id) from config.
+        /// </summary>
+        internal static Dictionary<int, string> ParseStationOverrides(string json)
+        {
+            var result = new Dictionary<int, string>();
+            if (string.IsNullOrEmpty(json)) return result;
+
+            try
+            {
+                var dict = STJ.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                if (dict != null)
+                {
+                    foreach (var kvp in dict)
+                    {
+                        if (int.TryParse(kvp.Key, NumberStyles.None, CultureInfo.InvariantCulture, out var streamId)
+                            && !string.IsNullOrEmpty(kvp.Value))
+                        {
+                            result[streamId] = kvp.Value;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return result;
+        }
+
         public new void ClearCaches()
         {
             _cachedChannels = null;
@@ -609,6 +671,8 @@ namespace Emby.Xtream.Plugin.Service
             _tunerChannelIdToStreamId = new Dictionary<string, int>();
             _allowedStreamIds = null;
             _dispatcharrDataLoaded = false;
+            var gracenoteDb = Plugin.InstanceOrNull?.GracenoteDbService;
+            if (gracenoteDb != null) gracenoteDb.ClearCache();
             Logger.Info("Xtream tuner caches cleared");
         }
 
@@ -1001,7 +1065,7 @@ namespace Emby.Xtream.Plugin.Service
                 if (statsMap.Count > 0) _streamStats = statsMap;
                 if (uuidMap.Count > 0) _channelUuidMap = uuidMap;
                 if (tvgIdMap.Count > 0) _tvgIdMap = tvgIdMap;
-                if (stationIdMap.Count > 0) _stationIdMap = stationIdMap;
+                // Station IDs now come from Gracenote DB matching, not Dispatcharr.
                 if (channelNumberMap.Count > 0) _channelNumberMap = channelNumberMap;
                 _allowedStreamIds = allowedStreamIds;
                 _dispatcharrDataLoaded = true;

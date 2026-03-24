@@ -709,6 +709,93 @@
                 <hr style="border:none; border-top:1px solid rgba(128,128,128,0.2); margin:0.25em 0 1.25em;" />
 
                 <div class="verticalSection">
+                    <h2 class="sectionTitle">Gracenote EPG (Channel Identifiarr DB)</h2>
+                    <div class="fieldDescription" style="margin-bottom:0.8em;">
+                        Point the plugin at a
+                        <a href="https://github.com/egyptiangio/channelidentifiarr" target="_blank" rel="noopener" style="color:#52B54B;">Channel Identifiarr</a>
+                        SQLite database to automatically match your channels to Gracenote station IDs.
+                        This gives your channels rich EPG data (artwork, descriptions, genres) without needing
+                        Channel Identifiarr running as a separate app.
+                    </div>
+
+                    <div class="inputContainer">
+                        <input class="txtGracenoteDbPath" type="text" is="emby-input"
+                               label="Gracenote Database Path (e.g. /config/channelidentifiarr.db)" />
+                    </div>
+                    <div style="display:flex; gap:0.5em; margin-bottom:0.75em;">
+                        <button class="btnTestGracenoteDb raised button-secondary" is="emby-button" type="button">
+                            <span>Test Database</span>
+                        </button>
+                    </div>
+                    <div class="gracenoteDbTestResult" style="margin-bottom:0.5em;"></div>
+
+                    <div class="gracenoteDbSettings" style="display:none;">
+                        <div class="inputContainer">
+                            <select class="selectGracenoteLineup" is="emby-select" label="Lineup (optional — scope matching to a specific TV provider)">
+                                <option value="">All stations (no lineup filter)</option>
+                            </select>
+                        </div>
+                        <div class="inputContainer">
+                            <input class="txtGracenoteThreshold" type="number" is="emby-input"
+                                   label="Match Confidence Threshold (0.0 - 1.0)"
+                                   min="0" max="1" step="0.05" />
+                            <div class="fieldDescription">
+                                Only auto-match channels with a confidence score at or above this value.
+                                Lower = more matches but more false positives. Default: 0.8
+                            </div>
+                        </div>
+
+                        <hr style="border:none; border-top:1px solid rgba(128,128,128,0.15); margin:1em 0;" />
+
+                        <h3 class="sectionTitle" style="margin-top:0; font-size:1em;">Channel Matches</h3>
+                        <div class="fieldDescription" style="margin-bottom:0.75em;">
+                            Preview how channels are matched to Gracenote stations. Click a row to override the match.
+                        </div>
+                        <button class="btnRefreshMatches raised button-secondary" is="emby-button" type="button">
+                            <span>Refresh Matches</span>
+                        </button>
+                        <div class="gracenoteMatchesContainer" style="margin-top:0.75em; max-height:400px; overflow-y:auto; border:1px solid rgba(128,128,128,0.15); border-radius:4px;">
+                            <table class="gracenoteMatchesTable" style="width:100%; border-collapse:collapse; font-size:0.9em;">
+                                <thead>
+                                    <tr style="border-bottom:1px solid rgba(128,128,128,0.2); text-align:left;">
+                                        <th style="padding:0.5em 0.75em;">Channel</th>
+                                        <th style="padding:0.5em 0.75em;">Matched Station</th>
+                                        <th style="padding:0.5em 0.75em;">Station ID</th>
+                                        <th style="padding:0.5em 0.75em;">Score</th>
+                                        <th style="padding:0.5em 0.75em;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody class="gracenoteMatchesTbody">
+                                    <tr><td colspan="5" style="padding:1em; text-align:center; opacity:0.5;">Click "Refresh Matches" to load</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Gracenote Override Modal -->
+                <div class="gracenoteOverrideDialog" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
+                    <div style="background:#1a1a1a; border-radius:8px; padding:1.5em; max-width:500px; width:90%; max-height:80vh; overflow-y:auto;">
+                        <h3 style="margin:0 0 0.75em;">Override Station Match</h3>
+                        <div class="overrideChannelInfo" style="margin-bottom:0.75em; opacity:0.7;"></div>
+                        <div class="inputContainer">
+                            <input class="txtStationSearch" type="text" is="emby-input" label="Search stations by name, call sign, or ID" />
+                        </div>
+                        <div class="stationSearchResults" style="max-height:250px; overflow-y:auto; border:1px solid rgba(128,128,128,0.15); border-radius:4px; margin-bottom:0.75em;"></div>
+                        <div style="display:flex; gap:0.5em; justify-content:flex-end;">
+                            <button class="btnClearOverride raised button-secondary" is="emby-button" type="button">
+                                <span>Clear Override</span>
+                            </button>
+                            <button class="btnCancelOverride raised button-secondary" is="emby-button" type="button">
+                                <span>Cancel</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <hr style="border:none; border-top:1px solid rgba(128,128,128,0.2); margin:0.25em 0 1.25em;" />
+
+                <div class="verticalSection">
                     <h2 class="sectionTitle">Updates</h2>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label>

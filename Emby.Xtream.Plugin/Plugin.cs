@@ -20,6 +20,7 @@ namespace Emby.Xtream.Plugin
         private readonly IApplicationPaths _applicationPaths;
         private LiveTvService _liveTvService;
         private StrmSyncService _strmSyncService;
+        private GracenoteDbService _gracenoteDbService;
 
         public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer, ILogManager logManager, IApplicationHost applicationHost)
             : base(applicationPaths, xmlSerializer)
@@ -29,6 +30,7 @@ namespace Emby.Xtream.Plugin
             _applicationPaths = applicationPaths;
             _liveTvService = new LiveTvService(logManager.GetLogger("XtreamTuner.LiveTv"));
             _strmSyncService = new StrmSyncService(logManager.GetLogger("XtreamTuner.StrmSync"));
+            _gracenoteDbService = new GracenoteDbService(logManager.GetLogger("XtreamTuner.GracenoteDb"));
         }
 
         public override string Name => "Xtream Tuner";
@@ -62,6 +64,8 @@ namespace Emby.Xtream.Plugin
         public LiveTvService LiveTvService => _liveTvService;
 
         public StrmSyncService StrmSyncService => _strmSyncService;
+
+        public GracenoteDbService GracenoteDbService => _gracenoteDbService;
 
         public Stream GetThumbImage()
         {

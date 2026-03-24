@@ -44,6 +44,12 @@ namespace Emby.Xtream.Plugin
         public int[] SelectedDispatcharrProfileIds { get; set; } = new int[0];
         public string CachedDispatcharrProfiles { get; set; } = string.Empty;
 
+        // Gracenote DB (Channel Identifiarr)
+        public string GracenoteDbPath { get; set; } = string.Empty;
+        public string SelectedLineupId { get; set; } = string.Empty;
+        public double GracenoteMatchThreshold { get; set; } = 0.8;
+        public string GracenoteStationOverrides { get; set; } = string.Empty;
+
         // VOD Movies
         public bool SyncMovies { get; set; }
         public string StrmLibraryPath { get; set; } = "/config/xtream";

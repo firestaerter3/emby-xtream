@@ -160,6 +160,41 @@ namespace Emby.Xtream.Plugin.Api
         public int ProvidersUpdated { get; set; }
     }
 
+    [Route("/XtreamTuner/GracenoteDb/Lineups", "GET", Summary = "Lists available lineups from the Gracenote database")]
+    public class GetGracenoteLineups : IReturn<List<Client.Models.GracenoteLineup>>
+    {
+    }
+
+    [Route("/XtreamTuner/GracenoteDb/Matches", "GET", Summary = "Shows current channel-to-station matches")]
+    public class GetGracenoteMatches : IReturn<List<ChannelMatchInfo>>
+    {
+    }
+
+    [Route("/XtreamTuner/GracenoteDb/Search", "GET", Summary = "Searches stations in the Gracenote database")]
+    public class SearchGracenoteStations : IReturn<List<Client.Models.GracenoteStation>>
+    {
+        public string Query { get; set; }
+    }
+
+    [Route("/XtreamTuner/GracenoteDb/Override", "POST", Summary = "Saves a manual station ID override for a channel")]
+    public class SaveGracenoteOverride : IReturn<TestConnectionResult>
+    {
+        public int StreamId { get; set; }
+        public string StationId { get; set; }
+    }
+
+    [Route("/XtreamTuner/GracenoteDb/Override", "DELETE", Summary = "Removes a manual station ID override for a channel")]
+    public class DeleteGracenoteOverride : IReturn<TestConnectionResult>
+    {
+        public int StreamId { get; set; }
+    }
+
+    [Route("/XtreamTuner/GracenoteDb/Test", "POST", Summary = "Tests that the Gracenote database file is readable")]
+    public class TestGracenoteDb : IReturn<TestConnectionResult>
+    {
+        public string Path { get; set; }
+    }
+
     public class TestConnectionResult
     {
         public bool Success { get; set; }
@@ -1230,6 +1265,153 @@ namespace Emby.Xtream.Plugin.Api
             }
 
             return result;
+        }
+
+        public object Get(GetGracenoteLineups request)
+        {
+            var config = Plugin.Instance.Configuration;
+            var dbPath = config.GracenoteDbPath;
+            if (string.IsNullOrEmpty(dbPath))
+                return new List<Client.Models.GracenoteLineup>();
+
+            try
+            {
+                return Plugin.Instance.GracenoteDbService.GetLineups(dbPath);
+            }
+            catch (Exception ex)
+            {
+                return new List<Client.Models.GracenoteLineup>();
+            }
+        }
+
+        public object Get(GetGracenoteMatches request)
+        {
+            var config = Plugin.Instance.Configuration;
+            if (string.IsNullOrEmpty(config.GracenoteDbPath))
+                return new List<Service.ChannelMatchInfo>();
+
+            var tunerHost = XtreamTunerHost.Instance;
+            if (tunerHost == null || tunerHost.CachedChannelCount == 0)
+                return new List<Service.ChannelMatchInfo>();
+
+            try
+            {
+                // Build channel list from cached channels
+                var channels = new List<(int StreamId, string Name)>();
+                var tunerMap = tunerHost.TunerChannelIdToStreamId;
+                var cachedChannels = tunerHost.CachedChannelList;
+                if (cachedChannels != null)
+                {
+                    foreach (var ch in cachedChannels)
+                    {
+                        if (tunerMap.TryGetValue(ch.TunerChannelId, out var sid))
+                            channels.Add((sid, ch.Name));
+                    }
+                }
+
+                var overrides = XtreamTunerHost.ParseStationOverrides(config.GracenoteStationOverrides);
+                return Plugin.Instance.GracenoteDbService.GetAllMatches(
+                    config.GracenoteDbPath,
+                    string.IsNullOrEmpty(config.SelectedLineupId) ? null : config.SelectedLineupId,
+                    channels,
+                    config.GracenoteMatchThreshold,
+                    overrides);
+            }
+            catch (Exception ex)
+            {
+                return new List<Service.ChannelMatchInfo>();
+            }
+        }
+
+        public object Get(SearchGracenoteStations request)
+        {
+            var config = Plugin.Instance.Configuration;
+            if (string.IsNullOrEmpty(config.GracenoteDbPath) || string.IsNullOrEmpty(request.Query))
+                return new List<Client.Models.GracenoteStation>();
+
+            try
+            {
+                return Plugin.Instance.GracenoteDbService.SearchStations(config.GracenoteDbPath, request.Query);
+            }
+            catch (Exception ex)
+            {
+                return new List<Client.Models.GracenoteStation>();
+            }
+        }
+
+        public object Post(SaveGracenoteOverride request)
+        {
+            var config = Plugin.Instance.Configuration;
+            var overrides = XtreamTunerHost.ParseStationOverrides(config.GracenoteStationOverrides);
+
+            if (string.IsNullOrEmpty(request.StationId))
+                overrides.Remove(request.StreamId);
+            else
+                overrides[request.StreamId] = request.StationId;
+
+            config.GracenoteStationOverrides = System.Text.Json.JsonSerializer.Serialize(
+                overrides.ToDictionary(
+                    k => k.Key.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    k => k.Value));
+            Plugin.Instance.SaveConfiguration();
+
+            // Clear tuner cache so next channel refresh picks up the override
+            var tunerHost = XtreamTunerHost.Instance;
+            if (tunerHost != null)
+                tunerHost.ClearCaches();
+
+            return new TestConnectionResult
+            {
+                Success = true,
+                Message = string.Format("Override saved: stream {0} → station {1}", request.StreamId, request.StationId ?? "(removed)"),
+            };
+        }
+
+        public object Delete(DeleteGracenoteOverride request)
+        {
+            var config = Plugin.Instance.Configuration;
+            var overrides = XtreamTunerHost.ParseStationOverrides(config.GracenoteStationOverrides);
+            overrides.Remove(request.StreamId);
+
+            config.GracenoteStationOverrides = System.Text.Json.JsonSerializer.Serialize(
+                overrides.ToDictionary(
+                    k => k.Key.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    k => k.Value));
+            Plugin.Instance.SaveConfiguration();
+
+            var tunerHost = XtreamTunerHost.Instance;
+            if (tunerHost != null)
+                tunerHost.ClearCaches();
+
+            return new TestConnectionResult
+            {
+                Success = true,
+                Message = string.Format("Override removed for stream {0}", request.StreamId),
+            };
+        }
+
+        public object Post(TestGracenoteDb request)
+        {
+            var path = request.Path;
+            if (string.IsNullOrEmpty(path))
+                return new TestConnectionResult { Message = "No path specified." };
+
+            if (!File.Exists(path))
+                return new TestConnectionResult { Message = "File not found: " + path };
+
+            try
+            {
+                var lineups = Plugin.Instance.GracenoteDbService.GetLineups(path);
+                return new TestConnectionResult
+                {
+                    Success = true,
+                    Message = string.Format("Database is valid. Found {0} lineup(s).", lineups.Count),
+                };
+            }
+            catch (Exception ex)
+            {
+                return new TestConnectionResult { Message = "Failed to read database: " + ex.Message };
+            }
         }
 
         public object Get(GetSanitizedLogs request)

@@ -151,6 +151,27 @@ function (BaseView, loading) {
             refreshCache(view);
         });
 
+        // Gracenote DB
+        view.querySelector('.btnTestGracenoteDb').addEventListener('click', function () {
+            testGracenoteDb(self);
+        });
+        view.querySelector('.btnRefreshMatches').addEventListener('click', function () {
+            loadGracenoteMatches(self);
+        });
+        view.querySelector('.btnCancelOverride').addEventListener('click', function () {
+            view.querySelector('.gracenoteOverrideDialog').style.display = 'none';
+        });
+        view.querySelector('.btnClearOverride').addEventListener('click', function () {
+            clearGracenoteOverride(self);
+        });
+        var stationSearchTimer = null;
+        view.querySelector('.txtStationSearch').addEventListener('input', function () {
+            clearTimeout(stationSearchTimer);
+            stationSearchTimer = setTimeout(function () {
+                searchGracenoteStations(self);
+            }, 400);
+        });
+
         view.querySelector('.btnSyncGuideMappings').addEventListener('click', function () {
             syncGuideMappings(view);
         });
@@ -371,6 +392,15 @@ function (BaseView, loading) {
             instance.selectedDispatcharrProfileIds = config.SelectedDispatcharrProfileIds || [];
             loadCachedDispatcharrProfiles(instance, config);
 
+            // Gracenote DB
+            view.querySelector('.txtGracenoteDbPath').value = config.GracenoteDbPath || '';
+            view.querySelector('.txtGracenoteThreshold').value = config.GracenoteMatchThreshold || 0.8;
+            var gracenoteSettings = view.querySelector('.gracenoteDbSettings');
+            if (config.GracenoteDbPath) {
+                gracenoteSettings.style.display = '';
+                loadGracenoteLineups(instance, config.SelectedLineupId);
+            }
+
             // Pre-parse cached categories so folder cards render correctly from the start
             var cachedVodCats = null;
             if (config.CachedVodCategories) {
@@ -490,6 +520,11 @@ function (BaseView, loading) {
             config.DispatcharrFallbackToXtream = view.querySelector('.chkDispatcharrFallback').checked;
             config.ForceAudioTranscode = view.querySelector('.chkForceAudioTranscode').checked;
             config.SelectedDispatcharrProfileIds = getSelectedDispatcharrProfileIds(instance);
+
+            // Gracenote DB
+            config.GracenoteDbPath = view.querySelector('.txtGracenoteDbPath').value.trim();
+            config.SelectedLineupId = view.querySelector('.selectGracenoteLineup').value || '';
+            config.GracenoteMatchThreshold = parseFloat(view.querySelector('.txtGracenoteThreshold').value) || 0.8;
 
             // VOD Movies
             config.SyncMovies = view.querySelector('.chkSyncMovies').checked;
@@ -2545,6 +2580,191 @@ function (BaseView, loading) {
         for (var i = 0; i < cards.length; i++) {
             cards[i].classList.toggle('active', cards[i].getAttribute('data-mode') === val);
         }
+    }
+
+    // ─── Gracenote DB Functions ───────────────────────────────────────
+
+    function testGracenoteDb(instance) {
+        var view = instance.view;
+        var path = view.querySelector('.txtGracenoteDbPath').value.trim();
+        var resultEl = view.querySelector('.gracenoteDbTestResult');
+        if (!path) {
+            resultEl.innerHTML = '<span style="color:orange;">Please enter a database path.</span>';
+            return;
+        }
+        resultEl.innerHTML = '<span style="opacity:0.6;">Testing...</span>';
+        ApiClient.ajax({
+            url: ApiClient.getUrl('XtreamTuner/GracenoteDb/Test'),
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ Path: path })
+        }).then(function (result) {
+            if (result.Success) {
+                resultEl.innerHTML = '<span style="color:#52B54B;">' + result.Message + '</span>';
+                view.querySelector('.gracenoteDbSettings').style.display = '';
+                loadGracenoteLineups(instance);
+            } else {
+                resultEl.innerHTML = '<span style="color:#cc0000;">' + (result.Message || 'Failed') + '</span>';
+            }
+        }, function (err) {
+            resultEl.innerHTML = '<span style="color:#cc0000;">Error: ' + (err.statusText || 'Request failed') + '</span>';
+        });
+    }
+
+    function loadGracenoteLineups(instance, selectedId) {
+        var view = instance.view;
+        var select = view.querySelector('.selectGracenoteLineup');
+        ApiClient.ajax({
+            url: ApiClient.getUrl('XtreamTuner/GracenoteDb/Lineups'),
+            type: 'GET'
+        }).then(function (lineups) {
+            var html = '<option value="">All stations (no lineup filter)</option>';
+            for (var i = 0; i < lineups.length; i++) {
+                var l = lineups[i];
+                var label = l.Name || l.LineupId;
+                if (l.Location) label += ' (' + l.Location + ')';
+                var sel = (selectedId && l.LineupId === selectedId) ? ' selected' : '';
+                html += '<option value="' + l.LineupId + '"' + sel + '>' + escapeHtml(label) + '</option>';
+            }
+            select.innerHTML = html;
+        }, function () {
+            select.innerHTML = '<option value="">Failed to load lineups</option>';
+        });
+    }
+
+    function loadGracenoteMatches(instance) {
+        var view = instance.view;
+        var tbody = view.querySelector('.gracenoteMatchesTbody');
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:1em; text-align:center; opacity:0.5;">Loading matches...</td></tr>';
+        ApiClient.ajax({
+            url: ApiClient.getUrl('XtreamTuner/GracenoteDb/Matches'),
+            type: 'GET'
+        }).then(function (matches) {
+            if (!matches || matches.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="padding:1em; text-align:center; opacity:0.5;">No channels found. Make sure channels have been loaded (refresh Live TV guide).</td></tr>';
+                return;
+            }
+            var html = '';
+            for (var i = 0; i < matches.length; i++) {
+                var m = matches[i];
+                var scoreColor = m.Score >= 0.8 ? '#52B54B' : m.Score >= 0.5 ? 'orange' : '#cc0000';
+                var overrideLabel = m.IsOverride ? ' <span style="font-size:0.75em; background:rgba(52,152,219,0.2); color:#3498db; padding:0.1em 0.4em; border-radius:3px;">override</span>' : '';
+                var aboveThreshold = m.IsAboveThreshold ? '' : ' style="opacity:0.5;"';
+                html += '<tr class="gracenoteMatchRow" data-streamid="' + m.StreamId + '" data-channelname="' + escapeHtml(m.ChannelName) + '"' + aboveThreshold + ' style="cursor:pointer; border-bottom:1px solid rgba(128,128,128,0.1);">'
+                    + '<td style="padding:0.4em 0.75em;">' + escapeHtml(m.ChannelName) + '</td>'
+                    + '<td style="padding:0.4em 0.75em;">' + escapeHtml(m.StationName || '-') + overrideLabel + '</td>'
+                    + '<td style="padding:0.4em 0.75em;">' + escapeHtml(m.StationId || '-') + '</td>'
+                    + '<td style="padding:0.4em 0.75em; color:' + scoreColor + ';">' + (m.Score ? m.Score.toFixed(3) : '-') + '</td>'
+                    + '<td style="padding:0.4em 0.75em;"><button class="btnOverride raised button-secondary" is="emby-button" type="button" style="font-size:0.8em;">Override</button></td>'
+                    + '</tr>';
+            }
+            tbody.innerHTML = html;
+
+            // Bind override buttons
+            var rows = tbody.querySelectorAll('.gracenoteMatchRow');
+            for (var j = 0; j < rows.length; j++) {
+                rows[j].querySelector('.btnOverride').addEventListener('click', (function (row) {
+                    return function (e) {
+                        e.stopPropagation();
+                        openOverrideDialog(instance, parseInt(row.getAttribute('data-streamid'), 10), row.getAttribute('data-channelname'));
+                    };
+                })(rows[j]));
+            }
+        }, function () {
+            tbody.innerHTML = '<tr><td colspan="5" style="padding:1em; text-align:center; color:#cc0000;">Failed to load matches.</td></tr>';
+        });
+    }
+
+    function openOverrideDialog(instance, streamId, channelName) {
+        var view = instance.view;
+        var dialog = view.querySelector('.gracenoteOverrideDialog');
+        dialog.style.display = 'flex';
+        dialog.setAttribute('data-streamid', streamId);
+        view.querySelector('.overrideChannelInfo').textContent = 'Channel: ' + channelName + ' (stream ' + streamId + ')';
+        view.querySelector('.txtStationSearch').value = channelName || '';
+        view.querySelector('.stationSearchResults').innerHTML = '';
+        // Auto-search with channel name
+        if (channelName) {
+            searchGracenoteStations(instance);
+        }
+    }
+
+    function searchGracenoteStations(instance) {
+        var view = instance.view;
+        var query = view.querySelector('.txtStationSearch').value.trim();
+        var container = view.querySelector('.stationSearchResults');
+        if (!query) {
+            container.innerHTML = '<div style="padding:0.75em; opacity:0.5;">Type to search...</div>';
+            return;
+        }
+        container.innerHTML = '<div style="padding:0.75em; opacity:0.5;">Searching...</div>';
+        ApiClient.ajax({
+            url: ApiClient.getUrl('XtreamTuner/GracenoteDb/Search', { Query: query }),
+            type: 'GET'
+        }).then(function (stations) {
+            if (!stations || stations.length === 0) {
+                container.innerHTML = '<div style="padding:0.75em; opacity:0.5;">No stations found.</div>';
+                return;
+            }
+            var html = '';
+            for (var i = 0; i < stations.length; i++) {
+                var s = stations[i];
+                html += '<div class="stationSearchItem" data-stationid="' + escapeHtml(s.StationId) + '" '
+                    + 'style="padding:0.5em 0.75em; cursor:pointer; border-bottom:1px solid rgba(128,128,128,0.1);" '
+                    + 'onmouseover="this.style.background=\'rgba(128,128,128,0.1)\'" onmouseout="this.style.background=\'\'">'
+                    + '<strong>' + escapeHtml(s.Name) + '</strong>'
+                    + (s.CallSign ? ' <span style="opacity:0.6;">(' + escapeHtml(s.CallSign) + ')</span>' : '')
+                    + ' <span style="opacity:0.4; font-size:0.85em;">ID: ' + escapeHtml(s.StationId) + '</span>'
+                    + '</div>';
+            }
+            container.innerHTML = html;
+
+            var items = container.querySelectorAll('.stationSearchItem');
+            for (var j = 0; j < items.length; j++) {
+                items[j].addEventListener('click', (function (item) {
+                    return function () {
+                        var stationId = item.getAttribute('data-stationid');
+                        saveGracenoteOverride(instance, stationId);
+                    };
+                })(items[j]));
+            }
+        }, function () {
+            container.innerHTML = '<div style="padding:0.75em; color:#cc0000;">Search failed.</div>';
+        });
+    }
+
+    function saveGracenoteOverride(instance, stationId) {
+        var view = instance.view;
+        var dialog = view.querySelector('.gracenoteOverrideDialog');
+        var streamId = parseInt(dialog.getAttribute('data-streamid'), 10);
+        ApiClient.ajax({
+            url: ApiClient.getUrl('XtreamTuner/GracenoteDb/Override'),
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ StreamId: streamId, StationId: stationId })
+        }).then(function () {
+            dialog.style.display = 'none';
+            loadGracenoteMatches(instance);
+        }, function () {
+            alert('Failed to save override.');
+        });
+    }
+
+    function clearGracenoteOverride(instance) {
+        var view = instance.view;
+        var dialog = view.querySelector('.gracenoteOverrideDialog');
+        var streamId = parseInt(dialog.getAttribute('data-streamid'), 10);
+        ApiClient.ajax({
+            url: ApiClient.getUrl('XtreamTuner/GracenoteDb/Override'),
+            type: 'DELETE',
+            contentType: 'application/json',
+            data: JSON.stringify({ StreamId: streamId })
+        }).then(function () {
+            dialog.style.display = 'none';
+            loadGracenoteMatches(instance);
+        }, function () {
+            alert('Failed to clear override.');
+        });
     }
 
     return View;
