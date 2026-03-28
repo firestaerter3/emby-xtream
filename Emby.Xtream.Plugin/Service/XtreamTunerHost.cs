@@ -47,7 +47,7 @@ namespace Emby.Xtream.Plugin.Service
         private volatile HashSet<int> _allowedStreamIds;
         private List<ChannelInfo> _cachedChannels;
         private DateTime _cacheTime = DateTime.MinValue;
-        private DateTime _lastDetachCheck = DateTime.MinValue;
+
 
         public int CachedChannelCount => _cachedChannels?.Count ?? 0;
 
@@ -92,15 +92,6 @@ namespace Emby.Xtream.Plugin.Service
             CancellationToken cancellationToken)
         {
             var config = Plugin.Instance.Configuration;
-            if (config.DeferEpgToGuideData && DateTime.UtcNow - _lastDetachCheck > TimeSpan.FromSeconds(60))
-            {
-                _lastDetachCheck = DateTime.UtcNow;
-                _ = Task.Run(() =>
-                {
-                    try { DetachListingProviders(); }
-                    catch (Exception ex) { Logger.Warn("Auto detach (EPG fallback) failed: {0}", ex.Message); }
-                });
-            }
 
             int streamId;
             if (_tunerChannelIdToStreamId.TryGetValue(tunerChannelId, out streamId))
@@ -752,17 +743,13 @@ namespace Emby.Xtream.Plugin.Service
                     Logger.Warn("DetachListingProviders: failed to save config: {0}", ex.Message);
                     return 0;
                 }
+
+                ClearWrongChannelArtwork();
             }
             else
             {
                 Logger.Info("DetachListingProviders: Xtream tuner already detached from all providers");
             }
-
-            // Always clear stale artwork, not just when config changed. Emby's EPG refresh
-            // is multi-phase (channel refresh → guide data → image download). The first clear
-            // runs during channel refresh but Emby may download artwork in a later phase.
-            // Running on every call catches images that arrived after a previous clear.
-            ClearWrongChannelArtwork();
 
             return updated;
         }
