@@ -153,6 +153,11 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    [Route("/XtreamTuner/StreamStats", "GET", Summary = "Returns cached stream stats received from Dispatcharr for all known streams")]
+    public class GetStreamStats : IReturn<object>
+    {
+    }
+
     public class SyncGuideMappingsResult
     {
         public bool Success { get; set; }
@@ -1058,6 +1063,36 @@ namespace Emby.Xtream.Plugin.Api
                 Logger.Warn("Failed to fetch Dispatcharr profiles: {0}", ex.Message);
                 return new List<Client.Models.DispatcharrProfile>();
             }
+        }
+
+        public object Get(GetStreamStats request)
+        {
+            var stats = XtreamTunerHost.Instance?.StreamStats;
+            if (stats == null || stats.Count == 0)
+                return new { count = 0, message = "No stream stats loaded. Stats are populated when Dispatcharr is enabled and channels have been refreshed.", streams = new object[0] };
+
+            var entries = stats
+                .OrderBy(kv => kv.Key)
+                .Select(kv => new
+                {
+                    stream_id       = kv.Key,
+                    video_codec     = kv.Value.VideoCodec,
+                    resolution      = kv.Value.Resolution,
+                    source_fps      = kv.Value.SourceFps,
+                    bitrate         = kv.Value.Bitrate,
+                    video_profile   = kv.Value.VideoProfile,
+                    video_level     = kv.Value.VideoLevel,
+                    video_bit_depth = kv.Value.VideoBitDepth,
+                    video_ref_frames = kv.Value.VideoRefFrames,
+                    audio_codec     = kv.Value.AudioCodec,
+                    audio_channels  = kv.Value.AudioChannels,
+                    audio_bitrate   = kv.Value.AudioBitrate,
+                    sample_rate     = kv.Value.SampleRate,
+                    audio_language  = kv.Value.AudioLanguage,
+                })
+                .ToList();
+
+            return new { count = entries.Count, streams = entries };
         }
 
         public async Task<object> Get(CheckForUpdate request)
