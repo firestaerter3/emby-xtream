@@ -406,7 +406,7 @@ function (BaseView, loading) {
             view.querySelector('.chkSmartSkipExisting').checked = config.SmartSkipExisting !== false;
             view.querySelector('.txtSyncParallelism').value = config.SyncParallelism || 3;
             view.querySelector('.chkCleanupOrphans').checked = !!config.CleanupOrphans;
-            view.querySelector('.txtOrphanSafetyThreshold').value = Math.round((config.OrphanSafetyThreshold || 0.20) * 100);
+            view.querySelector('.txtOrphanSafetyThreshold').value = Math.round((config.OrphanSafetyThreshold != null ? config.OrphanSafetyThreshold : 0.20) * 100);
             view.querySelector('.orphanThresholdContainer').style.display = config.CleanupOrphans ? '' : 'none';
             view.querySelector('.chkEnableNfoFiles').checked = !!config.EnableNfoFiles;
 
@@ -653,8 +653,9 @@ function (BaseView, loading) {
     }
 
     function applyScheduleToTasks(view, config, apiClient) {
-        apiClient.ajax({ url: apiClient.getUrl('ScheduledTasks'), type: 'GET' })
+        apiClient.getJSON(apiClient.getUrl('ScheduledTasks'))
             .then(function (tasks) {
+                if (!Array.isArray(tasks)) return;
                 var xtreamTasks = tasks.filter(function (t) {
                     return t.Category === 'Xtream Tuner';
                 });
@@ -685,12 +686,18 @@ function (BaseView, loading) {
         var header = document.createElement('div');
         header.style.cssText = 'display:flex; gap:0.5em; align-items:center; margin-bottom:0.5em;';
 
-        var nameInput = document.createElement('input');
-        nameInput.type = 'text';
+        // Use a <textarea> instead of <input> to avoid Emby's HTMLBuiltIn
+        // polyfill which intercepts all <input> elements and adds per-keystroke
+        // overhead that causes severe input lag.
+        var nameInput = document.createElement('textarea');
+        nameInput.rows = 1;
         nameInput.className = 'folderCardName';
         nameInput.placeholder = 'e.g. Drama';
         nameInput.value = name;
-        nameInput.style.cssText = 'flex:1; padding:0.5em 0.8em; background:transparent; border:1px solid rgba(128,128,128,0.25); border-radius:4px; color:inherit; font-size:1em;';
+        nameInput.style.cssText = 'flex:1; padding:0.5em 0.8em; background:transparent; border:1px solid rgba(128,128,128,0.25); border-radius:4px; color:inherit; font-size:1em; resize:none; overflow:hidden; line-height:1.4em; font-family:inherit; field-sizing:content;';
+        nameInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') e.preventDefault();
+        });
 
         var removeBtn = document.createElement('button');
         removeBtn.type = 'button';
