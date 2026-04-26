@@ -19,6 +19,7 @@ namespace Emby.Xtream.Plugin.Tests
             string subTitle = null,
             bool isLive = false,
             bool isNew = false,
+            bool isPremiere = false,
             bool isPreviouslyShown = false,
             bool isPlainText = true)
         {
@@ -33,6 +34,7 @@ namespace Emby.Xtream.Plugin.Tests
                 SubTitle = subTitle,
                 IsLive = isLive,
                 IsNew = isNew,
+                IsPremiere = isPremiere,
                 IsPreviouslyShown = isPreviouslyShown,
                 IsPlainText = isPlainText,
             };
@@ -195,10 +197,21 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
-        public void NewFlag_IsPremiereTrueViaIsNew()
+        public void NewFlag_IsNewTrue_IsPremiereFalse()
         {
+            // XMLTV <new/> must map to ProgramInfo.IsNew so Emby's
+            // "record only new episodes" series rule works.
             var info = Build(MakeProgram(isNew: true));
+            Assert.True(info.IsNew);
+            Assert.False(info.IsPremiere);
+        }
+
+        [Fact]
+        public void PremiereFlag_IsPremiereTrue_IsNewFalse()
+        {
+            var info = Build(MakeProgram(isPremiere: true));
             Assert.True(info.IsPremiere);
+            Assert.False(info.IsNew);
         }
 
         [Fact]
