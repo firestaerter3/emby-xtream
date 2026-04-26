@@ -207,6 +207,25 @@ Download the latest DLL from [Releases](../../releases/latest), replace the file
 
 ---
 
+## Security Note: Credentials in STRM Files and M3U Output
+
+The Xtream Codes protocol requires the username and password to appear directly in every stream URL — there is no token or session form. As a result, your Xtream credentials end up embedded in plaintext in two places:
+
+- The `.strm` files written under your **STRM Library Path** (default `/config/xtream`)
+- The M3U playlist served by the plugin's tuner endpoint
+
+This is a property of the protocol, not a plugin defect — the same is true of any Xtream-based tooling. Anything that can read those files (other containers sharing the volume, backup tools, indexers, users with shell access on the host) can harvest the credentials.
+
+**How to keep credentials off disk:**
+
+- **Use Dispatcharr.** When [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) is enabled, Live TV and multi-provider VOD URLs route through Dispatcharr's credential-free proxy URLs (`/proxy/ts/stream/<uuid>`, `/proxy/vod/movie/<uuid>`) instead of the raw Xtream form. Single-provider VOD movies and series episodes still fall back to the Xtream URL today.
+- **Restrict filesystem permissions.** Make sure the STRM library path is not readable by other users or containers on the host. For Docker, avoid mounting `/config/xtream` into unrelated services.
+- **Use a dedicated provider account.** If your Xtream provider supports multiple credential sets per subscription, use a separate one for Emby so it can be rotated independently.
+
+If credential exposure on disk is unacceptable for your environment, Dispatcharr in front of the plugin is currently the only complete answer. Improving credential-free routing for single-provider VOD and series episodes is tracked as a future enhancement.
+
+---
+
 ## License
 
 MIT
