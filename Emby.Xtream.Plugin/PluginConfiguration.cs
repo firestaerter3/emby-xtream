@@ -14,6 +14,12 @@ namespace Emby.Xtream.Plugin
         // Live TV
         public bool EnableLiveTv { get; set; } = true;
         public string LiveTvOutputFormat { get; set; } = "ts";
+        // Cap (in Mbps) applied to the MediaSource bitrate hint when no Streamflow
+        // stats are available. 0 = no hint (Emby Web defaults to ~200 Mbps for "Auto"
+        // bandwidth). Set to a value below your hardware encoder's cap (e.g. 8 for
+        // most consumer GPUs) if transcoding falls back to software with logs like
+        // "Bitrate (X Mbit/s) exceeds maximum supported rate".
+        public int FallbackTranscodeBitrateMbps { get; set; }
 
         // EPG / Guide Data
         public EpgSourceMode EpgSource { get; set; } = EpgSourceMode.XtreamServer;

@@ -971,6 +971,12 @@
                             Stream container format. MPEG-TS is recommended for lower latency.
                         </div>
                     </div>
+                    <div class="inputContainer">
+                        <input class="txtFallbackTranscodeBitrate" is="emby-input" type="number" min="0" max="200" step="1" label="Fallback transcode bitrate cap (Mbps)" />
+                        <div class="fieldDescription">
+                            Caps the transcode target bitrate when no Streamflow stream stats are available. Leave at 0 for the default behaviour. Set to a value below your hardware encoder's limit (e.g. 8 for most consumer GPUs) if transcoding falls back to software with logs like "Bitrate exceeds maximum supported rate".
+                        </div>
+                    </div>
                     <button class="btnRefreshCache raised button-secondary" is="emby-button" type="button" style="margin-top:0.5em;">
                         <span>Refresh Channel &amp; EPG Cache</span>
                     </button>

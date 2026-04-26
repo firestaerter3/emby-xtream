@@ -566,7 +566,7 @@ namespace Emby.Xtream.Plugin.Service
 
             _streamStats.TryGetValue(streamId, out var stats);
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent);
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps);
             Logger.Info("[stream-timing] ch={0} CreateMediaSource={1}ms hasStats={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, stats != null);
 
             return new List<MediaSourceInfo> { mediaSource };
@@ -600,7 +600,7 @@ namespace Emby.Xtream.Plugin.Service
             Logger.Info("[stream-timing] ch={0} BuildUrl={1}ms isDispatcharr={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, isDispatcharr);
             sw.Restart();
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent);
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps);
             Logger.Info("[stream-timing] ch={0} CreateMediaSource={1}ms hasStats={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, stats != null);
 
             var httpClient = Plugin.CreateHttpClient();
@@ -1080,7 +1080,7 @@ namespace Emby.Xtream.Plugin.Service
         private MediaSourceInfo CreateMediaSourceInfo(
             int streamId, string streamUrl, StreamStatsInfo stats,
             bool disableProbing = false, bool forceAudioTranscode = false,
-            string userAgent = null)
+            string userAgent = null, int fallbackBitrateMbps = 0)
         {
             var sourceId = "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture);
 
@@ -1285,38 +1285,42 @@ namespace Emby.Xtream.Plugin.Service
                 // Codec must be non-null: Emby's RecordingRequiresEncoding accesses it
                 // directly and throws NullReferenceException when it is null.  H.264/AAC
                 // are the most common IPTV codecs and serve as safe fallbacks.
-                //
-                // BitRate must also be set: without it, Emby Web negotiates the transcode
-                // target at the user's max bandwidth setting (often ~200 Mbps for "Auto"),
-                // which exceeds Intel QuickSync's ~39 Mbit/s cap and forces a fallback to
-                // software x265 — too slow for live playback.  Probing live MPEG-TS rarely
-                // yields a usable bitrate (ffmpeg reports N/A from a 500ms sample) so we
-                // hard-code a sensible IPTV default of 8 Mbps that comfortably covers
-                // 720p/1080p H.264 and stays well under any hardware encoder limit.
-                mediaSource.MediaStreams = new List<MediaStream>
+                var videoStream = new MediaStream
                 {
-                    new MediaStream
-                    {
-                        Type = MediaStreamType.Video,
-                        Index = 0,
-                        Codec = "h264",
-                        IsInterlaced = false,
-                        PixelFormat = "yuv420p",
-                        DisplayTitle = "H264",
-                        BitRate = 8_000_000,
-                    },
-                    new MediaStream
-                    {
-                        Type = MediaStreamType.Audio,
-                        Index = 1,
-                        Codec = "aac",
-                        DisplayTitle = "AAC",
-                        BitRate = 192_000,
-                    },
+                    Type = MediaStreamType.Video,
+                    Index = 0,
+                    Codec = "h264",
+                    IsInterlaced = false,
+                    PixelFormat = "yuv420p",
+                    DisplayTitle = "H264",
                 };
+                var audioStream = new MediaStream
+                {
+                    Type = MediaStreamType.Audio,
+                    Index = 1,
+                    Codec = "aac",
+                    DisplayTitle = "AAC",
+                };
+
+                // Optional bitrate cap: Emby Web defaults the transcode target to the
+                // user's max bandwidth setting (~200 Mbps for "Auto"), which exceeds
+                // consumer hardware encoder caps (e.g. Intel QuickSync's ~39 Mbit/s)
+                // and forces a fallback to software x265 — too slow for live playback.
+                // Off by default since most users either run Streamflow (which provides
+                // real bitrate) or have hardware that can target 200 Mbps without issue.
+                if (fallbackBitrateMbps > 0)
+                {
+                    int videoBps = fallbackBitrateMbps * 1_000_000;
+                    videoStream.BitRate = videoBps;
+                    audioStream.BitRate = 192_000;
+                    mediaSource.Bitrate = videoBps + 192_000;
+                }
+
+                mediaSource.MediaStreams = new List<MediaStream> { videoStream, audioStream };
                 mediaSource.DefaultAudioStreamIndex = 1;
-                mediaSource.Bitrate = 8_192_000;
-                Logger.Debug("Stream {0}: no stats available, will probe", streamId);
+                Logger.Debug(
+                    "Stream {0}: no stats available, will probe (fallback bitrate {1} Mbps)",
+                    streamId, fallbackBitrateMbps);
             }
 
             return mediaSource;
