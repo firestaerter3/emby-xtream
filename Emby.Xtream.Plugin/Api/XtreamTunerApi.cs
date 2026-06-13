@@ -939,7 +939,6 @@ namespace Emby.Xtream.Plugin.Api
         public async Task<object> Post(TestXtreamConnection request)
         {
             var config = Plugin.Instance.Configuration;
-            var result = new TestConnectionResult();
 
             // Prefer the values supplied in the request (the unsaved form values) so the
             // connection can be tested before saving; fall back to the persisted config.
@@ -947,93 +946,14 @@ namespace Emby.Xtream.Plugin.Api
             var username = !string.IsNullOrEmpty(request.Username) ? request.Username : config.Username;
             var password = !string.IsNullOrEmpty(request.Password) ? request.Password : config.Password;
 
-            if (string.IsNullOrEmpty(baseUrl) ||
-                string.IsNullOrEmpty(username) ||
-                string.IsNullOrEmpty(password))
+            using (var httpClient = Plugin.CreateHttpClient())
             {
-                result.Success = false;
-                result.Message = "Please enter server URL, username, and password.";
-                return result;
+                var (success, message) = await Service.XtreamConnectionTester
+                    .RunAsync(baseUrl, username, password, httpClient, CancellationToken.None)
+                    .ConfigureAwait(false);
+
+                return new TestConnectionResult { Success = success, Message = message };
             }
-
-            try
-            {
-                var url = string.Format(
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    "{0}/player_api.php?username={1}&password={2}",
-                    baseUrl, Uri.EscapeDataString(username), Uri.EscapeDataString(password));
-
-                using (var httpClient = Plugin.CreateHttpClient())
-                {
-                    var response = await httpClient.GetStringAsync(url).ConfigureAwait(false);
-
-                    try
-                    {
-                        using (var doc = System.Text.Json.JsonDocument.Parse(response))
-                        {
-                            if (doc.RootElement.TryGetProperty("user_info", out var userInfo))
-                            {
-                                var auth = 0;
-                                if (userInfo.TryGetProperty("auth", out var authEl))
-                                {
-                                    if (authEl.ValueKind == System.Text.Json.JsonValueKind.Number)
-                                        auth = authEl.GetInt32();
-                                    else if (authEl.ValueKind == System.Text.Json.JsonValueKind.String
-                                             && int.TryParse(authEl.GetString(), out var n))
-                                        auth = n;
-                                }
-
-                                string status = null;
-                                if (userInfo.TryGetProperty("status", out var statusEl))
-                                    status = statusEl.GetString();
-
-                                if (auth == 1)
-                                {
-                                    result.Success = true;
-                                    var msg = string.Format(
-                                        System.Globalization.CultureInfo.InvariantCulture,
-                                        "Connected as {0} — status: {1}",
-                                        username, status ?? "unknown");
-
-                                    if (userInfo.TryGetProperty("active_cons", out var activeEl))
-                                    {
-                                        msg += ", " + activeEl.ToString();
-                                        if (userInfo.TryGetProperty("max_connections", out var maxEl))
-                                            msg += "/" + maxEl.ToString();
-                                        msg += " active streams";
-                                    }
-
-                                    result.Message = msg;
-                                }
-                                else
-                                {
-                                    result.Success = false;
-                                    result.Message = string.Format(
-                                        "Authentication failed: account status is '{0}'.",
-                                        status ?? "unknown");
-                                }
-                            }
-                            else
-                            {
-                                result.Success = false;
-                                result.Message = "Server responded but returned an unexpected format. Verify the server URL.";
-                            }
-                        }
-                    }
-                    catch (System.Text.Json.JsonException)
-                    {
-                        result.Success = false;
-                        result.Message = "Server did not return a valid Xtream API response. Verify the server URL.";
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                result.Success = false;
-                result.Message = "Connection failed: " + ex.Message;
-            }
-
-            return result;
         }
 
         public async Task<object> Post(TestDispatcharrConnection request)
