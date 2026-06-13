@@ -851,47 +851,22 @@ function updateEpgVisibility(view) {
             return;
         }
 
-        var testUrl = url + '/player_api.php?username=' + encodeURIComponent(user) + '&password=' + encodeURIComponent(pass);
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', testUrl, true);
-        xhr.timeout = 10000;
-
-        xhr.onload = function () {
-            if (xhr.status >= 200 && xhr.status < 300) {
-                try {
-                    var resp = JSON.parse(xhr.responseText);
-                    if (resp.user_info) {
-                        var status = resp.user_info.status || 'unknown';
-                        var msg = 'Connected as ' + user + ' — status: ' + status;
-                        if (resp.user_info.active_cons !== undefined) {
-                            msg += ', ' + resp.user_info.active_cons;
-                            if (resp.user_info.max_connections !== undefined) {
-                                msg += '/' + resp.user_info.max_connections;
-                            }
-                            msg += ' active streams';
-                        }
-                        setPillResult(resultEl, true, msg);
-                    } else {
-                        setPillResult(resultEl, true, 'Connection successful!');
-                    }
-                } catch (e) {
-                    setPillResult(resultEl, true, 'Connection successful (non-JSON response).');
-                }
+        // Run the test server-side so it can reach hosts that the browser cannot
+        // resolve (e.g. Docker container names on the Emby server's network).
+        ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('XtreamTuner/TestConnection'),
+            contentType: 'application/json',
+            data: JSON.stringify({ BaseUrl: url, Username: user, Password: pass }),
+            dataType: 'json'
+        }).then(function (result) {
+            setPillResult(resultEl, result.Success, result.Message);
+            if (result.Success) {
                 saveConfig(instance);
-            } else {
-                setPillResult(resultEl, false, 'Connection failed (HTTP ' + xhr.status + ').');
             }
-        };
-
-        xhr.onerror = function () {
-            setPillResult(resultEl, false, 'Connection failed. Check URL and ensure server is reachable.');
-        };
-
-        xhr.ontimeout = function () {
-            setPillResult(resultEl, false, 'Connection timed out.');
-        };
-
-        xhr.send();
+        }).catch(function () {
+            setPillResult(resultEl, false, 'Test request failed. Check server logs.');
+        });
     }
 
     // ---- Folder browser ----

@@ -95,6 +95,9 @@ namespace Emby.Xtream.Plugin.Api
     [Route("/XtreamTuner/TestConnection", "POST", Summary = "Tests connection to Xtream server")]
     public class TestXtreamConnection : IReturn<TestConnectionResult>
     {
+        public string BaseUrl { get; set; }
+        public string Username { get; set; }
+        public string Password { get; set; }
     }
 
     [Route("/XtreamTuner/TestDispatcharr", "POST", Summary = "Tests connection to Dispatcharr")]
@@ -938,12 +941,18 @@ namespace Emby.Xtream.Plugin.Api
             var config = Plugin.Instance.Configuration;
             var result = new TestConnectionResult();
 
-            if (string.IsNullOrEmpty(config.BaseUrl) ||
-                string.IsNullOrEmpty(config.Username) ||
-                string.IsNullOrEmpty(config.Password))
+            // Prefer the values supplied in the request (the unsaved form values) so the
+            // connection can be tested before saving; fall back to the persisted config.
+            var baseUrl = !string.IsNullOrEmpty(request.BaseUrl) ? request.BaseUrl.TrimEnd('/') : config.BaseUrl;
+            var username = !string.IsNullOrEmpty(request.Username) ? request.Username : config.Username;
+            var password = !string.IsNullOrEmpty(request.Password) ? request.Password : config.Password;
+
+            if (string.IsNullOrEmpty(baseUrl) ||
+                string.IsNullOrEmpty(username) ||
+                string.IsNullOrEmpty(password))
             {
                 result.Success = false;
-                result.Message = "Please configure server URL, username, and password first.";
+                result.Message = "Please enter server URL, username, and password.";
                 return result;
             }
 
@@ -952,7 +961,7 @@ namespace Emby.Xtream.Plugin.Api
                 var url = string.Format(
                     System.Globalization.CultureInfo.InvariantCulture,
                     "{0}/player_api.php?username={1}&password={2}",
-                    config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password));
+                    baseUrl, Uri.EscapeDataString(username), Uri.EscapeDataString(password));
 
                 using (var httpClient = Plugin.CreateHttpClient())
                 {
@@ -981,7 +990,20 @@ namespace Emby.Xtream.Plugin.Api
                                 if (auth == 1)
                                 {
                                     result.Success = true;
-                                    result.Message = "Connection successful!";
+                                    var msg = string.Format(
+                                        System.Globalization.CultureInfo.InvariantCulture,
+                                        "Connected as {0} — status: {1}",
+                                        username, status ?? "unknown");
+
+                                    if (userInfo.TryGetProperty("active_cons", out var activeEl))
+                                    {
+                                        msg += ", " + activeEl.ToString();
+                                        if (userInfo.TryGetProperty("max_connections", out var maxEl))
+                                            msg += "/" + maxEl.ToString();
+                                        msg += " active streams";
+                                    }
+
+                                    result.Message = msg;
                                 }
                                 else
                                 {
