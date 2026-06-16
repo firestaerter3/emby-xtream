@@ -336,8 +336,13 @@ namespace Emby.Xtream.Plugin.Api
             {
                 NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
                 PropertyNameCaseInsensitive = true,
-                // Tolerate providers that send string fields (e.g. releasedate) as numbers/null.
-                Converters = { new Client.Models.TolerantStringConverter() },
+                // Tolerate providers that send string fields (e.g. releasedate) as numbers/null,
+                // and integer fields (e.g. category_id) as empty/non-numeric strings or arrays.
+                Converters =
+                {
+                    new Client.Models.TolerantStringConverter(),
+                    new Client.Models.TolerantNullableIntConverter(),
+                },
             };
 
             try

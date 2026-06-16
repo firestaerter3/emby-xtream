@@ -78,8 +78,13 @@ namespace Emby.Xtream.Plugin.Service
             NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
             PropertyNameCaseInsensitive = true,
             // Providers sometimes send string fields (e.g. info.releasedate, rating, tmdb) as
-            // numbers, booleans, null, or empty arrays. Coerce them instead of failing the sync.
-            Converters = { new Client.Models.TolerantStringConverter() },
+            // numbers, booleans, null, or empty arrays, and integer fields (e.g. category_id) as
+            // empty/non-numeric strings or arrays. Coerce them instead of failing the sync.
+            Converters =
+            {
+                new Client.Models.TolerantStringConverter(),
+                new Client.Models.TolerantNullableIntConverter(),
+            },
         };
 
         private static readonly Regex InvalidFileCharsRegex = new Regex(

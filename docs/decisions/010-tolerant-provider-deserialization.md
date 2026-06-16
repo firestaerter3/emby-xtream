@@ -1,8 +1,8 @@
-# ADR-010: Tolerant String Deserialization for Provider Responses
+# ADR-010: Tolerant Deserialization for Provider Responses
 
-**Date**: 2026-06-13
+**Date**: 2026-06-13 (updated 2026-06-16)
 **Status**: Accepted
-**Affects**: `Client/Models/TolerantStringConverter`, `Client/Models/SeriesInfo`, `Client/Models/StreamStatsInfo`, `StrmSyncService.JsonOptions`, `XtreamTunerApi` series-list options
+**Affects**: `Client/Models/TolerantStringConverter`, `Client/Models/TolerantNullableIntConverter`, `Client/Models/SeriesInfo`, `Client/Models/StreamStatsInfo`, `StrmSyncService.JsonOptions`, `XtreamTunerApi` series-list options
 
 ---
 
@@ -92,3 +92,38 @@ inline class.
   there, register the same converter on those options.
 - Covered by `TolerantStringConverterTests` (releasedate as number, decimal, null, array, object,
   boolean, string; multi-field numeric payload; full payload whose episodes still parse).
+
+## Update (2026-06-16): the same quirk in integer fields
+
+The reporter from GitHub #32 updated to the fix above and hit the mirror-image failure on a
+different field:
+
+```
+The JSON value could not be converted to System.Nullable`1[System.Int32]. Path: $.info.category_id
+```
+
+`SeriesInfo.CategoryId` is typed `int?`. `NumberHandling = AllowReadingFromString` parses a
+strictly-numeric quoted string, but the provider was sending something it could not parse — an
+empty string, a non-numeric string, or a structured value. Same root cause (inconsistent
+provider typing), same blast radius (one field aborts the whole `get_series_info` parse, so every
+series fails), same chosen mechanism (a tolerant converter at the options level rather than
+per-field annotation or whack-a-mole).
+
+Added `TolerantNullableIntConverter`, the integer sibling of `TolerantStringConverter`:
+
+- Number → `int` (decimal numbers truncate)
+- Numeric string → parsed `int` (decimal strings truncate)
+- Empty / non-numeric string → `null`
+- `null` → `null`
+- object/array → skipped (`reader.Skip()`) and treated as `null`
+
+Registered on the same two option sets (`StrmSyncService.JsonOptions` and the `XtreamTunerApi`
+series-list options). `null` is the correct degraded value: `category_id` is already optional and
+is only used for folder grouping, so a missing value falls back to the uncategorised bucket. The
+converter only covers nullable ints — non-nullable provider IDs (`series_id`, `stream_id`) are
+deliberately left strict, because silently defaulting a missing primary ID to `0` would
+manufacture broken library items rather than skip a cosmetic grouping.
+
+Covered by `TolerantNullableIntConverterTests` (category_id as number, numeric string, empty
+string, non-numeric string, null, array, object, decimal string; full payload whose episodes
+still parse; serialize roundtrip preserves value and null).
