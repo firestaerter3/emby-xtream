@@ -1,0 +1,117 @@
+name: Issue Triage
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to triage
+        required: true
+        type: number
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  triage:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'issues' ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/agent triage'))
+    runs-on: ubuntu-latest
+    env:
+      AGENT_TRIAGE_WEBHOOK_URL: ${{ secrets.AGENT_TRIAGE_WEBHOOK_URL }}
+      AGENT_TRIAGE_WEBHOOK_SECRET: ${{ secrets.AGENT_TRIAGE_WEBHOOK_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build triage context
+        id: context
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = context.eventName === 'workflow_dispatch'
+              ? Number(core.getInput('issue_number'))
+              : context.payload.issue.number;
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+            });
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              per_page: 20,
+            });
+            const payload = {
+              repository: `${context.repo.owner}/${context.repo.repo}`,
+              issue: {
+                number: issue.number,
+                title: issue.title,
+                body: issue.body || '',
+                labels: issue.labels.map(label => typeof label === 'string' ? label : label.name),
+                author: issue.user.login,
+                url: issue.html_url,
+              },
+              recent_comments: comments.slice(-10).map(comment => ({
+                author: comment.user.login,
+                body: comment.body || '',
+                created_at: comment.created_at,
+              })),
+              policy_files: [
+                'docs/agent-triage-policy.md',
+                'docs/agent-labels.md',
+                'AGENTS.md',
+                'CONTRIBUTING.md',
+              ],
+              required_output: 'Post a GitHub issue comment using the Agent Triage Report format from docs/agent-triage-policy.md and apply recommended labels.',
+            };
+            core.setOutput('number', String(issue.number));
+            core.setOutput('payload', JSON.stringify(payload));
+
+      - name: Dispatch to external triage agent
+        if: env.AGENT_TRIAGE_WEBHOOK_URL != ''
+        env:
+          PAYLOAD: ${{ steps.context.outputs.payload }}
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp)
+          printf '%s' "$PAYLOAD" > "$tmp"
+          if [ -n "$AGENT_TRIAGE_WEBHOOK_SECRET" ]; then
+            signature="sha256=$(openssl dgst -sha256 -hmac "$AGENT_TRIAGE_WEBHOOK_SECRET" -binary "$tmp" | xxd -p -c 256)"
+            curl --fail --show-error --silent --max-time 30 \
+              -H "Content-Type: application/json" \
+              -H "X-Hub-Signature-256: $signature" \
+              --data-binary "@$tmp" \
+              "$AGENT_TRIAGE_WEBHOOK_URL"
+          else
+            curl --fail --show-error --silent --max-time 30 \
+              -H "Content-Type: application/json" \
+              --data-binary "@$tmp" \
+              "$AGENT_TRIAGE_WEBHOOK_URL"
+          fi
+
+      - name: Fallback guidance when webhook is not configured
+        if: env.AGENT_TRIAGE_WEBHOOK_URL == ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number('${{ steps.context.outputs.number }}'),
+              body: [
+                '## Agent Triage Pending',
+                '',
+                'The triage workflow ran, but `AGENT_TRIAGE_WEBHOOK_URL` is not configured.',
+                '',
+                'Configure the repository secret to let the external agent classify the issue, apply labels, and decide whether it is `agent-ready`.',
+                '',
+                'Policy: `docs/agent-triage-policy.md`',
+              ].join('\n'),
+            });

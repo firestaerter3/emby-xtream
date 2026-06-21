@@ -1,0 +1,74 @@
+name: Feature request
+description: Suggest an improvement or new capability for Xtream Tuner
+title: "Feature: "
+labels: ["needs-triage", "feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are evaluated for scope, user value, maintenance cost, and fit with Emby/Xtream/Dispatcharr workflows.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to achieve, and why does the current plugin not cover it?
+      placeholder: I want to...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior, UI setting, endpoint, or workflow you want.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workaround or external tool have you tried?
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Live TV / EPG
+        - VOD movies
+        - TV series
+        - Dispatcharr integration
+        - Configuration dashboard
+        - Sync engine
+        - Packaging / releases
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: value
+    attributes:
+      label: Expected value
+      description: How broadly useful is this?
+      options:
+        - High - likely helps many users or provider types
+        - Medium - useful for a common workflow
+        - Low - mainly useful for my setup
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence of demand or compatibility need
+      description: Link related issues, provider docs, Emby behavior, Dispatcharr behavior, or screenshots.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues before opening this request.
+          required: true
+        - label: This request fits the Xtream Tuner plugin scope rather than a separate Emby, provider, or Dispatcharr issue.
+          required: true
