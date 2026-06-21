@@ -1,0 +1,87 @@
+name: Dispatch Agent Work
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to dispatch to the implementation agent
+        required: true
+        type: number
+
+permissions:
+  issues: read
+  contents: read
+
+jobs:
+  dispatch:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.label.name == 'agent-ready' && !contains(github.event.issue.labels.*.name, 'agent-rejected'))
+    runs-on: ubuntu-latest
+    env:
+      AGENT_WEBHOOK_URL: ${{ secrets.AGENT_WEBHOOK_URL }}
+      AGENT_WEBHOOK_SECRET: ${{ secrets.AGENT_WEBHOOK_SECRET }}
+    steps:
+      - name: Load issue
+        id: issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = context.eventName === 'workflow_dispatch'
+              ? Number(core.getInput('issue_number'))
+              : context.payload.issue.number;
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+            });
+            core.setOutput('number', String(issue.number));
+            core.setOutput('title', issue.title);
+            core.setOutput('payload', JSON.stringify({
+              event: 'agent-ready',
+              repository: `${context.repo.owner}/${context.repo.repo}`,
+              issue: {
+                number: issue.number,
+                title: issue.title,
+                body: issue.body || '',
+                labels: issue.labels.map(label => typeof label === 'string' ? label : label.name),
+                url: issue.html_url,
+                author: issue.user.login,
+              },
+              instructions: [
+                'Read docs/agent-triage-policy.md, AGENTS.md, CONTRIBUTING.md, and relevant ADRs first.',
+                'Create a branch named agent/issue-<number>-<slug>.',
+                'Write or update tests before changing production code.',
+                'Run dotnet test Emby.Xtream.Plugin.Tests/ -v minimal and cd Emby.Xtream.Plugin && bash build.sh when SDK is available.',
+                'Open a PR with the triage report, changed files, verification output, and residual risks.',
+              ],
+            }));
+
+      - name: Dispatch to external agent webhook
+        if: env.AGENT_WEBHOOK_URL != ''
+        env:
+          PAYLOAD: ${{ steps.issue.outputs.payload }}
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp)
+          printf '%s' "$PAYLOAD" > "$tmp"
+          if [ -n "$AGENT_WEBHOOK_SECRET" ]; then
+            signature="sha256=$(openssl dgst -sha256 -hmac "$AGENT_WEBHOOK_SECRET" -binary "$tmp" | xxd -p -c 256)"
+            curl --fail --show-error --silent --max-time 30 \
+              -H "Content-Type: application/json" \
+              -H "X-Hub-Signature-256: $signature" \
+              --data-binary "@$tmp" \
+              "$AGENT_WEBHOOK_URL"
+          else
+            curl --fail --show-error --silent --max-time 30 \
+              -H "Content-Type: application/json" \
+              --data-binary "@$tmp" \
+              "$AGENT_WEBHOOK_URL"
+          fi
+
+      - name: Explain skipped dispatch
+        if: env.AGENT_WEBHOOK_URL == ''
+        run: |
+          echo "AGENT_WEBHOOK_URL is not configured. Set this repository secret to dispatch agent-ready issues."

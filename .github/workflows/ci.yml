@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore tests
+        run: dotnet restore Emby.Xtream.Plugin.Tests/
+
+      - name: Test
+        run: dotnet test Emby.Xtream.Plugin.Tests/ --no-restore -v minimal
+
+      - name: Build plugin
+        run: cd Emby.Xtream.Plugin && bash build.sh

@@ -1,0 +1,91 @@
+name: Bug report
+description: Report a reproducible problem with Xtream Tuner
+title: "Bug: "
+labels: ["needs-triage", "bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Complete reports can be triaged and fixed much faster by the maintainer or automation.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: Series sync fails when...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect Xtream Tuner or Emby to do?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include exact errors if possible.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: List the smallest sequence that triggers the bug.
+      placeholder: |
+        1. Configure...
+        2. Start sync...
+        3. Observe...
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      placeholder: v1.2.3 or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: emby-version
+    attributes:
+      label: Emby Server version
+      placeholder: 4.8.x
+    validations:
+      required: true
+  - type: dropdown
+    id: integration
+    attributes:
+      label: Integration path
+      options:
+        - Direct Xtream provider
+        - Dispatcharr
+        - M3U Editor or other Xtream-compatible source
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste the relevant Emby/Xtream Tuner logs. Remove credentials, tokens, server URLs, usernames, and passwords.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: Describe enabled features, sync type, Live TV/VOD/Series settings, Dispatcharr settings, or category filters.
+    validations:
+      required: false
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checklist
+      options:
+        - label: I removed credentials, tokens, server URLs, usernames, and passwords from logs and screenshots.
+          required: true
+        - label: I searched existing issues before opening this report.
+          required: true
