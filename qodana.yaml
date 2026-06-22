@@ -4,6 +4,8 @@
 
 version: "1.0"
 linter: qodana-cdnet
+dotnet:
+  project: Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj
 profile:
   name: qodana.recommended
 include:
