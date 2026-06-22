@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +25,35 @@ jobs:
         run: dotnet restore Emby.Xtream.Plugin.Tests/
 
       - name: Test
-        run: dotnet test Emby.Xtream.Plugin.Tests/ --no-restore -v minimal
+        run: dotnet test Emby.Xtream.Plugin.Tests/ --no-restore -v minimal --logger "trx;LogFileName=results.trx"
 
       - name: Build plugin
         run: cd Emby.Xtream.Plugin && bash build.sh
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/*.trx'
+
+  qodana:
+    name: Qodana
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Qodana scan
+        uses: JetBrains/qodana-action@v2026.1
+        with:
+          pr-mode: false
+        env:
+          QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
+          QODANA_ENDPOINT: 'https://qodana.cloud'

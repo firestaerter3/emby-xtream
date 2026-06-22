@@ -1,0 +1,49 @@
+language: "en-US"
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!tools/**"
+    - "!InspectSDK/**"
+    - "!logs/**"
+    - "!docs/decisions/**"
+  instructions: |
+    This is an Emby plugin (C#, netstandard2.0) that integrates Xtream IPTV providers.
+
+    Key rules to enforce during review:
+
+    - Never call Plugin.Instance or Plugin.Instance.Configuration in a class constructor.
+      Emby instantiates service classes (StrmSyncService, LiveTvService, etc.) via SimpleInjector
+      before the Plugin constructor runs, so Plugin.Instance is null at that point.
+
+    - Never add SupportsProbing = true or AnalyzeDurationMs > 0 for Dispatcharr proxy URLs
+      (/proxy/ts/stream/<uuid>). Probing opens and immediately closes an HTTP connection,
+      which Dispatcharr interprets as a client disconnect and tears down the channel.
+
+    - Provider fields (title, rating, tmdb, category_id, etc.) must use the tolerant converters:
+      TolerantStringConverter for string fields, TolerantNullableIntConverter for nullable int fields.
+      Do not replace these with default System.Text.Json converters.
+
+    - When adding a new custom JsonConverter, check whether it should be registered on the
+      JsonOptions in StrmSyncService or via [JsonConverter] attribute. Attribute registration
+      is preferred for type-specific converters scoped to a single model property.
+
+    - After a JsonSerializer.Deserialize call that throws JsonException, the Utf8JsonReader
+      position is indeterminate — the reader has already advanced past the opening token.
+      A catch guard checking reader.TokenType == JsonTokenType.StartObject will never fire.
+
+    - PluginConfiguration fields are serialized to XML automatically by Emby. Use this for
+      persisting sync state (timestamps, hashes) — no extra storage mechanism needed.
+
+    - Significant architectural decisions must be documented as an ADR in docs/decisions/.
+
+chat:
+  auto_reply: true
