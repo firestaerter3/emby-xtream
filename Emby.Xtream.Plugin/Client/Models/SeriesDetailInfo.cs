@@ -9,6 +9,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         public List<SeasonInfo> Seasons { get; set; } = new List<SeasonInfo>();
 
         [JsonPropertyName("episodes")]
+        [JsonConverter(typeof(TolerantEpisodeDictionaryConverter))]
         public Dictionary<string, List<EpisodeInfo>> Episodes { get; set; } = new Dictionary<string, List<EpisodeInfo>>();
 
         [JsonPropertyName("info")]
