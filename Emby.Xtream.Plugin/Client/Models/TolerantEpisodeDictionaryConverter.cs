@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -26,7 +25,9 @@ namespace Emby.Xtream.Plugin.Client.Models
     internal sealed class TolerantEpisodeDictionaryConverter
         : JsonConverter<Dictionary<string, List<EpisodeInfo>>>
     {
-        public override Dictionary<string, List<EpisodeInfo>>? Read(
+        public override bool HandleNull { get { return true; } }
+
+        public override Dictionary<string, List<EpisodeInfo>> Read(
             ref Utf8JsonReader reader,
             Type typeToConvert,
             JsonSerializerOptions options)
@@ -77,7 +78,7 @@ namespace Emby.Xtream.Plugin.Client.Models
                 // skip it and continue with the next entry.
                 if (TryParseEpisodeList(ref reader, options, out var episodes))
                 {
-                    if (key is not null)
+                    if (key != null)
                     {
                         result[key] = episodes;
                     }
@@ -94,7 +95,7 @@ namespace Emby.Xtream.Plugin.Client.Models
         private static bool TryParseEpisodeList(
             ref Utf8JsonReader reader,
             JsonSerializerOptions options,
-            [NotNullWhen(true)] out List<EpisodeInfo>? episodes)
+            out List<EpisodeInfo> episodes)
         {
             episodes = null;
 
@@ -123,16 +124,18 @@ namespace Emby.Xtream.Plugin.Client.Models
 
                 try
                 {
-                    using var episodeDoc = JsonDocument.ParseValue(ref reader);
-                    if (!HasKnownEpisodeField(episodeDoc.RootElement))
+                    using (var episodeDoc = JsonDocument.ParseValue(ref reader))
                     {
-                        continue;
-                    }
+                        if (!HasKnownEpisodeField(episodeDoc.RootElement))
+                        {
+                            continue;
+                        }
 
-                    var episode = episodeDoc.RootElement.Deserialize<EpisodeInfo>(options);
-                    if (episode is not null)
-                    {
-                        list.Add(episode);
+                        var episode = episodeDoc.RootElement.Deserialize<EpisodeInfo>(options);
+                        if (episode != null)
+                        {
+                            list.Add(episode);
+                        }
                     }
                 }
                 catch (JsonException)
