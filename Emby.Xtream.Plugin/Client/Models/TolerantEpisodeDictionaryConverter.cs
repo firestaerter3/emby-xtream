@@ -123,7 +123,13 @@ namespace Emby.Xtream.Plugin.Client.Models
 
                 try
                 {
-                    var episode = JsonSerializer.Deserialize<EpisodeInfo>(ref reader, options);
+                    using var episodeDoc = JsonDocument.ParseValue(ref reader);
+                    if (!HasKnownEpisodeField(episodeDoc.RootElement))
+                    {
+                        continue;
+                    }
+
+                    var episode = episodeDoc.RootElement.Deserialize<EpisodeInfo>(options);
                     if (episode is not null)
                     {
                         list.Add(episode);
@@ -132,7 +138,7 @@ namespace Emby.Xtream.Plugin.Client.Models
                 catch (JsonException)
                 {
                     // Malformed entry — skip it rather than aborting the whole series.
-                    // The reader may be partially consumed; validate position.
+                    // JsonDocument.ParseValue consumes the object or throws before advancing.
                     if (reader.TokenType == JsonTokenType.StartObject)
                     {
                         reader.Skip();
@@ -147,6 +153,14 @@ namespace Emby.Xtream.Plugin.Client.Models
             }
 
             return false;
+        }
+
+        private static bool HasKnownEpisodeField(JsonElement episode)
+        {
+            return episode.TryGetProperty("id", out _)
+                || episode.TryGetProperty("episode_num", out _)
+                || episode.TryGetProperty("title", out _)
+                || episode.TryGetProperty("container_extension", out _);
         }
 
         public override void Write(

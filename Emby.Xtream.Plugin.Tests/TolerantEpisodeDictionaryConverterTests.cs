@@ -26,6 +26,7 @@ namespace Emby.Xtream.Plugin.Tests
             Converters =
             {
                 new TolerantStringConverter(),
+                new TolerantNullableIntConverter(),
             },
         };
 
