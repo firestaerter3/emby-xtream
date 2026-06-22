@@ -68,6 +68,7 @@ jobs:
 
       - name: Send notification webhook
         if: env.PR_NOTIFY_WEBHOOK_URL != ''
+        continue-on-error: true
         env:
           PAYLOAD: ${{ steps.payload.outputs.payload }}
         run: |
