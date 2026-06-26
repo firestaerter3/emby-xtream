@@ -31,7 +31,14 @@ namespace Emby.Xtream.Plugin.Service
             DateOpened = DateTimeOffset.UtcNow;
         }
 
-        public int ConsumerCount { get; set; }
+        private int _consumerCount;
+
+        public int ConsumerCount
+        {
+            get => Volatile.Read(ref _consumerCount);
+            set => Volatile.Write(ref _consumerCount, Math.Max(0, value));
+        }
+
         public string OriginalStreamId { get; set; }
         public string TunerHostId { get; }
         public bool EnableStreamSharing => false;
@@ -70,6 +77,23 @@ namespace Emby.Xtream.Plugin.Service
         {
             Dispose();
             return Task.CompletedTask;
+        }
+
+        public void AddConsumer()
+        {
+            Interlocked.Increment(ref _consumerCount);
+        }
+
+        public void RemoveConsumer()
+        {
+            while (true)
+            {
+                var current = Volatile.Read(ref _consumerCount);
+                if (current <= 0) return;
+
+                if (Interlocked.CompareExchange(ref _consumerCount, current - 1, current) == current)
+                    return;
+            }
         }
 
         // Reopen the HTTP connection to the upstream source. Called when a prior CopyToAsync
