@@ -16,8 +16,13 @@ namespace Emby.Xtream.Plugin.Tests
         {
             var type = typeof(XtreamLiveStream);
 
-            Assert.NotNull(type.GetMethod("AddConsumer", BindingFlags.Instance | BindingFlags.Public));
-            Assert.NotNull(type.GetMethod("RemoveConsumer", BindingFlags.Instance | BindingFlags.Public));
+            var addConsumer = type.GetMethod("AddConsumer", BindingFlags.Instance | BindingFlags.Public);
+            var removeConsumer = type.GetMethod("RemoveConsumer", BindingFlags.Instance | BindingFlags.Public);
+
+            Assert.NotNull(addConsumer);
+            Assert.NotNull(removeConsumer);
+            Assert.True(addConsumer.IsVirtual);
+            Assert.True(removeConsumer.IsVirtual);
         }
 
         [Fact]
@@ -70,9 +75,11 @@ namespace Emby.Xtream.Plugin.Tests
                     foreach (var thread in threads) thread.Start();
                     startBarrier.SignalAndWait();
                     postAddBarrier.SignalAndWait();
-                    Assert.Equal(threadCount * operationsPerThread, stream.ConsumerCount);
+                    var consumerCountAfterAdds = stream.ConsumerCount;
                     removeBarrier.SignalAndWait();
                     foreach (var thread in threads) thread.Join();
+
+                    Assert.Equal(threadCount * operationsPerThread, consumerCountAfterAdds);
                 }
 
                 Assert.Equal(0, stream.ConsumerCount);

@@ -11,7 +11,7 @@ using MediaBrowser.Model.Logging;
 
 namespace Emby.Xtream.Plugin.Service
 {
-    internal sealed class XtreamLiveStream : ILiveStream, IDisposable
+    internal class XtreamLiveStream : ILiveStream, IDisposable
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger _logger;
@@ -79,12 +79,12 @@ namespace Emby.Xtream.Plugin.Service
             return Task.CompletedTask;
         }
 
-        public void AddConsumer()
+        public virtual void AddConsumer()
         {
             Interlocked.Increment(ref _consumerCount);
         }
 
-        public void RemoveConsumer()
+        public virtual void RemoveConsumer()
         {
             while (true)
             {
