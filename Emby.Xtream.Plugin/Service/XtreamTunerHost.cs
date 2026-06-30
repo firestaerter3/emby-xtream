@@ -956,7 +956,7 @@ namespace Emby.Xtream.Plugin.Service
             return liveStream;
         }
 
-        public new void ClearCaches()
+        public void ClearCaches()
         {
             _cachedChannels = null;
             _cacheTime = DateTime.MinValue;

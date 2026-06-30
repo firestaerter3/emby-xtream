@@ -1,13 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
-
   <ItemGroup>
-    <PackageReference Include="mediabrowser.server.core" Version="4.8.0.80" />
+    <Reference Include="MediaBrowser.Common" HintPath="$(MSBuildThisFileDirectory)../lib/MediaBrowser.Common.dll" Private="true" />
+    <Reference Include="MediaBrowser.Controller" HintPath="$(MSBuildThisFileDirectory)../lib/MediaBrowser.Controller.dll" Private="true" />
+    <Reference Include="MediaBrowser.Model" HintPath="$(MSBuildThisFileDirectory)../lib/MediaBrowser.Model.dll" Private="true" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.9.0" />
     <PackageReference Include="xunit" Version="2.7.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.7">
@@ -15,9 +15,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
   </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\Emby.Xtream.Plugin\Emby.Xtream.Plugin.csproj" />
   </ItemGroup>
-
 </Project>
