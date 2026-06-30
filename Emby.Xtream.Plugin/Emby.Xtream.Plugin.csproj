@@ -9,9 +9,9 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="MediaBrowser.Common" HintPath="/tmp/emby_beta_sdk/system/MediaBrowser.Common.dll" Private="true" />
-    <Reference Include="MediaBrowser.Controller" HintPath="/tmp/emby_beta_sdk/system/MediaBrowser.Controller.dll" Private="true" />
-    <Reference Include="MediaBrowser.Model" HintPath="/tmp/emby_beta_sdk/system/MediaBrowser.Model.dll" Private="true" />
+    <Reference Include="MediaBrowser.Common" HintPath="$(MSBuildThisFileDirectory)../lib/MediaBrowser.Common.dll" Private="true" />
+    <Reference Include="MediaBrowser.Controller" HintPath="$(MSBuildThisFileDirectory)../lib/MediaBrowser.Controller.dll" Private="true" />
+    <Reference Include="MediaBrowser.Model" HintPath="$(MSBuildThisFileDirectory)../lib/MediaBrowser.Model.dll" Private="true" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
     <PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
     <PackageReference Include="System.Memory" Version="4.6.0" />
