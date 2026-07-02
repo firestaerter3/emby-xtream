@@ -79,12 +79,12 @@ namespace Emby.Xtream.Plugin.Service
             return Task.CompletedTask;
         }
 
-        public virtual void AddConsumer()
+        public virtual void AddConsumer(string id)
         {
             Interlocked.Increment(ref _consumerCount);
         }
 
-        public virtual void RemoveConsumer()
+        public virtual void RemoveConsumer(string id)
         {
             while (true)
             {

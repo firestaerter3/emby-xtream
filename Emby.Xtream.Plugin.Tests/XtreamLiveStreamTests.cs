@@ -16,8 +16,8 @@ namespace Emby.Xtream.Plugin.Tests
         {
             var type = typeof(XtreamLiveStream);
 
-            var addConsumer = type.GetMethod("AddConsumer", BindingFlags.Instance | BindingFlags.Public);
-            var removeConsumer = type.GetMethod("RemoveConsumer", BindingFlags.Instance | BindingFlags.Public);
+            var addConsumer = type.GetMethod("AddConsumer", new[] { typeof(string) });
+            var removeConsumer = type.GetMethod("RemoveConsumer", new[] { typeof(string) });
 
             Assert.NotNull(addConsumer);
             Assert.NotNull(removeConsumer);
@@ -30,14 +30,14 @@ namespace Emby.Xtream.Plugin.Tests
         {
             using (var stream = CreateStream())
             {
-                stream.AddConsumer();
-                stream.AddConsumer();
+                stream.AddConsumer("consumer-a");
+                stream.AddConsumer("consumer-b");
 
                 Assert.Equal(2, stream.ConsumerCount);
 
-                stream.RemoveConsumer();
-                stream.RemoveConsumer();
-                stream.RemoveConsumer();
+                stream.RemoveConsumer("consumer-b");
+                stream.RemoveConsumer("consumer-a");
+                stream.RemoveConsumer("consumer-nonexistent");
 
                 Assert.Equal(0, stream.ConsumerCount);
             }
@@ -60,14 +60,14 @@ namespace Emby.Xtream.Plugin.Tests
                             startBarrier.SignalAndWait();
                             for (var i = 0; i < operationsPerThread; i++)
                             {
-                                stream.AddConsumer();
+                                stream.AddConsumer("test");
                             }
 
                             postAddBarrier.SignalAndWait();
                             removeBarrier.SignalAndWait();
                             for (var i = 0; i < operationsPerThread; i++)
                             {
-                                stream.RemoveConsumer();
+                                stream.RemoveConsumer("test");
                             }
                         }))
                         .ToArray();
@@ -87,14 +87,16 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
-        public void AddConsumerAndRemoveConsumerRemainPublicMethodsUntilEmbyReferencesExposeRuntimeSlots()
+        public void AddConsumerAndRemoveConsumerAreNowOnILiveStreamInterface()
         {
+            // Emby 4.10.0.17 added AddConsumer(string) and RemoveConsumer(string)
+            // to ILiveStream. The plugin methods satisfy the interface naturally.
             var interfaceMethodNames = typeof(ILiveStream).GetMethods().Select(method => method.Name).ToArray();
 
-            Assert.DoesNotContain("AddConsumer", interfaceMethodNames);
-            Assert.DoesNotContain("RemoveConsumer", interfaceMethodNames);
-            Assert.NotNull(typeof(XtreamLiveStream).GetMethod("AddConsumer"));
-            Assert.NotNull(typeof(XtreamLiveStream).GetMethod("RemoveConsumer"));
+            Assert.Contains("AddConsumer", interfaceMethodNames);
+            Assert.Contains("RemoveConsumer", interfaceMethodNames);
+            Assert.NotNull(typeof(XtreamLiveStream).GetMethod("AddConsumer", new[] { typeof(string) }));
+            Assert.NotNull(typeof(XtreamLiveStream).GetMethod("RemoveConsumer", new[] { typeof(string) }));
         }
 
         [Fact]
