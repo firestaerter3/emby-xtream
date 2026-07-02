@@ -950,11 +950,25 @@ namespace Emby.Xtream.Plugin.Service
             var httpClient = Plugin.CreateHttpClient();
             ILiveStream liveStream = new XtreamLiveStream(mediaSource, tuner.Id, httpClient, Logger);
 
+            // Append a unique suffix per session so Emby's MediaSourceManager treats each
+            // session independently. Without this, two sessions on the same channel share
+            // one XtreamLiveStream (both have MediaSource.Id = "xtream_live_N"), and when the
+            // first session closes its consumer, RemoveConsumer drops the count to 0 and kills
+            // the shared live stream — taking the second session with it (issue #43).
+            mediaSource.Id = BuildSessionMediaSourceId(mediaSource.Id, ((XtreamLiveStream)liveStream).UniqueId);
+
             Logger.Info("Opening live stream for channel {0} (stream {1})",
                 tunerChannel?.Name ?? tunerChannel?.Id, streamId);
 
             return liveStream;
         }
+
+        /// <summary>
+        /// Builds a per-session unique media source ID by appending a session-specific suffix.
+        /// Shared by the production code and tests so a change to the suffix formula is caught.
+        /// </summary>
+        internal static string BuildSessionMediaSourceId(string baseId, string uniqueId)
+            => baseId + "_" + uniqueId;
 
         public void ClearCaches()
         {

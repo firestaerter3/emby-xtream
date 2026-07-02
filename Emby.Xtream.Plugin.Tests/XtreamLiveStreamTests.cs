@@ -97,12 +97,43 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.NotNull(typeof(XtreamLiveStream).GetMethod("RemoveConsumer"));
         }
 
+        [Fact]
+        public void ConcurrentSessionsGetUniqueMediaSourceIds()
+        {
+            // Two XtreamLiveStream instances for the same base channel id must have
+            // different UniqueIds, which GetChannelStream appends to MediaSource.Id.
+            // Without this, Emby's MediaSourceManager reuses the first live stream
+            // for both sessions and the first session's close kills the second (issue #43).
+            var baseId = "xtream_live_363";
+
+            using (var stream1 = CreateStream(baseId))
+            using (var stream2 = CreateStream(baseId))
+            {
+                Assert.NotEqual(stream1.UniqueId, stream2.UniqueId);
+                Assert.NotEqual(
+                    XtreamTunerHost.BuildSessionMediaSourceId(stream1.MediaSource.Id, stream1.UniqueId),
+                    XtreamTunerHost.BuildSessionMediaSourceId(stream2.MediaSource.Id, stream2.UniqueId));
+            }
+        }
+
         private static XtreamLiveStream CreateStream()
         {
             return new XtreamLiveStream(
                 new MediaSourceInfo
                 {
                     Id = "stream-1",
+                    Path = "http://example.invalid/live.ts"
+                },
+                "tuner-1",
+                new System.Net.Http.HttpClient());
+        }
+
+        private static XtreamLiveStream CreateStream(string baseId)
+        {
+            return new XtreamLiveStream(
+                new MediaSourceInfo
+                {
+                    Id = baseId,
                     Path = "http://example.invalid/live.ts"
                 },
                 "tuner-1",
