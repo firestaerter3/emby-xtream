@@ -111,8 +111,8 @@ namespace Emby.Xtream.Plugin.Tests
             {
                 Assert.NotEqual(stream1.UniqueId, stream2.UniqueId);
                 Assert.NotEqual(
-                    stream1.MediaSource.Id + "_" + stream1.UniqueId,
-                    stream2.MediaSource.Id + "_" + stream2.UniqueId);
+                    XtreamTunerHost.BuildSessionMediaSourceId(stream1.MediaSource.Id, stream1.UniqueId),
+                    XtreamTunerHost.BuildSessionMediaSourceId(stream2.MediaSource.Id, stream2.UniqueId));
             }
         }
 
