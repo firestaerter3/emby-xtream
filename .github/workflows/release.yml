@@ -48,9 +48,12 @@ jobs:
             fi
           } > release_notes.md
 
-      - name: Create draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll
-          body_path: release_notes.md
-          draft: true
+      - name: Create release
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release_notes.md \
+            --prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
