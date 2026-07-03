@@ -8,18 +8,36 @@
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release_4_10'">
+    <DefineConstants>$(DefineConstants);EMBY_4_10</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Emby 4.9.x SDK (default Release config) -->
+  <ItemGroup Condition="'$(Configuration)' != 'Release_4_10'">
+    <Reference Include="MediaBrowser.Common" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_9/MediaBrowser.Common.dll" Private="true" />
+    <Reference Include="MediaBrowser.Controller" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_9/MediaBrowser.Controller.dll" Private="true" />
+    <Reference Include="MediaBrowser.Model" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_9/MediaBrowser.Model.dll" Private="true" />
+  </ItemGroup>
+
+  <!-- Emby 4.10.0.17+ SDK (Release_4_10 config) -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release_4_10'">
+    <Reference Include="MediaBrowser.Common" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_10/MediaBrowser.Common.dll" Private="true" />
+    <Reference Include="MediaBrowser.Controller" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_10/MediaBrowser.Controller.dll" Private="true" />
+    <Reference Include="MediaBrowser.Model" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_10/MediaBrowser.Model.dll" Private="true" />
+  </ItemGroup>
+
   <ItemGroup>
-    <Reference Include="MediaBrowser.Common" HintPath="$(MSBuildThisFileDirectory)../lib/MediaBrowser.Common.dll" Private="true" />
-    <Reference Include="MediaBrowser.Controller" HintPath="$(MSBuildThisFileDirectory)../lib/MediaBrowser.Controller.dll" Private="true" />
-    <Reference Include="MediaBrowser.Model" HintPath="$(MSBuildThisFileDirectory)../lib/MediaBrowser.Model.dll" Private="true" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
     <PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
     <PackageReference Include="System.Memory" Version="4.6.0" />
   </ItemGroup>
+
   <ItemGroup>
     <EmbeddedResource Include="Configuration\Web\**" />
     <EmbeddedResource Include="thumb.png" />
   </ItemGroup>
+
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>Emby.Xtream.Plugin.Tests</_Parameter1>
