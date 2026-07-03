@@ -79,6 +79,7 @@ namespace Emby.Xtream.Plugin.Service
             return Task.CompletedTask;
         }
 
+        #if EMBY_4_10
         public virtual void AddConsumer(string id)
         {
             Interlocked.Increment(ref _consumerCount);
@@ -95,6 +96,7 @@ namespace Emby.Xtream.Plugin.Service
                     return;
             }
         }
+#endif
 
         // Reopen the HTTP connection to the upstream source. Called when a prior CopyToAsync
         // was cancelled mid-read, which aborts the underlying SSL connection and leaves _stream

@@ -11,6 +11,7 @@ namespace Emby.Xtream.Plugin.Tests
 {
     public class XtreamLiveStreamTests
     {
+        #if EMBY_4_10
         [Fact]
         public void ExposesConsumerLifecycleMethodsForEmbyRuntimeCompatibility()
         {
@@ -98,6 +99,7 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.NotNull(typeof(XtreamLiveStream).GetMethod("AddConsumer", new[] { typeof(string) }));
             Assert.NotNull(typeof(XtreamLiveStream).GetMethod("RemoveConsumer", new[] { typeof(string) }));
         }
+#endif
 
         [Fact]
         public void ConcurrentSessionsGetUniqueMediaSourceIds()
