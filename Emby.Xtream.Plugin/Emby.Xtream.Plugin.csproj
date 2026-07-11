@@ -27,9 +27,17 @@
     <Reference Include="MediaBrowser.Model" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_10/MediaBrowser.Model.dll" Private="true" />
   </ItemGroup>
 
-  <ItemGroup>
+  <!-- Emby 4.9.x / .NET 6 compatible packages (default Release config) -->
+  <ItemGroup Condition="'$(Configuration)' != 'Release_4_10'">
     <PackageReference Include="System.Text.Json" Version="6.0.10" />
     <PackageReference Include="System.IO.Pipelines" Version="6.0.3" />
+    <PackageReference Include="System.Memory" Version="4.6.0" />
+  </ItemGroup>
+
+  <!-- Emby 4.10+ SDK requires Pipeline/Json v8 (Release_4_10 config) -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release_4_10'">
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
     <PackageReference Include="System.Memory" Version="4.6.0" />
   </ItemGroup>
 
