@@ -56,3 +56,7 @@ tests/e2e/playwright-report/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Internal planning / spec drafts — kept local, not published
+docs/plans/
+docs/superpowers/
