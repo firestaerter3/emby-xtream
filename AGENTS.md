@@ -3,9 +3,7 @@
 ## See also
 
 - `Jellyfin-Xtream-Library/` — shared Xtream plugin architecture / code patterns; primary Jellyfin variant
-- `docker-stacks/` — Emby container deploy
 - `Dispatcharr/` — IPTV proxy this plugin consumes
-- Top-level `Coding Projects/` memory: `cluster_media_stack.md`
 
 ## Emby Plugin Architecture
 
