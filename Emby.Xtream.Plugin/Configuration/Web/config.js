@@ -26,6 +26,10 @@ function (BaseView, loading) {
         this.selectedSeriesCategoryIds = [];
         this.loadedDispatcharrProfiles = [];
         this.selectedDispatcharrProfileIds = [];
+        this.excludedVodStreamIds = [];
+        this.excludedSeriesIds = [];
+        this.contentItemsByCategory = { vod: {}, series: {} };
+        this.expandedContentCategories = { vod: {}, series: {} };
 
         var self = this;
 
@@ -162,11 +166,11 @@ function (BaseView, loading) {
         });
 
         view.querySelector('.btnSelectAllVodCategories').addEventListener('click', function () {
-            toggleAllVodCategories(view, true);
+            toggleAllVodCategories(self, true);
         });
 
         view.querySelector('.btnDeselectAllVodCategories').addEventListener('click', function () {
-            toggleAllVodCategories(view, false);
+            toggleAllVodCategories(self, false);
         });
 
         // VOD category buttons (multi mode)
@@ -180,11 +184,61 @@ function (BaseView, loading) {
         });
 
         view.querySelector('.btnSelectAllSeriesCategories').addEventListener('click', function () {
-            toggleAllSeriesCategories(view, true);
+            toggleAllSeriesCategories(self, true);
         });
 
         view.querySelector('.btnDeselectAllSeriesCategories').addEventListener('click', function () {
-            toggleAllSeriesCategories(view, false);
+            toggleAllSeriesCategories(self, false);
+        });
+
+        // Per-title selection: delegated so re-rendered panels stay live
+        ['.vodCategoriesList', '.seriesCategoriesList'].forEach(function (selector) {
+            var listEl = view.querySelector(selector);
+            if (!listEl) return;
+
+            listEl.addEventListener('click', function (e) {
+                var toggle = e.target.closest('.contentItemToggle');
+                if (toggle) {
+                    e.preventDefault();
+                    toggleContentItemPanel(
+                        self,
+                        toggle.getAttribute('data-content-type'),
+                        parseInt(toggle.getAttribute('data-cat-id'), 10),
+                        toggle);
+                    return;
+                }
+
+                var selectAll = e.target.closest('.contentItemSelectAll');
+                if (selectAll) {
+                    e.preventDefault();
+                    toggleAllContentItems(
+                        self,
+                        selectAll.getAttribute('data-content-type'),
+                        parseInt(selectAll.getAttribute('data-cat-id'), 10),
+                        true);
+                    return;
+                }
+
+                var deselectAll = e.target.closest('.contentItemDeselectAll');
+                if (deselectAll) {
+                    e.preventDefault();
+                    toggleAllContentItems(
+                        self,
+                        deselectAll.getAttribute('data-content-type'),
+                        parseInt(deselectAll.getAttribute('data-cat-id'), 10),
+                        false);
+                }
+            });
+
+            listEl.addEventListener('change', function (e) {
+                var cb = e.target.closest('.contentItemCheckbox');
+                if (!cb) return;
+                setContentExclusion(
+                    self,
+                    cb.getAttribute('data-content-type'),
+                    parseInt(cb.getAttribute('data-item-id'), 10),
+                    !cb.checked);
+            });
         });
 
         // Series category buttons (multi mode)
@@ -391,6 +445,7 @@ function (BaseView, loading) {
             view.querySelector('.selMovieFolderMode').value = movieMode;
             loadFolderEntries(view, 'movie', config.MovieFolderMappings || '', cachedVodCats);
             instance.selectedVodCategoryIds = config.SelectedVodCategoryIds || [];
+            instance.excludedVodStreamIds = config.ExcludedVodStreamIds || [];
 
             // Series
             view.querySelector('.chkSyncSeries').checked = !!config.SyncSeries;
@@ -399,6 +454,7 @@ function (BaseView, loading) {
             view.querySelector('.selSeriesFolderMode').value = seriesMode;
             loadFolderEntries(view, 'series', config.SeriesFolderMappings || '', cachedSeriesCats);
             instance.selectedSeriesCategoryIds = config.SelectedSeriesCategoryIds || [];
+            instance.excludedSeriesIds = config.ExcludedSeriesIds || [];
 
             // Update channel
             view.querySelector('.chkUseBetaChannel').checked = !!config.UseBetaChannel;
@@ -504,12 +560,14 @@ function (BaseView, loading) {
             config.MovieFolderMode = view.querySelector('.selMovieFolderMode').value;
             config.MovieFolderMappings = serializeFolderEntries(view, 'movie');
             config.SelectedVodCategoryIds = getSelectedVodCategoryIds(instance);
+            config.ExcludedVodStreamIds = instance.excludedVodStreamIds.slice();
 
             // Series
             config.SyncSeries = view.querySelector('.chkSyncSeries').checked;
             config.SeriesFolderMode = view.querySelector('.selSeriesFolderMode').value;
             config.SeriesFolderMappings = serializeFolderEntries(view, 'series');
             config.SelectedSeriesCategoryIds = getSelectedSeriesCategoryIds(instance);
+            config.ExcludedSeriesIds = instance.excludedSeriesIds.slice();
 
             // Update channel
             config.UseBetaChannel = view.querySelector('.chkUseBetaChannel').checked;
@@ -1120,7 +1178,7 @@ function updateEpgVisibility(view) {
                 if (vodCats && vodCats.length > 0) {
                     vodLoaded = true;
                     instance.loadedVodCategories = vodCats;
-                    renderCategoryList(view, '.vodCategoriesList', vodCats, 'vodCategoryCheckbox', instance.selectedVodCategoryIds);
+                    renderCategoryList(view, '.vodCategoriesList', vodCats, 'vodCategoryCheckbox', instance.selectedVodCategoryIds, 'vod');
                     view.querySelector('.btnSelectAllVodCategories').disabled = false;
                     view.querySelector('.btnDeselectAllVodCategories').disabled = false;
                     var statusEl = view.querySelector('.vodCategoriesStatus');
@@ -1147,7 +1205,7 @@ function updateEpgVisibility(view) {
                 if (seriesCats && seriesCats.length > 0) {
                     seriesLoaded = true;
                     instance.loadedSeriesCategories = seriesCats;
-                    renderCategoryList(view, '.seriesCategoriesList', seriesCats, 'seriesCategoryCheckbox', instance.selectedSeriesCategoryIds);
+                    renderCategoryList(view, '.seriesCategoriesList', seriesCats, 'seriesCategoryCheckbox', instance.selectedSeriesCategoryIds, 'series');
                     view.querySelector('.btnSelectAllSeriesCategories').disabled = false;
                     view.querySelector('.btnDeselectAllSeriesCategories').disabled = false;
                     var statusEl = view.querySelector('.seriesCategoriesStatus');
@@ -1182,7 +1240,9 @@ function updateEpgVisibility(view) {
         }
     }
 
-    function renderCategoryList(view, listSelector, categories, checkboxClass, selectedIds) {
+    // contentType: 'vod' | 'series' to draw a per-title expander, or null/undefined for
+    // Live TV (per-channel selection is not implemented for Live TV in this plugin).
+    function renderCategoryList(view, listSelector, categories, checkboxClass, selectedIds, contentType) {
         var listEl = view.querySelector(listSelector);
         if (!listEl) return;
         var html = '';
@@ -1190,13 +1250,159 @@ function updateEpgVisibility(view) {
             var cat = categories[i];
             var checked = selectedIds.indexOf(cat.CategoryId) >= 0 ? ' checked' : '';
             html += '<div class="checkboxContainer" style="margin:0.15em 0;">';
-            html += '<label style="display:flex; align-items:center; cursor:pointer;">';
+            html += '<div style="display:flex; align-items:center;">';
+            if (contentType) {
+                html += '<button type="button" class="contentItemToggle" data-content-type="' + contentType + '"';
+                html += ' data-cat-id="' + cat.CategoryId + '" title="Show titles in this category"';
+                html += ' style="background:none; border:none; color:inherit; cursor:pointer; opacity:0.6; padding:0 0.4em 0 0; font-size:0.95em;">&#9656;</button>';
+            }
+            html += '<label style="display:flex; align-items:center; cursor:pointer; flex:1;">';
             html += '<input type="checkbox" class="' + checkboxClass + '" data-category-id="' + cat.CategoryId + '"' + checked + ' style="margin-right:0.5em;" />';
             html += '<span>' + escapeHtml(cat.CategoryName) + '</span>';
             html += '</label>';
             html += '</div>';
+            if (contentType) {
+                html += '<div class="contentItemList" data-content-type="' + contentType + '" data-cat-id="' + cat.CategoryId + '"';
+                html += ' style="display:none; margin:0.2em 0 0.5em 1.6em; padding-left:0.6em; border-left:2px solid rgba(128,128,128,0.25);"></div>';
+            }
+            html += '</div>';
         }
         listEl.innerHTML = html;
+    }
+
+    // ---- Per-title selection (issue #57) ----
+
+    function toggleContentItemPanel(instance, contentType, categoryId, btn) {
+        var view = instance.view;
+        var panel = view.querySelector('.contentItemList[data-content-type="' + contentType + '"][data-cat-id="' + categoryId + '"]');
+        if (!panel) return;
+
+        var expanded = !!instance.expandedContentCategories[contentType][categoryId];
+        if (expanded) {
+            instance.expandedContentCategories[contentType][categoryId] = false;
+            panel.style.display = 'none';
+            if (btn) btn.innerHTML = '&#9656;';
+            return;
+        }
+
+        instance.expandedContentCategories[contentType][categoryId] = true;
+        panel.style.display = '';
+        if (btn) btn.innerHTML = '&#9662;';
+
+        if (instance.contentItemsByCategory[contentType][categoryId]) {
+            renderContentItems(instance, contentType, categoryId);
+        } else {
+            fetchContentItems(instance, contentType, categoryId);
+        }
+    }
+
+    function fetchContentItems(instance, contentType, categoryId) {
+        var view = instance.view;
+        var panel = view.querySelector('.contentItemList[data-content-type="' + contentType + '"][data-cat-id="' + categoryId + '"]');
+        if (!panel) return;
+
+        var label = contentType === 'vod' ? 'movies' : 'series';
+        panel.innerHTML = '<div style="opacity:0.5; padding:0.25em 0;">Loading ' + label + '...</div>';
+
+        // Query string appended by hand: every other call in this file uses the
+        // single-argument form of getUrl, so don't introduce a second convention here.
+        var endpoint = contentType === 'vod' ? 'XtreamTuner/Items/Vod' : 'XtreamTuner/Items/Series';
+        var apiUrl = ApiClient.getUrl(endpoint) + '?CategoryId=' + encodeURIComponent(categoryId);
+
+        ApiClient.getJSON(apiUrl).then(function (items) {
+            instance.contentItemsByCategory[contentType][categoryId] = items || [];
+            renderContentItems(instance, contentType, categoryId);
+        }).catch(function () {
+            panel.innerHTML = '<div style="color:#cc0000; padding:0.25em 0;">Failed to load ' + label +
+                '. Save your connection settings first, then try again.</div>';
+        });
+    }
+
+    function renderContentItems(instance, contentType, categoryId) {
+        var view = instance.view;
+        var panel = view.querySelector('.contentItemList[data-content-type="' + contentType + '"][data-cat-id="' + categoryId + '"]');
+        if (!panel) return;
+
+        var items = instance.contentItemsByCategory[contentType][categoryId] || [];
+        var label = contentType === 'vod' ? 'movies' : 'series';
+        if (items.length === 0) {
+            panel.innerHTML = '<div style="opacity:0.5; padding:0.25em 0;">No ' + label + ' in this category.</div>';
+            return;
+        }
+
+        var excluded = {};
+        var list = contentType === 'vod' ? instance.excludedVodStreamIds : instance.excludedSeriesIds;
+        for (var e = 0; e < list.length; e++) {
+            excluded[list[e]] = true;
+        }
+
+        // Plain styled buttons, NOT is="emby-button": Emby's custom-element upgrade does not
+        // run on markup injected via innerHTML, so an emby-button here renders unstyled.
+        var btnStyle = 'background:none; border:1px solid rgba(128,128,128,0.35); color:inherit; ' +
+            'cursor:pointer; padding:0.15em 0.6em; border-radius:3px; font-size:0.9em;';
+
+        var html = '<div style="margin:0.25em 0 0.4em;">';
+        html += '<button type="button" class="contentItemSelectAll"';
+        html += ' data-content-type="' + contentType + '" data-cat-id="' + categoryId + '"';
+        html += ' style="' + btnStyle + ' margin-right:0.4em;">Select All</button>';
+        html += '<button type="button" class="contentItemDeselectAll"';
+        html += ' data-content-type="' + contentType + '" data-cat-id="' + categoryId + '"';
+        html += ' style="' + btnStyle + '">Deselect All</button>';
+        html += '<span style="opacity:0.5; margin-left:0.6em;">' + items.length + ' ' + label + '</span>';
+        html += '</div>';
+
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var checked = excluded[item.Id] ? '' : ' checked';
+            html += '<div style="margin:0.1em 0;">';
+            html += '<label style="display:flex; align-items:center; cursor:pointer;">';
+            html += '<input type="checkbox" class="contentItemCheckbox" data-content-type="' + contentType + '"';
+            html += ' data-item-id="' + item.Id + '"' + checked + ' style="margin-right:0.5em;" />';
+            html += '<span>' + escapeHtml(item.Name || '(unnamed)') + '</span>';
+            html += '</label>';
+            html += '</div>';
+        }
+
+        panel.innerHTML = html;
+    }
+
+    function setContentExclusion(instance, contentType, itemId, shouldBeExcluded) {
+        var list = contentType === 'vod' ? instance.excludedVodStreamIds : instance.excludedSeriesIds;
+        var idx = list.indexOf(itemId);
+        if (shouldBeExcluded && idx === -1) {
+            list.push(itemId);
+        } else if (!shouldBeExcluded && idx !== -1) {
+            list.splice(idx, 1);
+        }
+    }
+
+    function toggleAllContentItems(instance, contentType, categoryId, checked) {
+        var view = instance.view;
+        var panel = view.querySelector('.contentItemList[data-content-type="' + contentType + '"][data-cat-id="' + categoryId + '"]');
+        if (!panel) return;
+        var boxes = panel.querySelectorAll('.contentItemCheckbox');
+        for (var i = 0; i < boxes.length; i++) {
+            boxes[i].checked = checked;
+            setContentExclusion(instance, contentType, parseInt(boxes[i].getAttribute('data-item-id'), 10), !checked);
+        }
+    }
+
+    // Wholesale category changes make a stale per-title exclusion list actively confusing
+    // (a category the user just ticked would come back with holes in it), so reset it and
+    // redraw any panel that is currently open.
+    function clearContentExclusions(instance, contentType) {
+        if (contentType === 'vod') {
+            instance.excludedVodStreamIds = [];
+        } else {
+            instance.excludedSeriesIds = [];
+        }
+
+        var expanded = instance.expandedContentCategories[contentType] || {};
+        for (var categoryId in expanded) {
+            if (expanded[categoryId] && instance.contentItemsByCategory[contentType][categoryId]) {
+                renderContentItems(instance, contentType, parseInt(categoryId, 10));
+            }
+        }
     }
 
     // ---- Live TV Categories ----
@@ -1289,18 +1495,7 @@ function updateEpgVisibility(view) {
 
             if (statusEl) statusEl.textContent = '';
 
-            var html = '';
-            for (var i = 0; i < categories.length; i++) {
-                var cat = categories[i];
-                var checked = instance.selectedVodCategoryIds.indexOf(cat.CategoryId) >= 0 ? ' checked' : '';
-                html += '<div class="checkboxContainer" style="margin:0.15em 0;">';
-                html += '<label style="display:flex; align-items:center; cursor:pointer;">';
-                html += '<input type="checkbox" class="vodCategoryCheckbox" data-category-id="' + cat.CategoryId + '"' + checked + ' style="margin-right:0.5em;" />';
-                html += '<span>' + escapeHtml(cat.CategoryName) + '</span>';
-                html += '</label>';
-                html += '</div>';
-            }
-            listEl.innerHTML = html;
+            renderCategoryList(view, '.vodCategoriesList', categories, 'vodCategoryCheckbox', instance.selectedVodCategoryIds, 'vod');
 
             view.querySelector('.btnSelectAllVodCategories').disabled = false;
             view.querySelector('.btnDeselectAllVodCategories').disabled = false;
@@ -1311,11 +1506,13 @@ function updateEpgVisibility(view) {
         });
     }
 
-    function toggleAllVodCategories(view, checked) {
+    function toggleAllVodCategories(instance, checked) {
+        var view = instance.view;
         var checkboxes = view.querySelectorAll('.vodCategoryCheckbox');
         for (var i = 0; i < checkboxes.length; i++) {
             checkboxes[i].checked = checked;
         }
+        clearContentExclusions(instance, 'vod');
         updateCategoryCountBadge(view, 'vod');
     }
 
@@ -1410,18 +1607,7 @@ function updateEpgVisibility(view) {
 
             if (statusEl) statusEl.textContent = '';
 
-            var html = '';
-            for (var i = 0; i < categories.length; i++) {
-                var cat = categories[i];
-                var checked = instance.selectedSeriesCategoryIds.indexOf(cat.CategoryId) >= 0 ? ' checked' : '';
-                html += '<div class="checkboxContainer" style="margin:0.15em 0;">';
-                html += '<label style="display:flex; align-items:center; cursor:pointer;">';
-                html += '<input type="checkbox" class="seriesCategoryCheckbox" data-category-id="' + cat.CategoryId + '"' + checked + ' style="margin-right:0.5em;" />';
-                html += '<span>' + escapeHtml(cat.CategoryName) + '</span>';
-                html += '</label>';
-                html += '</div>';
-            }
-            listEl.innerHTML = html;
+            renderCategoryList(view, '.seriesCategoriesList', categories, 'seriesCategoryCheckbox', instance.selectedSeriesCategoryIds, 'series');
 
             view.querySelector('.btnSelectAllSeriesCategories').disabled = false;
             view.querySelector('.btnDeselectAllSeriesCategories').disabled = false;
@@ -1432,11 +1618,13 @@ function updateEpgVisibility(view) {
         });
     }
 
-    function toggleAllSeriesCategories(view, checked) {
+    function toggleAllSeriesCategories(instance, checked) {
+        var view = instance.view;
         var checkboxes = view.querySelectorAll('.seriesCategoryCheckbox');
         for (var i = 0; i < checkboxes.length; i++) {
             checkboxes[i].checked = checked;
         }
+        clearContentExclusions(instance, 'series');
         updateCategoryCountBadge(view, 'series');
     }
 
