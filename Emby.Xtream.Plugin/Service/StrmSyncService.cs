@@ -322,7 +322,34 @@ namespace Emby.Xtream.Plugin.Service
 
                 // Fetch streams for selected categories
                 _movieProgress.Phase = "Fetching VOD streams";
-                var allStreams = await FetchVodStreamsAsync(config.SelectedVodCategoryIds, config, cancellationToken).ConfigureAwait(false);
+                var fetchedStreams = await FetchVodStreamsAsync(config.SelectedVodCategoryIds, config, cancellationToken).ConfigureAwait(false);
+
+                // Per-item exclusions (issue #57): split the catalogue before anything else reads it.
+                // The excluded half is kept so its on-disk folders can be removed below.
+                var excludedVodSet = ContentExclusionFilter.BuildSet(config.ExcludedVodStreamIds);
+                var excludedMovies = new List<Tuple<string, int?>>();
+                var allStreams = fetchedStreams;
+                if (excludedVodSet.Count > 0)
+                {
+                    allStreams = new List<VodStreamInfo>();
+                    foreach (var s in fetchedStreams)
+                    {
+                        if (ContentExclusionFilter.IsExcluded(excludedVodSet, s.StreamId))
+                        {
+                            var excludedName = config.EnableContentNameCleaning
+                                ? ContentNameCleaner.CleanContentName(s.Name, config.ContentRemoveTerms)
+                                : s.Name;
+                            excludedMovies.Add(Tuple.Create(excludedName, s.CategoryId));
+                        }
+                        else
+                        {
+                            allStreams.Add(s);
+                        }
+                    }
+
+                    _logger.Info("Per-item exclusions: skipping {0} of {1} movies",
+                        excludedMovies.Count, fetchedStreams.Count);
+                }
 
                 // Delta sync: split into new (not yet synced) and existing
                 var lastMovieTs = config.LastMovieSyncTimestamp;
@@ -569,18 +596,30 @@ namespace Emby.Xtream.Plugin.Service
 
                 await Task.WhenAll(tasks).ConfigureAwait(false);
 
+                // Remove folders for explicitly excluded movies. Deliberately before orphan
+                // cleanup and independent of it — see RemoveExcludedContent remarks.
+                if (excludedMovies.Count > 0)
+                {
+                    _movieProgress.Phase = "Removing excluded movies";
+                    _movieProgress.Deleted += RemoveExcludedContent(
+                        config, excludedMovies, config.MovieFolderMode, categoryNames, folderMappings, "Movies");
+                }
+
                 // Cleanup orphans
                 if (config.CleanupOrphans)
                 {
                     _movieProgress.Phase = "Cleaning up orphaned files";
                     var moviesRoot = Path.Combine(config.StrmLibraryPath, "Movies");
-                    _movieProgress.Deleted = CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold);
+                    _movieProgress.Deleted += CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold);
                 }
 
-                // Persist the highest Added timestamp seen so next sync can delta from here
-                if (allStreams.Count > 0)
+                // Persist the highest Added timestamp seen so next sync can delta from here.
+                // Computed over the UNFILTERED catalogue: if the newest movie happens to be
+                // excluded, the watermark must still advance past it or every later sync
+                // re-processes everything after it.
+                if (fetchedStreams.Count > 0)
                 {
-                    var maxAdded = allStreams.Max(m => m.Added);
+                    var maxAdded = fetchedStreams.Max(m => m.Added);
                     if (maxAdded > config.LastMovieSyncTimestamp)
                     {
                         config.LastMovieSyncTimestamp = maxAdded;

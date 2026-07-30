@@ -285,5 +285,78 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.Equal(0, svc.MovieProgress.Total);
             Assert.Equal(0, SaveConfigCallCount);
         }
+
+        // -----------------------------------------------------------------
+        // Per-item exclusion (issue #57)
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public async Task ExcludedMovie_NotWritten_OthersUnaffected()
+        {
+            var config = DefaultConfig();
+            config.ExcludedVodStreamIds = new[] { 2 };
+            RegisterVodStreams(VodStreamsJson(
+                VodStream(streamId: 1, name: "Keep Me", added: 1000),
+                VodStream(streamId: 2, name: "Drop Me", added: 1000)));
+
+            await MakeService().SyncMoviesAsync(config, None, SaveConfig);
+
+            Assert.True(File.Exists(MovieStrmPath("Keep Me")));
+            Assert.False(File.Exists(MovieStrmPath("Drop Me")));
+        }
+
+        [Fact]
+        public async Task ExcludedMovie_ExistingFolderDeleted_WithoutOrphanCleanup()
+        {
+            var config = DefaultConfig();
+            config.CleanupOrphans = false;
+            config.ExcludedVodStreamIds = new[] { 2 };
+
+            // Simulate a previous sync having written "Drop Me"
+            var staleStrm = MovieStrmPath("Drop Me");
+            Directory.CreateDirectory(Path.GetDirectoryName(staleStrm));
+            File.WriteAllText(staleStrm, "http://fake-xtream/movie/user/pass/2.mkv");
+
+            RegisterVodStreams(VodStreamsJson(
+                VodStream(streamId: 1, name: "Keep Me", added: 1000),
+                VodStream(streamId: 2, name: "Drop Me", added: 1000)));
+
+            await MakeService().SyncMoviesAsync(config, None, SaveConfig);
+
+            Assert.False(Directory.Exists(Path.Combine(TempDir.Path, "Movies", "Drop Me")));
+            Assert.True(File.Exists(MovieStrmPath("Keep Me")));
+        }
+
+        [Fact]
+        public async Task ExcludedMovie_FolderWithTmdbSuffix_Deleted()
+        {
+            var config = DefaultConfig();
+            config.ExcludedVodStreamIds = new[] { 2 };
+
+            var staleDir = Path.Combine(TempDir.Path, "Movies", "Drop Me [tmdbid=550]");
+            Directory.CreateDirectory(staleDir);
+            File.WriteAllText(Path.Combine(staleDir, "Drop Me [tmdbid=550].strm"), "http://old");
+
+            RegisterVodStreams(VodStreamsJson(
+                VodStream(streamId: 2, name: "Drop Me", added: 1000)));
+
+            await MakeService().SyncMoviesAsync(config, None, SaveConfig);
+
+            Assert.False(Directory.Exists(staleDir));
+        }
+
+        [Fact]
+        public async Task ExcludedMovie_DoesNotStallDeltaWatermark()
+        {
+            var config = DefaultConfig();
+            config.ExcludedVodStreamIds = new[] { 2 };
+            RegisterVodStreams(VodStreamsJson(
+                VodStream(streamId: 1, name: "Keep Me", added: 1000),
+                VodStream(streamId: 2, name: "Drop Me", added: 5000)));
+
+            await MakeService().SyncMoviesAsync(config, None, SaveConfig);
+
+            Assert.Equal(5000, config.LastMovieSyncTimestamp);
+        }
     }
 }
