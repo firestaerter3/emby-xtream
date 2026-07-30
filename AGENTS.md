@@ -80,6 +80,12 @@ Xtream providers type the same field differently across (and within) servers: a 
 
 `Client/Models/TolerantStringConverter` coerces any JSON token into a string (or `null` for structured values) and is registered on `StrmSyncService.JsonOptions` and the `XtreamTunerApi` series-list options. **Don't replace string properties on the provider models with the default converter** — the tolerant one is load-bearing for provider interop. `NumberHandling = AllowReadingFromString` only covers the string → number direction, not number → string. See [ADR-010](docs/decisions/010-tolerant-provider-deserialization.md).
 
+### Per-item exclusions delete folders directly, not via orphan cleanup
+
+`ExcludedVodStreamIds` / `ExcludedSeriesIds` remove an item's folder in a targeted pass (`StrmSyncService.RemoveExcludedContent`) that ignores both `CleanupOrphans` and `OrphanSafetyThreshold`. That threshold guards against a provider returning a truncated catalogue; an exclusion is a deliberate user action, so suppressing the delete would just read as the filter doing nothing. Folder matching strips `[tmdbid=…]`/`[tvdbid=…]` suffixes, so a title is found regardless of the metadata-ID naming settings in force when it was written.
+
+Both sync methods compute their delta watermark from the **unfiltered** catalogue — if the newest title happens to be excluded, the watermark must still advance past it or every later sync re-processes everything after it. Re-ticking a title needs no watermark reset: both smart-skip paths already guard on the folder existing. See [ADR-012](docs/decisions/012-per-item-content-exclusion.md).
+
 ## Architecture Decision Records (ADRs)
 
 Significant decisions are recorded in `docs/decisions/NNN-title.md`. Create a new ADR when:
