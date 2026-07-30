@@ -709,7 +709,35 @@ namespace Emby.Xtream.Plugin.Service
                     : null;
 
                 _seriesProgress.Phase = "Fetching series list";
-                var allSeries = await FetchSeriesListAsync(config.SelectedSeriesCategoryIds, config, cancellationToken).ConfigureAwait(false);
+                var fetchedSeries = await FetchSeriesListAsync(config.SelectedSeriesCategoryIds, config, cancellationToken).ConfigureAwait(false);
+
+                // Per-item exclusions (issue #57) — see the matching block in SyncMoviesAsync.
+                var excludedSeriesSet = ContentExclusionFilter.BuildSet(config.ExcludedSeriesIds);
+                var excludedSeriesItems = new List<Tuple<string, int?>>();
+                var excludedSeriesRaw = new List<SeriesInfo>();
+                var allSeries = fetchedSeries;
+                if (excludedSeriesSet.Count > 0)
+                {
+                    allSeries = new List<SeriesInfo>();
+                    foreach (var s in fetchedSeries)
+                    {
+                        if (ContentExclusionFilter.IsExcluded(excludedSeriesSet, s.SeriesId))
+                        {
+                            var excludedName = config.EnableContentNameCleaning
+                                ? ContentNameCleaner.CleanContentName(s.Name, config.ContentRemoveTerms)
+                                : s.Name;
+                            excludedSeriesItems.Add(Tuple.Create(excludedName, s.CategoryId));
+                            excludedSeriesRaw.Add(s);
+                        }
+                        else
+                        {
+                            allSeries.Add(s);
+                        }
+                    }
+
+                    _logger.Info("Per-item exclusions: skipping {0} of {1} series",
+                        excludedSeriesItems.Count, fetchedSeries.Count);
+                }
 
                 // Delta sync: split into changed and unchanged using LastModified timestamp
                 var lastSeriesTs = config.LastSeriesSyncTimestamp;
@@ -728,6 +756,18 @@ namespace Emby.Xtream.Plugin.Service
                 config.LastKnownEnableSeriesIdFolderNaming = config.EnableSeriesIdFolderNaming;
                 config.LastKnownEnableSeriesMetadataLookup = config.EnableSeriesMetadataLookup;
                 saveConfig?.Invoke();
+
+                // Excluded series never enter the loop below, so fold their timestamps in here —
+                // otherwise the watermark stalls behind an excluded-but-recent title.
+                foreach (var s in excludedSeriesRaw)
+                {
+                    long excludedLm;
+                    if (long.TryParse(s.LastModified, NumberStyles.None, CultureInfo.InvariantCulture, out excludedLm)
+                        && excludedLm > maxSeriesTs)
+                    {
+                        maxSeriesTs = excludedLm;
+                    }
+                }
 
                 _seriesProgress.Total = allSeries.Count;
                 _seriesProgress.Phase = "Writing STRM files";
@@ -1068,13 +1108,22 @@ namespace Emby.Xtream.Plugin.Service
 
                 await Task.WhenAll(tasks).ConfigureAwait(false);
 
+                // Remove folders for explicitly excluded series. Deliberately before orphan
+                // cleanup and independent of it — see RemoveExcludedContent remarks.
+                if (excludedSeriesItems.Count > 0)
+                {
+                    _seriesProgress.Phase = "Removing excluded series";
+                    _seriesProgress.Deleted += RemoveExcludedContent(
+                        config, excludedSeriesItems, config.SeriesFolderMode, categoryNames, folderMappings, "Shows");
+                }
+
                 // Cleanup orphans
                 if (config.CleanupOrphans)
                 {
                     _seriesProgress.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");
                     var deletedEpisodes = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold);
-                    _seriesProgress.Deleted = deletedEpisodes;
+                    _seriesProgress.Deleted += deletedEpisodes;
                     _episodeProgress.Deleted = deletedEpisodes;
                 }
 

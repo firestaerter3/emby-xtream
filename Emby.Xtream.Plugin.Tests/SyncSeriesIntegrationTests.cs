@@ -479,5 +479,64 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.Equal(0, svc.SeriesProgress.Total);
             Assert.Equal(0, SaveConfigCallCount);
         }
+
+        // -----------------------------------------------------------------
+        // Per-item exclusion (issue #57)
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public async Task ExcludedSeries_NotWritten_OthersUnaffected()
+        {
+            var config = DefaultConfig();
+            config.ExcludedSeriesIds = new[] { 2 };
+
+            Handler.RespondWith("action=get_series", SeriesListJson(
+                Series(seriesId: 1, name: "Keep Show", lastModified: "1000"),
+                Series(seriesId: 2, name: "Drop Show", lastModified: "1000")));
+            Handler.RespondWith("action=get_series_info&series_id=1", SeriesDetailJson(seriesId: 1));
+            Handler.RespondWith("action=get_series_info&series_id=2", SeriesDetailJson(seriesId: 2));
+
+            await MakeService().SyncSeriesAsync(config, None, SaveConfig);
+
+            Assert.True(Directory.Exists(Path.Combine(TempDir.Path, "Shows", "Keep Show")));
+            Assert.False(Directory.Exists(Path.Combine(TempDir.Path, "Shows", "Drop Show")));
+        }
+
+        [Fact]
+        public async Task ExcludedSeries_ExistingFolderDeleted_WithoutOrphanCleanup()
+        {
+            var config = DefaultConfig();
+            config.CleanupOrphans = false;
+            config.ExcludedSeriesIds = new[] { 2 };
+
+            var staleSeasonDir = Path.Combine(TempDir.Path, "Shows", "Drop Show", "Season 01");
+            Directory.CreateDirectory(staleSeasonDir);
+            File.WriteAllText(Path.Combine(staleSeasonDir, "Drop Show - S01E01.strm"), "http://old");
+
+            Handler.RespondWith("action=get_series", SeriesListJson(
+                Series(seriesId: 2, name: "Drop Show", lastModified: "1000")));
+            Handler.RespondWith("action=get_series_info&series_id=2", SeriesDetailJson(seriesId: 2));
+
+            await MakeService().SyncSeriesAsync(config, None, SaveConfig);
+
+            Assert.False(Directory.Exists(Path.Combine(TempDir.Path, "Shows", "Drop Show")));
+        }
+
+        [Fact]
+        public async Task ExcludedSeries_DoesNotStallDeltaWatermark()
+        {
+            var config = DefaultConfig();
+            config.ExcludedSeriesIds = new[] { 2 };
+
+            Handler.RespondWith("action=get_series", SeriesListJson(
+                Series(seriesId: 1, name: "Keep Show", lastModified: "1000"),
+                Series(seriesId: 2, name: "Drop Show", lastModified: "5000")));
+            Handler.RespondWith("action=get_series_info&series_id=1", SeriesDetailJson(seriesId: 1));
+            Handler.RespondWith("action=get_series_info&series_id=2", SeriesDetailJson(seriesId: 2));
+
+            await MakeService().SyncSeriesAsync(config, None, SaveConfig);
+
+            Assert.Equal(5000, config.LastSeriesSyncTimestamp);
+        }
     }
 }
