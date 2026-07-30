@@ -1679,6 +1679,105 @@ namespace Emby.Xtream.Plugin.Service
             return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
         }
 
+        /// <summary>
+        /// Deletes the on-disk folders of items the user has explicitly excluded.
+        /// </summary>
+        /// <remarks>
+        /// Runs independently of <see cref="PluginConfiguration.CleanupOrphans"/> and ignores
+        /// <see cref="PluginConfiguration.OrphanSafetyThreshold"/>. That threshold exists to survive
+        /// a provider returning a truncated catalogue; an exclusion is a deliberate user action, so
+        /// suppressing the delete would just look like the filter doing nothing.
+        ///
+        /// Folder matching strips any metadata-ID suffix, so an excluded title is found whether it
+        /// was written as "Some Movie", "Some Movie [tmdbid=123]" or "Some Show [tvdbid=456]".
+        /// </remarks>
+        /// <param name="config">Active plugin configuration (supplies the library root).</param>
+        /// <param name="excludedItems">Cleaned display name + category ID for each excluded item.</param>
+        /// <param name="folderMode">"single", "multiple" or "custom".</param>
+        /// <param name="categoryNames">Category ID → name, used by "multiple" mode.</param>
+        /// <param name="folderMappings">Category ID → folder, used by "custom" mode.</param>
+        /// <param name="rootFolder">"Movies" or "Shows".</param>
+        /// <returns>The number of folders deleted.</returns>
+        private int RemoveExcludedContent(
+            PluginConfiguration config,
+            List<Tuple<string, int?>> excludedItems,
+            string folderMode,
+            Dictionary<int, string> categoryNames,
+            Dictionary<int, string> folderMappings,
+            string rootFolder)
+        {
+            if (excludedItems == null || excludedItems.Count == 0)
+            {
+                return 0;
+            }
+
+            var removed = 0;
+
+            // subFolder → { folderNameWithoutIdSuffix → fullPath }. One readdir per subfolder.
+            var dirIndexCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var item in excludedItems)
+            {
+                var sanitized = SanitizeFileName(item.Item1);
+                if (string.IsNullOrWhiteSpace(sanitized))
+                {
+                    continue;
+                }
+
+                var subFolder = BuildContentFolderPath(
+                    folderMode, item.Item2, categoryNames, folderMappings, rootFolder);
+                if (subFolder == null)
+                {
+                    continue;
+                }
+
+                Dictionary<string, string> dirIndex;
+                if (!dirIndexCache.TryGetValue(subFolder, out dirIndex))
+                {
+                    dirIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    var fullPath = Path.Combine(config.StrmLibraryPath, subFolder);
+                    if (Directory.Exists(fullPath))
+                    {
+                        foreach (var dir in Directory.GetDirectories(fullPath))
+                        {
+                            var stripped = StripFolderIdSuffix(Path.GetFileName(dir));
+                            if (!string.IsNullOrEmpty(stripped) && !dirIndex.ContainsKey(stripped))
+                            {
+                                dirIndex[stripped] = dir;
+                            }
+                        }
+                    }
+
+                    dirIndexCache[subFolder] = dirIndex;
+                }
+
+                string existingDir;
+                if (!dirIndex.TryGetValue(sanitized, out existingDir))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    Directory.Delete(existingDir, true);
+                    dirIndex.Remove(sanitized);
+                    removed++;
+                    _logger.Info("Removed excluded item folder: {0}", existingDir);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn("Failed to remove excluded item folder '{0}': {1}", existingDir, ex.Message);
+                }
+            }
+
+            if (removed > 0)
+            {
+                _logger.Info("Removed {0} folder(s) for explicitly excluded items under {1}", removed, rootFolder);
+            }
+
+            return removed;
+        }
+
         private int CleanupOrphans(string rootPath, HashSet<string> validPaths, double safetyThreshold)
         {
             if (!Directory.Exists(rootPath))
