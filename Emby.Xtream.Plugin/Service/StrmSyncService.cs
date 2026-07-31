@@ -135,6 +135,44 @@ namespace Emby.Xtream.Plugin.Service
         private readonly SemaphoreSlim _movieSyncGate = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim _seriesSyncGate = new SemaphoreSlim(1, 1);
 
+        /// <summary>Lowest usable value for <see cref="PluginConfiguration.SyncParallelism"/>.</summary>
+        internal const int MinSyncParallelism = 1;
+
+        /// <summary>Highest usable value for <see cref="PluginConfiguration.SyncParallelism"/>.</summary>
+        internal const int MaxSyncParallelism = 10;
+
+        /// <summary>
+        /// Returns a usable parallelism, correcting a persisted value that is out of range.
+        /// </summary>
+        /// <remarks>
+        /// The config UI validates this, but the value is persisted to XML and survives hand edits
+        /// and migrations. Zero is the dangerous one: <c>new SemaphoreSlim(0)</c> has no permits, so
+        /// the first task waits forever and the sync hangs with no way out but editing the file.
+        /// </remarks>
+        internal static int GetSyncParallelism(PluginConfiguration config)
+        {
+            var configured = config.SyncParallelism;
+            if (configured >= MinSyncParallelism && configured <= MaxSyncParallelism)
+            {
+                return configured;
+            }
+
+            return configured < MinSyncParallelism ? MinSyncParallelism : MaxSyncParallelism;
+        }
+
+        private int ResolveSyncParallelism(PluginConfiguration config)
+        {
+            var resolved = GetSyncParallelism(config);
+            if (resolved != config.SyncParallelism)
+            {
+                _logger.Warn(
+                    "SyncParallelism is {0}, which is outside the usable range {1}-{2} — using {3} for this run",
+                    config.SyncParallelism, MinSyncParallelism, MaxSyncParallelism, resolved);
+            }
+
+            return resolved;
+        }
+
         private static void ReportTaskProgress(SyncProgress syncProgress, IProgress<double> taskProgress)
         {
             if (taskProgress == null) return;
@@ -430,7 +468,7 @@ namespace Emby.Xtream.Plugin.Service
                 _logger.Info("Starting movie STRM sync for {0} streams", allStreams.Count);
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
 
                 // Shared Dispatcharr VOD client — only queried per-movie, after smart-skip
                 Emby.Xtream.Plugin.Client.DispatcharrClient dispatcharrVodClient = null;
@@ -529,7 +567,7 @@ namespace Emby.Xtream.Plugin.Service
                         var streamUrl = string.Format(
                             CultureInfo.InvariantCulture,
                             "{0}/movie/{1}/{2}/{3}.{4}",
-                            config.BaseUrl, config.Username, config.Password, movie.StreamId, ext);
+                            config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), movie.StreamId, ext);
 
                         // Build list of STRM entries (multi-version via Dispatcharr, or single)
                         var strmEntries = new List<Tuple<string, string>>();
@@ -884,7 +922,7 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
 
                 // Episode hash cache: load stored hashes so we can skip file I/O for unchanged series
                 var storedHashes = DeserializeEpisodeHashes(config.SeriesEpisodeHashesJson);
@@ -1155,7 +1193,7 @@ namespace Emby.Xtream.Plugin.Service
                                 var streamUrl = string.Format(
                                     CultureInfo.InvariantCulture,
                                     "{0}/series/{1}/{2}/{3}.{4}",
-                                    config.BaseUrl, config.Username, config.Password, episode.Id, ext);
+                                    config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), episode.Id, ext);
 
                                 // Skip write if file content is already up to date (avoids Emby library re-scan)
                                 var fileExists = File.Exists(strmPath);
@@ -1337,7 +1375,7 @@ namespace Emby.Xtream.Plugin.Service
 
             try
             {
-                var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
                 var categoryNames = new Dictionary<int, string>();
                 var folderMappings = FolderMappingParser.Parse(config.MovieFolderMappings);
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1411,7 +1449,7 @@ namespace Emby.Xtream.Plugin.Service
             var streamUrl = string.Format(
                 CultureInfo.InvariantCulture,
                 "{0}/movie/{1}/{2}/{3}.{4}",
-                config.BaseUrl, config.Username, config.Password, item.StreamId, ext);
+                config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), item.StreamId, ext);
 
             var fileExists = File.Exists(strmPath);
 
@@ -1481,7 +1519,7 @@ namespace Emby.Xtream.Plugin.Service
                     var ext = !string.IsNullOrEmpty(ep.ContainerExtension) ? ep.ContainerExtension : "mp4";
                     var epUrl = string.Format(CultureInfo.InvariantCulture,
                         "{0}/series/{1}/{2}/{3}.{4}",
-                        config.BaseUrl, config.Username, config.Password, ep.Id, ext);
+                        config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), ep.Id, ext);
 
                     var fileExists = File.Exists(epPath);
 
@@ -1774,7 +1812,7 @@ namespace Emby.Xtream.Plugin.Service
             else
             {
                 result.RequestedCategoryCount = categoryIds.Length;
-                var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
                 var tasks = categoryIds.Select(async catId =>
                 {
                     await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1855,7 +1893,7 @@ namespace Emby.Xtream.Plugin.Service
             else
             {
                 result.RequestedCategoryCount = categoryIds.Length;
-                var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
                 var tasks = categoryIds.Select(async catId =>
                 {
                     await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);

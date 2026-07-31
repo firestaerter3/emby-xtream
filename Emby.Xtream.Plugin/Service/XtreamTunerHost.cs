@@ -1432,7 +1432,7 @@ namespace Emby.Xtream.Plugin.Service
                 ? "ts" : "m3u8";
             return (string.Format(CultureInfo.InvariantCulture,
                 "{0}/live/{1}/{2}/{3}.{4}",
-                config.BaseUrl, config.Username, config.Password, streamId, extension), false);
+                config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), streamId, extension), false);
         }
 
         private MediaSourceInfo CreateMediaSourceInfo(
