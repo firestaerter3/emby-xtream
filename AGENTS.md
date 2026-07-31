@@ -86,6 +86,14 @@ Xtream providers type the same field differently across (and within) servers: a 
 
 Both sync methods compute their delta watermark from the **unfiltered** catalogue — if the newest title happens to be excluded, the watermark must still advance past it or every later sync re-processes everything after it. Re-ticking a title needs no watermark reset: both smart-skip paths already guard on the folder existing. See [ADR-012](docs/decisions/012-per-item-content-exclusion.md).
 
+## Tests
+
+### `FakeHttpHandler` responses are single-shot and match by substring in registration order
+
+`RespondWith(urlSubstring, body)` queues **one** response. A test that runs the same sync twice starves on the second call and throws `no registered response for URL: …`. For a multi-phase test use `RespondWithSequence(urlSubstring, new[] { body, body, body })` — one body per expected call.
+
+Matching walks the rules in registration order and takes the first whose substring is contained in the URL *and* still has a queued response. That makes registration order load-bearing whenever one pattern is a prefix of another: `"action=get_series"` is a prefix of `"action=get_series_info"`, so the **detail rule must be registered first**. Single-shot registrations happen to survive this by draining, which is why the existing tests get away with the opposite order — sequences do not.
+
 ## Architecture Decision Records (ADRs)
 
 Significant decisions are recorded in `docs/decisions/NNN-title.md`. Create a new ADR when:
