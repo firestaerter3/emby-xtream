@@ -11,7 +11,7 @@ using MediaBrowser.Model.Logging;
 
 namespace Emby.Xtream.Plugin.Service
 {
-    internal sealed class XtreamLiveStream : ILiveStream, IDisposable
+    internal class XtreamLiveStream : ILiveStream, IDisposable
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger _logger;
@@ -31,7 +31,14 @@ namespace Emby.Xtream.Plugin.Service
             DateOpened = DateTimeOffset.UtcNow;
         }
 
-        public int ConsumerCount { get; set; }
+        private int _consumerCount;
+
+        public int ConsumerCount
+        {
+            get => Volatile.Read(ref _consumerCount);
+            set => Volatile.Write(ref _consumerCount, Math.Max(0, value));
+        }
+
         public string OriginalStreamId { get; set; }
         public string TunerHostId { get; }
         public bool EnableStreamSharing => false;
@@ -71,6 +78,25 @@ namespace Emby.Xtream.Plugin.Service
             Dispose();
             return Task.CompletedTask;
         }
+
+        #if EMBY_4_10
+        public virtual void AddConsumer(string id)
+        {
+            Interlocked.Increment(ref _consumerCount);
+        }
+
+        public virtual void RemoveConsumer(string id)
+        {
+            while (true)
+            {
+                var current = Volatile.Read(ref _consumerCount);
+                if (current <= 0) return;
+
+                if (Interlocked.CompareExchange(ref _consumerCount, current - 1, current) == current)
+                    return;
+            }
+        }
+#endif
 
         // Reopen the HTTP connection to the upstream source. Called when a prior CopyToAsync
         // was cancelled mid-read, which aborts the underlying SSL connection and leaves _stream

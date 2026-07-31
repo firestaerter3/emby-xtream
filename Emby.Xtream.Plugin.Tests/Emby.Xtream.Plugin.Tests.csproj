@@ -1,13 +1,29 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Release_4_10'">
+    <DefineConstants>$(DefineConstants);EMBY_4_10</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Emby 4.9.x SDK (default Release config) -->
+  <ItemGroup Condition="'$(Configuration)' != 'Release_4_10'">
+    <Reference Include="MediaBrowser.Common" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_9/MediaBrowser.Common.dll" Private="true" />
+    <Reference Include="MediaBrowser.Controller" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_9/MediaBrowser.Controller.dll" Private="true" />
+    <Reference Include="MediaBrowser.Model" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_9/MediaBrowser.Model.dll" Private="true" />
+  </ItemGroup>
+
+  <!-- Emby 4.10.0.17+ SDK (Release_4_10 config) -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release_4_10'">
+    <Reference Include="MediaBrowser.Common" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_10/MediaBrowser.Common.dll" Private="true" />
+    <Reference Include="MediaBrowser.Controller" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_10/MediaBrowser.Controller.dll" Private="true" />
+    <Reference Include="MediaBrowser.Model" HintPath="$(MSBuildThisFileDirectory)../lib/emby4_10/MediaBrowser.Model.dll" Private="true" />
+  </ItemGroup>
+
   <ItemGroup>
-    <PackageReference Include="mediabrowser.server.core" Version="4.8.0.80" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.9.0" />
     <PackageReference Include="xunit" Version="2.7.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.7">
@@ -19,5 +35,4 @@
   <ItemGroup>
     <ProjectReference Include="..\Emby.Xtream.Plugin\Emby.Xtream.Plugin.csproj" />
   </ItemGroup>
-
 </Project>

@@ -20,11 +20,17 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Build plugin
+      - name: Build plugin (Emby 4.9.x)
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          cd Emby.Xtream.Plugin
-          dotnet publish -c Release -o out --no-self-contained -p:Version=$VERSION
+          dotnet publish Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj \
+            -c Release -o out --no-self-contained -p:Version=$VERSION
+
+      - name: Build plugin (Emby 4.10+)
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          dotnet publish Emby.Xtream.Plugin/Emby.Xtream.Plugin.csproj \
+            -c Release_4_10 -o out_4_10 --no-self-contained -p:Version=$VERSION
 
       - name: Generate release notes
         id: notes
@@ -43,14 +49,26 @@ jobs:
             git log "$RANGE" --no-merges --pretty=format:"- %s" | grep -v "Co-Authored-By"
             echo ""
             echo ""
+            echo ""
+            echo "## Downloads"
+            echo ""
+            echo "- **Emby 4.9.x** — \`Emby.Xtream.Plugin.dll\` (default for auto-update)"
+            echo "- **Emby 4.10+** — \`Emby.Xtream.Plugin-4.10.dll\` (for 4.10.0.17+ beta only)"
+            echo ""
             if [ -n "$PREV_TAG" ]; then
               echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${{ github.ref_name }}"
             fi
           } > release_notes.md
 
-      - name: Create draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll
-          body_path: release_notes.md
-          draft: true
+      - name: Create release
+        run: |
+          # Rename 4.10 DLL so both assets coexist in the release
+          cp out_4_10/Emby.Xtream.Plugin.dll out_4_10/Emby.Xtream.Plugin-4.10.dll
+          gh release create "$GITHUB_REF_NAME" \
+            out/Emby.Xtream.Plugin.dll \
+            out_4_10/Emby.Xtream.Plugin-4.10.dll \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release_notes.md \
+            --prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -608,7 +608,7 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 // Cleanup orphans
-                if (config.CleanupOrphans)
+                if (config.CleanupOrphans && _movieProgress.Failed == 0)
                 {
                     _movieProgress.Phase = "Cleaning up orphaned files";
                     var moviesRoot = Path.Combine(config.StrmLibraryPath, "Movies");
@@ -1122,7 +1122,7 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 // Cleanup orphans
-                if (config.CleanupOrphans)
+                if (config.CleanupOrphans && _seriesProgress.Failed == 0)
                 {
                     _seriesProgress.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");

@@ -105,7 +105,7 @@ namespace Emby.Xtream.Plugin
         // Sync settings
         public bool SmartSkipExisting { get; set; } = true;
         public int SyncParallelism { get; set; } = 3;
-        public bool CleanupOrphans { get; set; }
+        public bool CleanupOrphans { get; set; } = true;
 
         /// <summary>Max requests/second to the Xtream provider. 0 = disabled (no throttle).</summary>
         public int XtreamRequestsPerSecond { get; set; } = 0;

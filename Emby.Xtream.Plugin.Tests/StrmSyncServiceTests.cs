@@ -559,6 +559,17 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         // -----------------------------------------------------------------
+        // PluginConfiguration defaults
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public void CleanupOrphans_DefaultIsTrue()
+        {
+            var config = new PluginConfiguration();
+            Assert.True(config.CleanupOrphans);
+        }
+
+        // -----------------------------------------------------------------
         // NullLogger (private — used by CheckAndUpgradeNamingVersion tests)
         // -----------------------------------------------------------------
 
