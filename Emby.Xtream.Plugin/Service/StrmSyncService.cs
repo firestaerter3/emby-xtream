@@ -1370,11 +1370,15 @@ namespace Emby.Xtream.Plugin.Service
                 return false;
             }
 
-            var config = Plugin.Instance.Configuration;
-            _movieProgress = new SyncProgress { IsRunning = true, Phase = "Retrying failed items", Total = items.Count };
-
+            // Everything after the acquire must be inside the try. Plugin.Instance.Configuration
+            // can throw (ApplicationPaths may not be initialised yet), and a throw between the
+            // acquire and the try would hold the gate forever — every later movie sync would be
+            // refused until Emby restarts.
             try
             {
+                var config = Plugin.Instance.Configuration;
+                _movieProgress = new SyncProgress { IsRunning = true, Phase = "Retrying failed items", Total = items.Count };
+
                 var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
                 var categoryNames = new Dictionary<int, string>();
                 var folderMappings = FolderMappingParser.Parse(config.MovieFolderMappings);
