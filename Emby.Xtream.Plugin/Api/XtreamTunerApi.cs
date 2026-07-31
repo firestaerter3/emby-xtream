@@ -45,6 +45,18 @@ namespace Emby.Xtream.Plugin.Api
     {
     }
 
+    [Route("/XtreamTuner/Items/Vod", "GET", Summary = "Gets VOD movie titles for one category")]
+    public class GetVodItems : IReturn<List<ContentItemSummary>>
+    {
+        public int CategoryId { get; set; }
+    }
+
+    [Route("/XtreamTuner/Items/Series", "GET", Summary = "Gets series titles for one category")]
+    public class GetSeriesItems : IReturn<List<ContentItemSummary>>
+    {
+        public int CategoryId { get; set; }
+    }
+
     [Route("/XtreamTuner/Sync/Movies", "POST", Summary = "Triggers VOD movie STRM sync")]
     public class SyncMovies : IReturn<SyncResult>
     {
@@ -181,6 +193,16 @@ namespace Emby.Xtream.Plugin.Api
         public List<string> Directories { get; set; }
     }
 
+    /// <summary>
+    /// Minimal title projection for the per-item selection UI — a category can hold
+    /// thousands of titles, so only the ID and display name cross the wire.
+    /// </summary>
+    public class ContentItemSummary
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+    }
+
     public class InstallUpdateResult
     {
         public bool Success { get; set; }
@@ -244,6 +266,22 @@ namespace Emby.Xtream.Plugin.Api
 
     public class XtreamTunerApi : BaseApiService
     {
+        /// <summary>
+        /// Shared options for the per-item listing endpoints. Uses the tolerant converters
+        /// so a single off-type provider field can't blank an entire category listing (ADR-010).
+        /// </summary>
+        private static readonly System.Text.Json.JsonSerializerOptions ItemListJsonOptions =
+            new System.Text.Json.JsonSerializerOptions
+            {
+                NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
+                PropertyNameCaseInsensitive = true,
+                Converters =
+                {
+                    new Client.Models.TolerantStringConverter(),
+                    new Client.Models.TolerantNullableIntConverter(),
+                },
+            };
+
         public async Task<object> Get(GetEpgXml request)
         {
             var liveTvService = Plugin.Instance.LiveTvService;
@@ -395,6 +433,76 @@ namespace Emby.Xtream.Plugin.Api
             catch
             {
                 return new List<Category>();
+            }
+        }
+
+        public async Task<object> Get(GetVodItems request)
+        {
+            var config = Plugin.Instance?.Configuration;
+            if (config == null || string.IsNullOrEmpty(config.BaseUrl) ||
+                string.IsNullOrEmpty(config.Username) || string.IsNullOrEmpty(config.Password))
+            {
+                return new List<ContentItemSummary>();
+            }
+
+            var url = string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "{0}/player_api.php?username={1}&password={2}&action=get_vod_streams&category_id={3}",
+                config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password),
+                request.CategoryId);
+
+            try
+            {
+                using (var httpClient = Plugin.CreateHttpClient())
+                {
+                    var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
+                    var streams = System.Text.Json.JsonSerializer.Deserialize<List<VodStreamInfo>>(json, ItemListJsonOptions)
+                        ?? new List<VodStreamInfo>();
+
+                    return streams
+                        .Select(s => new ContentItemSummary { Id = s.StreamId, Name = s.Name })
+                        .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                }
+            }
+            catch
+            {
+                return new List<ContentItemSummary>();
+            }
+        }
+
+        public async Task<object> Get(GetSeriesItems request)
+        {
+            var config = Plugin.Instance?.Configuration;
+            if (config == null || string.IsNullOrEmpty(config.BaseUrl) ||
+                string.IsNullOrEmpty(config.Username) || string.IsNullOrEmpty(config.Password))
+            {
+                return new List<ContentItemSummary>();
+            }
+
+            var url = string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "{0}/player_api.php?username={1}&password={2}&action=get_series&category_id={3}",
+                config.BaseUrl, Uri.EscapeDataString(config.Username), Uri.EscapeDataString(config.Password),
+                request.CategoryId);
+
+            try
+            {
+                using (var httpClient = Plugin.CreateHttpClient())
+                {
+                    var json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
+                    var series = System.Text.Json.JsonSerializer.Deserialize<List<SeriesInfo>>(json, ItemListJsonOptions)
+                        ?? new List<SeriesInfo>();
+
+                    return series
+                        .Select(s => new ContentItemSummary { Id = s.SeriesId, Name = s.Name })
+                        .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                }
+            }
+            catch
+            {
+                return new List<ContentItemSummary>();
             }
         }
 

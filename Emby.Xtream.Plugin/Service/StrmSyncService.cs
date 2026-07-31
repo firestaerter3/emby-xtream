@@ -322,7 +322,34 @@ namespace Emby.Xtream.Plugin.Service
 
                 // Fetch streams for selected categories
                 _movieProgress.Phase = "Fetching VOD streams";
-                var allStreams = await FetchVodStreamsAsync(config.SelectedVodCategoryIds, config, cancellationToken).ConfigureAwait(false);
+                var fetchedStreams = await FetchVodStreamsAsync(config.SelectedVodCategoryIds, config, cancellationToken).ConfigureAwait(false);
+
+                // Per-item exclusions (issue #57): split the catalogue before anything else reads it.
+                // The excluded half is kept so its on-disk folders can be removed below.
+                var excludedVodSet = ContentExclusionFilter.BuildSet(config.ExcludedVodStreamIds);
+                var excludedMovies = new List<Tuple<string, int?>>();
+                var allStreams = fetchedStreams;
+                if (excludedVodSet.Count > 0)
+                {
+                    allStreams = new List<VodStreamInfo>();
+                    foreach (var s in fetchedStreams)
+                    {
+                        if (ContentExclusionFilter.IsExcluded(excludedVodSet, s.StreamId))
+                        {
+                            var excludedName = config.EnableContentNameCleaning
+                                ? ContentNameCleaner.CleanContentName(s.Name, config.ContentRemoveTerms)
+                                : s.Name;
+                            excludedMovies.Add(Tuple.Create(excludedName, s.CategoryId));
+                        }
+                        else
+                        {
+                            allStreams.Add(s);
+                        }
+                    }
+
+                    _logger.Info("Per-item exclusions: skipping {0} of {1} movies",
+                        excludedMovies.Count, fetchedStreams.Count);
+                }
 
                 // Delta sync: split into new (not yet synced) and existing
                 var lastMovieTs = config.LastMovieSyncTimestamp;
@@ -569,18 +596,32 @@ namespace Emby.Xtream.Plugin.Service
 
                 await Task.WhenAll(tasks).ConfigureAwait(false);
 
+                // Remove folders for explicitly excluded movies. Deliberately before orphan
+                // cleanup and independent of it — see RemoveExcludedContent remarks.
+                // Note both passes accumulate into Deleted, which therefore counts folders
+                // (exclusions) and files (orphans) together. The dashboard shows one number.
+                if (excludedMovies.Count > 0)
+                {
+                    _movieProgress.Phase = "Removing excluded movies";
+                    _movieProgress.Deleted += RemoveExcludedContent(
+                        config, excludedMovies, config.MovieFolderMode, categoryNames, folderMappings, "Movies");
+                }
+
                 // Cleanup orphans
                 if (config.CleanupOrphans && _movieProgress.Failed == 0)
                 {
                     _movieProgress.Phase = "Cleaning up orphaned files";
                     var moviesRoot = Path.Combine(config.StrmLibraryPath, "Movies");
-                    _movieProgress.Deleted = CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold);
+                    _movieProgress.Deleted += CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold);
                 }
 
-                // Persist the highest Added timestamp seen so next sync can delta from here
-                if (allStreams.Count > 0)
+                // Persist the highest Added timestamp seen so next sync can delta from here.
+                // Computed over the UNFILTERED catalogue: if the newest movie happens to be
+                // excluded, the watermark must still advance past it or every later sync
+                // re-processes everything after it.
+                if (fetchedStreams.Count > 0)
                 {
-                    var maxAdded = allStreams.Max(m => m.Added);
+                    var maxAdded = fetchedStreams.Max(m => m.Added);
                     if (maxAdded > config.LastMovieSyncTimestamp)
                     {
                         config.LastMovieSyncTimestamp = maxAdded;
@@ -670,7 +711,35 @@ namespace Emby.Xtream.Plugin.Service
                     : null;
 
                 _seriesProgress.Phase = "Fetching series list";
-                var allSeries = await FetchSeriesListAsync(config.SelectedSeriesCategoryIds, config, cancellationToken).ConfigureAwait(false);
+                var fetchedSeries = await FetchSeriesListAsync(config.SelectedSeriesCategoryIds, config, cancellationToken).ConfigureAwait(false);
+
+                // Per-item exclusions (issue #57) — see the matching block in SyncMoviesAsync.
+                var excludedSeriesSet = ContentExclusionFilter.BuildSet(config.ExcludedSeriesIds);
+                var excludedSeriesItems = new List<Tuple<string, int?>>();
+                var excludedSeriesRaw = new List<SeriesInfo>();
+                var allSeries = fetchedSeries;
+                if (excludedSeriesSet.Count > 0)
+                {
+                    allSeries = new List<SeriesInfo>();
+                    foreach (var s in fetchedSeries)
+                    {
+                        if (ContentExclusionFilter.IsExcluded(excludedSeriesSet, s.SeriesId))
+                        {
+                            var excludedName = config.EnableContentNameCleaning
+                                ? ContentNameCleaner.CleanContentName(s.Name, config.ContentRemoveTerms)
+                                : s.Name;
+                            excludedSeriesItems.Add(Tuple.Create(excludedName, s.CategoryId));
+                            excludedSeriesRaw.Add(s);
+                        }
+                        else
+                        {
+                            allSeries.Add(s);
+                        }
+                    }
+
+                    _logger.Info("Per-item exclusions: skipping {0} of {1} series",
+                        excludedSeriesItems.Count, fetchedSeries.Count);
+                }
 
                 // Delta sync: split into changed and unchanged using LastModified timestamp
                 var lastSeriesTs = config.LastSeriesSyncTimestamp;
@@ -689,6 +758,18 @@ namespace Emby.Xtream.Plugin.Service
                 config.LastKnownEnableSeriesIdFolderNaming = config.EnableSeriesIdFolderNaming;
                 config.LastKnownEnableSeriesMetadataLookup = config.EnableSeriesMetadataLookup;
                 saveConfig?.Invoke();
+
+                // Excluded series never enter the loop below, so fold their timestamps in here —
+                // otherwise the watermark stalls behind an excluded-but-recent title.
+                foreach (var s in excludedSeriesRaw)
+                {
+                    long excludedLm;
+                    if (long.TryParse(s.LastModified, NumberStyles.None, CultureInfo.InvariantCulture, out excludedLm)
+                        && excludedLm > maxSeriesTs)
+                    {
+                        maxSeriesTs = excludedLm;
+                    }
+                }
 
                 _seriesProgress.Total = allSeries.Count;
                 _seriesProgress.Phase = "Writing STRM files";
@@ -1029,13 +1110,24 @@ namespace Emby.Xtream.Plugin.Service
 
                 await Task.WhenAll(tasks).ConfigureAwait(false);
 
+                // Remove folders for explicitly excluded series. Deliberately before orphan
+                // cleanup and independent of it — see RemoveExcludedContent remarks.
+                // Note both passes accumulate into Deleted, which therefore counts folders
+                // (exclusions) and files (orphans) together. The dashboard shows one number.
+                if (excludedSeriesItems.Count > 0)
+                {
+                    _seriesProgress.Phase = "Removing excluded series";
+                    _seriesProgress.Deleted += RemoveExcludedContent(
+                        config, excludedSeriesItems, config.SeriesFolderMode, categoryNames, folderMappings, "Shows");
+                }
+
                 // Cleanup orphans
                 if (config.CleanupOrphans && _seriesProgress.Failed == 0)
                 {
                     _seriesProgress.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");
                     var deletedEpisodes = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold);
-                    _seriesProgress.Deleted = deletedEpisodes;
+                    _seriesProgress.Deleted += deletedEpisodes;
                     _episodeProgress.Deleted = deletedEpisodes;
                 }
 
@@ -1677,6 +1769,105 @@ namespace Emby.Xtream.Plugin.Service
 
             var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
             return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
+        }
+
+        /// <summary>
+        /// Deletes the on-disk folders of items the user has explicitly excluded.
+        /// </summary>
+        /// <remarks>
+        /// Runs independently of <see cref="PluginConfiguration.CleanupOrphans"/> and ignores
+        /// <see cref="PluginConfiguration.OrphanSafetyThreshold"/>. That threshold exists to survive
+        /// a provider returning a truncated catalogue; an exclusion is a deliberate user action, so
+        /// suppressing the delete would just look like the filter doing nothing.
+        ///
+        /// Folder matching strips any metadata-ID suffix, so an excluded title is found whether it
+        /// was written as "Some Movie", "Some Movie [tmdbid=123]" or "Some Show [tvdbid=456]".
+        /// </remarks>
+        /// <param name="config">Active plugin configuration (supplies the library root).</param>
+        /// <param name="excludedItems">Cleaned display name + category ID for each excluded item.</param>
+        /// <param name="folderMode">"single", "multiple" or "custom".</param>
+        /// <param name="categoryNames">Category ID → name, used by "multiple" mode.</param>
+        /// <param name="folderMappings">Category ID → folder, used by "custom" mode.</param>
+        /// <param name="rootFolder">"Movies" or "Shows".</param>
+        /// <returns>The number of folders deleted.</returns>
+        private int RemoveExcludedContent(
+            PluginConfiguration config,
+            List<Tuple<string, int?>> excludedItems,
+            string folderMode,
+            Dictionary<int, string> categoryNames,
+            Dictionary<int, string> folderMappings,
+            string rootFolder)
+        {
+            if (excludedItems == null || excludedItems.Count == 0)
+            {
+                return 0;
+            }
+
+            var removed = 0;
+
+            // subFolder → { folderNameWithoutIdSuffix → fullPath }. One readdir per subfolder.
+            var dirIndexCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var item in excludedItems)
+            {
+                var sanitized = SanitizeFileName(item.Item1);
+                if (string.IsNullOrWhiteSpace(sanitized))
+                {
+                    continue;
+                }
+
+                var subFolder = BuildContentFolderPath(
+                    folderMode, item.Item2, categoryNames, folderMappings, rootFolder);
+                if (subFolder == null)
+                {
+                    continue;
+                }
+
+                Dictionary<string, string> dirIndex;
+                if (!dirIndexCache.TryGetValue(subFolder, out dirIndex))
+                {
+                    dirIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    var fullPath = Path.Combine(config.StrmLibraryPath, subFolder);
+                    if (Directory.Exists(fullPath))
+                    {
+                        foreach (var dir in Directory.GetDirectories(fullPath))
+                        {
+                            var stripped = StripFolderIdSuffix(Path.GetFileName(dir));
+                            if (!string.IsNullOrEmpty(stripped) && !dirIndex.ContainsKey(stripped))
+                            {
+                                dirIndex[stripped] = dir;
+                            }
+                        }
+                    }
+
+                    dirIndexCache[subFolder] = dirIndex;
+                }
+
+                string existingDir;
+                if (!dirIndex.TryGetValue(sanitized, out existingDir))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    Directory.Delete(existingDir, true);
+                    dirIndex.Remove(sanitized);
+                    removed++;
+                    _logger.Info("Removed excluded item folder: {0}", existingDir);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn("Failed to remove excluded item folder '{0}': {1}", existingDir, ex.Message);
+                }
+            }
+
+            if (removed > 0)
+            {
+                _logger.Info("Removed {0} folder(s) for explicitly excluded items under {1}", removed, rootFolder);
+            }
+
+            return removed;
         }
 
         private int CleanupOrphans(string rootPath, HashSet<string> validPaths, double safetyThreshold)

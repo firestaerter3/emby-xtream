@@ -57,6 +57,9 @@ tests/e2e/playwright-report/
 .DS_Store
 Thumbs.db
 
+# gstack tooling state
+.gstack/
+
 # Internal planning / spec drafts — kept local, not published
 docs/plans/
 docs/superpowers/

@@ -58,11 +58,24 @@ namespace Emby.Xtream.Plugin
         public string MovieFolderMode { get; set; } = "single";
         public string MovieFolderMappings { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Xtream stream IDs the user has explicitly excluded from movie sync.
+        /// Excluded items are never written, and their existing folder is deleted
+        /// on the next sync (independent of <see cref="CleanupOrphans"/>).
+        /// </summary>
+        public int[] ExcludedVodStreamIds { get; set; } = new int[0];
+
         // Series / TV Shows
         public bool SyncSeries { get; set; }
         public int[] SelectedSeriesCategoryIds { get; set; } = new int[0];
         public string SeriesFolderMode { get; set; } = "single";
         public string SeriesFolderMappings { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Xtream series IDs the user has explicitly excluded from series sync.
+        /// Granularity is per-series, not per-episode.
+        /// </summary>
+        public int[] ExcludedSeriesIds { get; set; } = new int[0];
 
         // Content name cleaning
         public bool EnableContentNameCleaning { get; set; }
