@@ -1428,7 +1428,7 @@ namespace Emby.Xtream.Plugin.Api
             foreach (var line in lines)
             {
                 var s = LogSanitizer.SanitizeLine(line,
-                    config.Username, config.Password,
+                    Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty),
                     config.DispatcharrUser, config.DispatcharrPass);
                 sanitized.AppendLine(s);
             }
