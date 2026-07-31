@@ -1851,10 +1851,39 @@ namespace Emby.Xtream.Plugin.Service
 
                 try
                 {
-                    Directory.Delete(existingDir, true);
+                    // Ownership check: a folder holding no STRM was not written by this plugin.
+                    // Matching is by title alone, so without this a user's own "Ben-Hur" folder
+                    // would be destroyed by excluding the provider's "Ben-Hur".
+                    var strmFiles = Directory.GetFiles(existingDir, "*.strm", SearchOption.AllDirectories);
+                    if (strmFiles.Length == 0)
+                    {
+                        _logger.Debug(
+                            "Skipping '{0}' for excluded item '{1}': no STRM files, so this folder isn't ours",
+                            existingDir, sanitized);
+                        continue;
+                    }
+
+                    // Delete only what we wrote, then prune whatever that emptied. Anything the
+                    // user put alongside it survives, and so does the folder if it still holds
+                    // content. Same contract as CleanupOrphans.
+                    foreach (var file in Directory.GetFiles(existingDir, "*.*", SearchOption.AllDirectories))
+                    {
+                        var ext = Path.GetExtension(file);
+                        if (string.Equals(ext, ".strm", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(ext, ".nfo", StringComparison.OrdinalIgnoreCase))
+                        {
+                            File.Delete(file);
+                        }
+                    }
+
+                    var folderGone = TryPruneEmptyTree(existingDir);
                     dirIndex.Remove(sanitized);
                     removed++;
-                    _logger.Info("Removed excluded item folder: {0}", existingDir);
+                    _logger.Info(
+                        folderGone
+                            ? "Removed excluded item folder: {0}"
+                            : "Removed plugin files for excluded item, folder kept (still has other content): {0}",
+                        existingDir);
                 }
                 catch (Exception ex)
                 {
@@ -1867,7 +1896,35 @@ namespace Emby.Xtream.Plugin.Service
                 _logger.Info("Removed {0} folder(s) for explicitly excluded items under {1}", removed, rootFolder);
             }
 
+
             return removed;
+        }
+
+        /// <summary>
+        /// Deletes <paramref name="dir"/> and any subdirectory of it that is empty, deepest first.
+        /// Stops at the first level that still holds something.
+        /// </summary>
+        /// <param name="dir">The directory to prune.</param>
+        /// <returns>True if <paramref name="dir"/> itself was removed.</returns>
+        private static bool TryPruneEmptyTree(string dir)
+        {
+            if (!Directory.Exists(dir))
+            {
+                return true;
+            }
+
+            foreach (var sub in Directory.GetDirectories(dir))
+            {
+                TryPruneEmptyTree(sub);
+            }
+
+            if (Directory.GetFileSystemEntries(dir).Length == 0)
+            {
+                Directory.Delete(dir);
+                return true;
+            }
+
+            return false;
         }
 
         private int CleanupOrphans(string rootPath, HashSet<string> validPaths, double safetyThreshold)

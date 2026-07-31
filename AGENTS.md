@@ -80,7 +80,9 @@ Xtream providers type the same field differently across (and within) servers: a 
 
 ### Per-item exclusions delete folders directly, not via orphan cleanup
 
-`ExcludedVodStreamIds` / `ExcludedSeriesIds` remove an item's folder in a targeted pass (`StrmSyncService.RemoveExcludedContent`) that ignores both `CleanupOrphans` and `OrphanSafetyThreshold`. That threshold guards against a provider returning a truncated catalogue; an exclusion is a deliberate user action, so suppressing the delete would just read as the filter doing nothing. Folder matching strips `[tmdbid=…]`/`[tvdbid=…]` suffixes, so a title is found regardless of the metadata-ID naming settings in force when it was written.
+`ExcludedVodStreamIds` / `ExcludedSeriesIds` remove an item's files in a targeted pass (`StrmSyncService.RemoveExcludedContent`) that ignores both `CleanupOrphans` and `OrphanSafetyThreshold`. That threshold guards against a provider returning a truncated catalogue; an exclusion is a deliberate user action, so suppressing the delete would just read as the filter doing nothing. Folder matching strips `[tmdbid=…]`/`[tvdbid=…]` suffixes, so a title is found regardless of the metadata-ID naming settings in force when it was written.
+
+**Never recursively delete a matched folder.** Matching is by title only, so a match is not proof of ownership. The pass skips any matched folder containing no `.strm` (it wasn't written by us — a user's own `Ben-Hur` must survive excluding the provider's `Ben-Hur`), deletes only `.strm`/`.nfo`, then prunes what that emptied. Same contract as `CleanupOrphans`. The first implementation used `Directory.Delete(dir, recursive: true)` and could destroy user data.
 
 Both sync methods compute their delta watermark from the **unfiltered** catalogue — if the newest title happens to be excluded, the watermark must still advance past it or every later sync re-processes everything after it. Re-ticking a title needs no watermark reset: both smart-skip paths already guard on the folder existing. See [ADR-012](docs/decisions/012-per-item-content-exclusion.md).
 
