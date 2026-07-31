@@ -1178,6 +1178,7 @@ function updateEpgVisibility(view) {
                 if (vodCats && vodCats.length > 0) {
                     vodLoaded = true;
                     instance.loadedVodCategories = vodCats;
+                    resetContentItemState(instance, 'vod');
                     renderCategoryList(view, '.vodCategoriesList', vodCats, 'vodCategoryCheckbox', instance.selectedVodCategoryIds, 'vod');
                     view.querySelector('.btnSelectAllVodCategories').disabled = false;
                     view.querySelector('.btnDeselectAllVodCategories').disabled = false;
@@ -1205,6 +1206,7 @@ function updateEpgVisibility(view) {
                 if (seriesCats && seriesCats.length > 0) {
                     seriesLoaded = true;
                     instance.loadedSeriesCategories = seriesCats;
+                    resetContentItemState(instance, 'series');
                     renderCategoryList(view, '.seriesCategoriesList', seriesCats, 'seriesCategoryCheckbox', instance.selectedSeriesCategoryIds, 'series');
                     view.querySelector('.btnSelectAllSeriesCategories').disabled = false;
                     view.querySelector('.btnDeselectAllSeriesCategories').disabled = false;
@@ -1271,6 +1273,15 @@ function updateEpgVisibility(view) {
     }
 
     // ---- Per-title selection (issue #57) ----
+
+    // Redrawing the category list replaces every panel with a fresh collapsed one, so the
+    // expansion map must be dropped alongside it — otherwise the first click on a toggle
+    // reads as "collapse" against an already-hidden panel and appears to do nothing.
+    // The item cache goes too: a category refresh is an explicit ask for current data.
+    function resetContentItemState(instance, contentType) {
+        instance.expandedContentCategories[contentType] = {};
+        instance.contentItemsByCategory[contentType] = {};
+    }
 
     function toggleContentItemPanel(instance, contentType, categoryId, btn) {
         var view = instance.view;
@@ -1495,6 +1506,7 @@ function updateEpgVisibility(view) {
 
             if (statusEl) statusEl.textContent = '';
 
+            resetContentItemState(instance, 'vod');
             renderCategoryList(view, '.vodCategoriesList', categories, 'vodCategoryCheckbox', instance.selectedVodCategoryIds, 'vod');
 
             view.querySelector('.btnSelectAllVodCategories').disabled = false;
@@ -1607,6 +1619,7 @@ function updateEpgVisibility(view) {
 
             if (statusEl) statusEl.textContent = '';
 
+            resetContentItemState(instance, 'series');
             renderCategoryList(view, '.seriesCategoriesList', categories, 'seriesCategoryCheckbox', instance.selectedSeriesCategoryIds, 'series');
 
             view.querySelector('.btnSelectAllSeriesCategories').disabled = false;
