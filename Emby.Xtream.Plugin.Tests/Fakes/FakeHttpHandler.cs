@@ -20,6 +20,16 @@ namespace Emby.Xtream.Plugin.Tests.Fakes
 
         public List<string> ReceivedUrls { get; } = new List<string>();
 
+        /// <summary>
+        /// Optional gate. When set, every request waits on it before responding.
+        /// </summary>
+        /// <remarks>
+        /// Responses are otherwise produced synchronously, so a caller runs to completion before it
+        /// ever returns its Task. That makes it impossible to hold two calls genuinely in flight,
+        /// which is exactly what a concurrency test needs. Complete this to let requests through.
+        /// </remarks>
+        public TaskCompletionSource<bool> Gate { get; set; }
+
         /// <summary>Register a single response for URLs containing <paramref name="urlSubstring"/>.</summary>
         public void RespondWith(string urlSubstring, string body, HttpStatusCode status = HttpStatusCode.OK)
         {
@@ -37,21 +47,26 @@ namespace Emby.Xtream.Plugin.Tests.Fakes
             _rules.Add((urlSubstring, q));
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            var gate = Gate;
+            if (gate != null)
+            {
+                await gate.Task.ConfigureAwait(false);
+            }
+
             var url = request.RequestUri?.ToString() ?? string.Empty;
-            ReceivedUrls.Add(url);
+            lock (ReceivedUrls) { ReceivedUrls.Add(url); }
 
             foreach (var (urlSubstring, queue) in _rules)
             {
                 if (url.Contains(urlSubstring) && queue.Count > 0)
                 {
                     var (body, status) = queue.Dequeue();
-                    var response = new HttpResponseMessage(status)
+                    return new HttpResponseMessage(status)
                     {
                         Content = new StringContent(body, Encoding.UTF8, "application/json")
                     };
-                    return Task.FromResult(response);
                 }
             }
 

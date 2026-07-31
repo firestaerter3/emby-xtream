@@ -528,10 +528,20 @@ namespace Emby.Xtream.Plugin.Api
 
             try
             {
-                await syncService.SyncMoviesAsync(
+                var ran = await syncService.SyncMoviesAsync(
                     config,
                     CancellationToken.None,
                     () => Plugin.Instance.SaveConfiguration()).ConfigureAwait(false);
+
+                // The IsRunning check above is a fast path; the service holds the real gate and is
+                // the only thing that can answer this without a race.
+                if (!ran)
+                {
+                    result.Success = false;
+                    result.Message = "Movie sync is already running.";
+                    return result;
+                }
+
                 var progress = syncService.MovieProgress;
                 if (!string.IsNullOrEmpty(progress.AbortReason))
                 {
@@ -583,10 +593,19 @@ namespace Emby.Xtream.Plugin.Api
 
             try
             {
-                await syncService.SyncSeriesAsync(
+                var ran = await syncService.SyncSeriesAsync(
                     config,
                     CancellationToken.None,
                     () => Plugin.Instance.SaveConfiguration()).ConfigureAwait(false);
+
+                // See Post(SyncMovies): the service gate is authoritative, the check above is not.
+                if (!ran)
+                {
+                    result.Success = false;
+                    result.Message = "Series sync is already running.";
+                    return result;
+                }
+
                 var progress = syncService.SeriesProgress;
                 if (!string.IsNullOrEmpty(progress.AbortReason))
                 {
