@@ -56,3 +56,4 @@ tests/e2e/playwright-report/
 # OS files
 .DS_Store
 Thumbs.db
+.gstack/
