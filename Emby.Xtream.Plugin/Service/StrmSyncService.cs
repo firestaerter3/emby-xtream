@@ -622,7 +622,7 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     _movieProgress.Phase = "Cleaning up orphaned files";
                     var moviesRoot = Path.Combine(config.StrmLibraryPath, "Movies");
-                    _movieProgress.Deleted += CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold);
+                    _movieProgress.Deleted += CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold, config);
                 }
 
                 // Persist the highest Added timestamp seen so next sync can delta from here.
@@ -1170,7 +1170,7 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     _seriesProgress.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");
-                    var deletedEpisodes = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold);
+                    var deletedEpisodes = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold, config);
                     _seriesProgress.Deleted += deletedEpisodes;
                     _episodeProgress.Deleted = deletedEpisodes;
                 }
@@ -1956,32 +1956,23 @@ namespace Emby.Xtream.Plugin.Service
 
                 try
                 {
-                    // Ownership check: a folder holding no STRM was not written by this plugin.
-                    // Matching is by title alone, so without this a user's own "Ben-Hur" folder
-                    // would be destroyed by excluding the provider's "Ben-Hur".
-                    var strmFiles = Directory.GetFiles(existingDir, "*.strm", SearchOption.AllDirectories);
-                    if (strmFiles.Length == 0)
+                    // Delete only the files this plugin actually wrote, verified by content, then
+                    // prune whatever that emptied. Matching is by title alone, so a match is not
+                    // proof of ownership: without this a user's own "Ben-Hur" folder would be
+                    // destroyed by excluding the provider's "Ben-Hur", and a hand-written .nfo or a
+                    // trailer.strm sitting beside our output would go with it. See ADR-014.
+                    bool folderGone;
+                    var deletedFiles = StrmOwnership.DeleteOwnedFiles(
+                        existingDir, config.BaseUrl, config.DispatcharrUrl, out folderGone);
+
+                    if (deletedFiles == 0)
                     {
                         _logger.Debug(
-                            "Skipping '{0}' for excluded item '{1}': no STRM files, so this folder isn't ours",
+                            "Skipping '{0}' for excluded item '{1}': nothing in it was written by this plugin",
                             existingDir, sanitized);
                         continue;
                     }
 
-                    // Delete only what we wrote, then prune whatever that emptied. Anything the
-                    // user put alongside it survives, and so does the folder if it still holds
-                    // content. Same contract as CleanupOrphans.
-                    foreach (var file in Directory.GetFiles(existingDir, "*.*", SearchOption.AllDirectories))
-                    {
-                        var ext = Path.GetExtension(file);
-                        if (string.Equals(ext, ".strm", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(ext, ".nfo", StringComparison.OrdinalIgnoreCase))
-                        {
-                            File.Delete(file);
-                        }
-                    }
-
-                    var folderGone = TryPruneEmptyTree(existingDir);
                     dirIndex.Remove(sanitized);
                     removed++;
                     _logger.Info(
@@ -2005,34 +1996,9 @@ namespace Emby.Xtream.Plugin.Service
             return removed;
         }
 
-        /// <summary>
-        /// Deletes <paramref name="dir"/> and any subdirectory of it that is empty, deepest first.
-        /// Stops at the first level that still holds something.
-        /// </summary>
-        /// <param name="dir">The directory to prune.</param>
-        /// <returns>True if <paramref name="dir"/> itself was removed.</returns>
-        private static bool TryPruneEmptyTree(string dir)
-        {
-            if (!Directory.Exists(dir))
-            {
-                return true;
-            }
 
-            foreach (var sub in Directory.GetDirectories(dir))
-            {
-                TryPruneEmptyTree(sub);
-            }
-
-            if (Directory.GetFileSystemEntries(dir).Length == 0)
-            {
-                Directory.Delete(dir);
-                return true;
-            }
-
-            return false;
-        }
-
-        private int CleanupOrphans(string rootPath, HashSet<string> validPaths, double safetyThreshold)
+        private int CleanupOrphans(
+            string rootPath, HashSet<string> validPaths, double safetyThreshold, PluginConfiguration config)
         {
             if (!Directory.Exists(rootPath))
             {
@@ -2040,12 +2006,11 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             var existingStrms = Directory.GetFiles(rootPath, "*.strm", SearchOption.AllDirectories);
-            var orphanCount = existingStrms.Count(s => !validPaths.Contains(s));
 
             // Nothing was written or preserved this run, but files exist on disk. That is a
             // provider returning an empty catalogue, not the user deleting their whole library.
             // The ratio guard below cannot catch this at small N (it only applies above 10 files),
-            // so refuse outright rather than emptying the library.
+            // so refuse outright rather than emptying the library. See ADR-013.
             if (validPaths.Count == 0 && existingStrms.Length > 0)
             {
                 _logger.Warn(
@@ -2054,43 +2019,62 @@ namespace Emby.Xtream.Plugin.Service
                 return 0;
             }
 
-            if (safetyThreshold > 0 && existingStrms.Length > 10 && orphanCount > 0)
+            // Being a .strm under our library root is not proof we wrote it. Verify ownership
+            // before considering anything for deletion — a user's own STRM that the provider
+            // never listed would otherwise look exactly like an orphan. Only orphan candidates
+            // are read, so the cost stays proportional to deletions, not to library size.
+            var orphans = existingStrms
+                .Where(s => !validPaths.Contains(s))
+                .Where(s => StrmOwnership.IsOwnedStrm(s, config.BaseUrl, config.DispatcharrUrl))
+                .ToList();
+
+            var foreignCount = existingStrms.Length - validPaths.Count - orphans.Count;
+            if (foreignCount > 0)
             {
-                double ratio = (double)orphanCount / existingStrms.Length;
+                _logger.Info(
+                    "Orphan cleanup: leaving {0} STRM file(s) under {1} that this plugin did not write",
+                    foreignCount, rootPath);
+            }
+
+            // Ratio is taken over the files we could actually have written (what we wrote or kept,
+            // plus the orphans we own). Counting foreign files in the denominator would dilute the
+            // ratio and make the guard fire less often than intended.
+            var ownedTotal = validPaths.Count + orphans.Count;
+            if (safetyThreshold > 0 && ownedTotal > 10 && orphans.Count > 0)
+            {
+                double ratio = (double)orphans.Count / ownedTotal;
                 if (ratio > safetyThreshold)
                 {
                     _logger.Warn(
                         "Orphan cleanup skipped: {0}/{1} ({2:P0}) exceeds safety threshold {3:P0} — possible provider issue",
-                        orphanCount, existingStrms.Length, ratio, safetyThreshold);
+                        orphans.Count, ownedTotal, ratio, safetyThreshold);
                     return 0;
                 }
             }
+
             var removed = 0;
 
-            foreach (var strmFile in existingStrms)
+            foreach (var strmFile in orphans)
             {
-                if (!validPaths.Contains(strmFile))
+                try
                 {
-                    try
-                    {
-                        File.Delete(strmFile);
-                        removed++;
+                    File.Delete(strmFile);
+                    removed++;
 
-                        // Remove empty parent directories
-                        var dir = Path.GetDirectoryName(strmFile);
-                        while (!string.IsNullOrEmpty(dir) &&
-                               !string.Equals(dir, rootPath, StringComparison.OrdinalIgnoreCase) &&
-                               Directory.Exists(dir) &&
-                               Directory.GetFileSystemEntries(dir).Length == 0)
-                        {
-                            Directory.Delete(dir);
-                            dir = Path.GetDirectoryName(dir);
-                        }
-                    }
-                    catch (Exception ex)
+                    // Remove empty parent directories
+                    var dir = Path.GetDirectoryName(strmFile);
+                    while (!string.IsNullOrEmpty(dir) &&
+                           !string.Equals(dir, rootPath, StringComparison.OrdinalIgnoreCase) &&
+                           Directory.Exists(dir) &&
+                           Directory.GetFileSystemEntries(dir).Length == 0)
                     {
-                        _logger.Debug("Failed to cleanup orphan '{0}': {1}", strmFile, ex.Message);
+                        Directory.Delete(dir);
+                        dir = Path.GetDirectoryName(dir);
                     }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug("Failed to cleanup orphan '{0}': {1}", strmFile, ex.Message);
                 }
             }
 

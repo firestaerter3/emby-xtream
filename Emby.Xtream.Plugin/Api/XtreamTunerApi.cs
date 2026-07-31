@@ -787,14 +787,39 @@ namespace Emby.Xtream.Plugin.Api
                     return result;
                 }
 
+                // Clear only what this plugin wrote. The library root can be shared with content
+                // the user manages themselves, and a recursive delete of the whole root took that
+                // with it — the same class of data loss as BUG-028, reached through a button
+                // instead of a sync. See ADR-014.
                 var dirs = Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly);
-                result.DeletedFolders = dirs.Length;
+                var removedFolders = 0;
+                var removedFiles = 0;
+                var keptFolders = 0;
 
-                Directory.Delete(root, true);
-                Directory.CreateDirectory(root);
+                foreach (var dir in dirs)
+                {
+                    bool folderRemoved;
+                    var deleted = Emby.Xtream.Plugin.Service.StrmOwnership.DeleteOwnedFiles(
+                        dir, config.BaseUrl, config.DispatcharrUrl, out folderRemoved);
 
+                    removedFiles += deleted;
+                    if (folderRemoved)
+                    {
+                        removedFolders++;
+                    }
+                    else
+                    {
+                        keptFolders++;
+                    }
+                }
+
+                result.DeletedFolders = removedFolders;
                 result.Success = true;
-                result.Message = string.Format("Deleted {0} folders from {1}.", dirs.Length, folderName);
+                result.Message = keptFolders > 0
+                    ? string.Format(
+                        "Deleted {0} folders ({1} files) from {2}. Kept {3} folder(s) holding content this plugin did not write.",
+                        removedFolders, removedFiles, folderName, keptFolders)
+                    : string.Format("Deleted {0} folders ({1} files) from {2}.", removedFolders, removedFiles, folderName);
             }
             catch (Exception ex)
             {
