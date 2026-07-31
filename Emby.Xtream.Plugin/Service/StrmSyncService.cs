@@ -127,6 +127,14 @@ namespace Emby.Xtream.Plugin.Service
         private SyncProgress _seriesProgress = new SyncProgress();
         private SyncProgress _episodeProgress = new SyncProgress();
 
+        // Single-flight gates. Each sync replaces its progress object wholesale and shares a
+        // written-path set, so two overlapping runs of the same kind corrupt each other's state.
+        // Movies and series are gated separately because they touch different roots and are
+        // deliberately runnable at the same time. RetryFailedAsync takes the movie gate: it writes
+        // movie files and reuses _movieProgress.
+        private readonly SemaphoreSlim _movieSyncGate = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim _seriesSyncGate = new SemaphoreSlim(1, 1);
+
         private static void ReportTaskProgress(SyncProgress syncProgress, IProgress<double> taskProgress)
         {
             if (taskProgress == null) return;
@@ -279,7 +287,39 @@ namespace Emby.Xtream.Plugin.Service
             return true;
         }
 
-        public async Task SyncMoviesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null)
+        /// <summary>
+        /// Syncs movie STRM files. At most one movie sync runs at a time.
+        /// </summary>
+        /// <returns>
+        /// False when a movie sync was already in progress and this request was ignored.
+        /// True when this call ran (check <see cref="SyncProgress.AbortReason"/> for a run that
+        /// started and then bailed on configuration).
+        /// </returns>
+        public async Task<bool> SyncMoviesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null)
+        {
+            // Single-flight gate, held for the whole operation. Callers check IsRunning first, but
+            // that is a fast path, not a lock: between the check and the assignment below, a second
+            // request or the scheduled task can pass it too. Two runs then share writtenPaths and
+            // the progress object, and whichever finishes first clears IsRunning while the other is
+            // still writing — admitting a third run mid-cleanup.
+            if (!await _movieSyncGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            {
+                _logger.Warn("Movie sync requested while one is already running — ignoring the duplicate request");
+                return false;
+            }
+
+            try
+            {
+                await SyncMoviesCoreAsync(config, cancellationToken, saveConfig, taskProgress).ConfigureAwait(false);
+                return true;
+            }
+            finally
+            {
+                _movieSyncGate.Release();
+            }
+        }
+
+        private async Task SyncMoviesCoreAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig, IProgress<double> taskProgress)
         {
             ApplyUserAgentToSharedClient();
             CheckAndUpgradeNamingVersion(config, saveConfig);
@@ -679,7 +719,34 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        public async Task SyncSeriesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null)
+        /// <summary>
+        /// Syncs series STRM files. At most one series sync runs at a time.
+        /// </summary>
+        /// <returns>
+        /// False when a series sync was already in progress and this request was ignored.
+        /// True when this call ran.
+        /// </returns>
+        public async Task<bool> SyncSeriesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null)
+        {
+            // See SyncMoviesAsync for why the caller's IsRunning check is not sufficient.
+            if (!await _seriesSyncGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            {
+                _logger.Warn("Series sync requested while one is already running — ignoring the duplicate request");
+                return false;
+            }
+
+            try
+            {
+                await SyncSeriesCoreAsync(config, cancellationToken, saveConfig, taskProgress).ConfigureAwait(false);
+                return true;
+            }
+            finally
+            {
+                _seriesSyncGate.Release();
+            }
+        }
+
+        private async Task SyncSeriesCoreAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig, IProgress<double> taskProgress)
         {
             ApplyUserAgentToSharedClient();
             CheckAndUpgradeNamingVersion(config, saveConfig);
@@ -1247,11 +1314,23 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        public async Task RetryFailedAsync(CancellationToken cancellationToken)
+        /// <summary>
+        /// Re-attempts the items that failed in the last sync.
+        /// </summary>
+        /// <returns>False when a movie sync or another retry was already running.</returns>
+        public async Task<bool> RetryFailedAsync(CancellationToken cancellationToken)
         {
             List<FailedSyncItem> items;
             lock (_failedItemsLock) { items = _failedItems.ToList(); }
-            if (items.Count == 0) return;
+            if (items.Count == 0) return true;
+
+            // Shares _movieProgress with SyncMoviesAsync and writes into the same movie tree, so it
+            // takes the same gate rather than racing a sync that is already underway.
+            if (!await _movieSyncGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            {
+                _logger.Warn("Retry requested while a movie sync is already running — ignoring the duplicate request");
+                return false;
+            }
 
             var config = Plugin.Instance.Configuration;
             _movieProgress = new SyncProgress { IsRunning = true, Phase = "Retrying failed items", Total = items.Count };
@@ -1297,11 +1376,14 @@ namespace Emby.Xtream.Plugin.Service
                     foreach (var s in succeeded)
                         _failedItems.Remove(s);
                 }
+
+                return true;
             }
             finally
             {
                 _movieProgress.IsRunning = false;
                 _movieProgress.Phase = "Retry complete";
+                _movieSyncGate.Release();
             }
         }
 
