@@ -42,6 +42,7 @@ Sync on-demand movies as STRM files that Emby treats as a native movie library.
 - **TMDB metadata matching** — appends `[tmdbid=123]` to folder names for instant Emby identification
 - **TMDB fallback lookup** — queries Emby's metadata providers when the Xtream source lacks a TMDB ID
 - **Category selection** — pick specific VOD categories to sync, or sync all
+- **Per-title selection** — expand any category (Single Folder mode) to tick individual movies. Unticked titles stop syncing and their folder is removed on the next sync, whether or not orphan cleanup is on
 - **Danger zone** — one-click delete of all synced movie content
 
 ### TV Series Library
@@ -54,6 +55,7 @@ Full series support with proper season/episode structure.
 - **Manual ID overrides** — force a specific TVDb ID for shows that don't auto-match
 - **Metadata fallback lookup** — searches Emby's providers when no ID is available
 - **Same folder modes as movies** — single, multiple, or custom category mapping
+- **Per-title selection** — same as movies, at whole-series granularity rather than per-episode
 
 ### Smart Sync Engine
 
