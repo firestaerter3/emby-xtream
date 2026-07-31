@@ -1398,24 +1398,6 @@ function updateEpgVisibility(view) {
         }
     }
 
-    // Wholesale category changes make a stale per-title exclusion list actively confusing
-    // (a category the user just ticked would come back with holes in it), so reset it and
-    // redraw any panel that is currently open.
-    function clearContentExclusions(instance, contentType) {
-        if (contentType === 'vod') {
-            instance.excludedVodStreamIds = [];
-        } else {
-            instance.excludedSeriesIds = [];
-        }
-
-        var expanded = instance.expandedContentCategories[contentType] || {};
-        for (var categoryId in expanded) {
-            if (expanded[categoryId] && instance.contentItemsByCategory[contentType][categoryId]) {
-                renderContentItems(instance, contentType, parseInt(categoryId, 10));
-            }
-        }
-    }
-
     // ---- Live TV Categories ----
 
     function loadCategories(instance) {
@@ -1518,13 +1500,17 @@ function updateEpgVisibility(view) {
         });
     }
 
+    // Per-title exclusions deliberately survive this. They are keyed by stream ID and are
+    // independent of category selection: an excluded title in a deselected category is simply
+    // never fetched, and re-selecting the category re-applies the exclusion. Clearing them here
+    // would be actively destructive — on Emby "no categories checked" means *sync everything*
+    // (see FetchVodStreamsAsync), so Deselect All would hand back every title the user removed.
     function toggleAllVodCategories(instance, checked) {
         var view = instance.view;
         var checkboxes = view.querySelectorAll('.vodCategoryCheckbox');
         for (var i = 0; i < checkboxes.length; i++) {
             checkboxes[i].checked = checked;
         }
-        clearContentExclusions(instance, 'vod');
         updateCategoryCountBadge(view, 'vod');
     }
 
@@ -1631,13 +1617,13 @@ function updateEpgVisibility(view) {
         });
     }
 
+    // Per-title exclusions survive this — see the note on toggleAllVodCategories.
     function toggleAllSeriesCategories(instance, checked) {
         var view = instance.view;
         var checkboxes = view.querySelectorAll('.seriesCategoryCheckbox');
         for (var i = 0; i < checkboxes.length; i++) {
             checkboxes[i].checked = checked;
         }
-        clearContentExclusions(instance, 'series');
         updateCategoryCountBadge(view, 'series');
     }
 

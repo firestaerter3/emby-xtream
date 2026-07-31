@@ -345,6 +345,38 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.False(Directory.Exists(staleDir));
         }
 
+        /// <summary>
+        /// ADR-012 claims re-ticking a title recreates it without any forced re-sync, and that
+        /// claim is why no delta watermark reset was added. Pins the full journey: sync, exclude,
+        /// re-include — with smart skip on and the watermark already past the movie.
+        /// </summary>
+        [Fact]
+        public async Task ReIncludedMovie_Recreated_WithSmartSkipAndStaleWatermark()
+        {
+            var config = DefaultConfig();
+            config.SmartSkipExisting = true;
+
+            // Three syncs below, and RespondWith is single-shot — queue one body per sync.
+            var vodJson = VodStreamsJson(VodStream(streamId: 2, name: "Drop Me", added: 1000));
+            Handler.RespondWithSequence("get_vod_streams", new[] { vodJson, vodJson, vodJson });
+
+            // Phase 1: normal sync writes it and advances the watermark past it.
+            await MakeService().SyncMoviesAsync(config, None, SaveConfig);
+            Assert.True(File.Exists(MovieStrmPath("Drop Me")));
+            Assert.Equal(1000, config.LastMovieSyncTimestamp);
+
+            // Phase 2: exclude it — folder goes away.
+            config.ExcludedVodStreamIds = new[] { 2 };
+            await MakeService().SyncMoviesAsync(config, None, SaveConfig);
+            Assert.False(Directory.Exists(Path.Combine(TempDir.Path, "Movies", "Drop Me")));
+
+            // Phase 3: re-include. The movie is delta-unchanged and smart skip is on, so the
+            // only thing that can rescue it is the File.Exists guard on the skip path.
+            config.ExcludedVodStreamIds = new int[0];
+            await MakeService().SyncMoviesAsync(config, None, SaveConfig);
+            Assert.True(File.Exists(MovieStrmPath("Drop Me")));
+        }
+
         [Fact]
         public async Task ExcludedMovie_DoesNotStallDeltaWatermark()
         {

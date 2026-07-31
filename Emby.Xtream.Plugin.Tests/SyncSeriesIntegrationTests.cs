@@ -522,6 +522,43 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.False(Directory.Exists(Path.Combine(TempDir.Path, "Shows", "Drop Show")));
         }
 
+        /// <summary>
+        /// Series counterpart to the movie re-inclusion test. This path has two skip guards to
+        /// clear — the pre-fetch directory index and the episode-hash skip — and both must fall
+        /// through on a folder that is no longer on disk.
+        /// </summary>
+        [Fact]
+        public async Task ReIncludedSeries_Recreated_WithSmartSkipAndStaleWatermark()
+        {
+            var config = DefaultConfig();
+            config.SmartSkipExisting = true;
+
+            // Three syncs below and RespondWith is single-shot, so queue one body per call.
+            // The detail rule must be registered FIRST: rules match on substring in registration
+            // order, and "action=get_series" is a prefix of "action=get_series_info".
+            var listJson = SeriesListJson(Series(seriesId: 2, name: "Drop Show", lastModified: "1000"));
+            var detailJson = SeriesDetailJson(seriesId: 2);
+            Handler.RespondWithSequence("action=get_series_info&series_id=2", new[] { detailJson, detailJson });
+            Handler.RespondWithSequence("action=get_series", new[] { listJson, listJson, listJson });
+
+            var showDir = Path.Combine(TempDir.Path, "Shows", "Drop Show");
+
+            // Phase 1: normal sync writes the show and stores its episode hash.
+            await MakeService().SyncSeriesAsync(config, None, SaveConfig);
+            Assert.True(Directory.Exists(showDir));
+            Assert.False(string.IsNullOrEmpty(config.SeriesEpisodeHashesJson));
+
+            // Phase 2: exclude it — folder goes away.
+            config.ExcludedSeriesIds = new[] { 2 };
+            await MakeService().SyncSeriesAsync(config, None, SaveConfig);
+            Assert.False(Directory.Exists(showDir));
+
+            // Phase 3: re-include with the watermark already past it.
+            config.ExcludedSeriesIds = new int[0];
+            await MakeService().SyncSeriesAsync(config, None, SaveConfig);
+            Assert.True(Directory.Exists(showDir));
+        }
+
         [Fact]
         public async Task ExcludedSeries_DoesNotStallDeltaWatermark()
         {

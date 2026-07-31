@@ -598,6 +598,8 @@ namespace Emby.Xtream.Plugin.Service
 
                 // Remove folders for explicitly excluded movies. Deliberately before orphan
                 // cleanup and independent of it — see RemoveExcludedContent remarks.
+                // Note both passes accumulate into Deleted, which therefore counts folders
+                // (exclusions) and files (orphans) together. The dashboard shows one number.
                 if (excludedMovies.Count > 0)
                 {
                     _movieProgress.Phase = "Removing excluded movies";
@@ -1110,6 +1112,8 @@ namespace Emby.Xtream.Plugin.Service
 
                 // Remove folders for explicitly excluded series. Deliberately before orphan
                 // cleanup and independent of it — see RemoveExcludedContent remarks.
+                // Note both passes accumulate into Deleted, which therefore counts folders
+                // (exclusions) and files (orphans) together. The dashboard shows one number.
                 if (excludedSeriesItems.Count > 0)
                 {
                     _seriesProgress.Phase = "Removing excluded series";
