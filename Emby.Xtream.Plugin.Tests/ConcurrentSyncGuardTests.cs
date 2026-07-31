@@ -95,11 +95,18 @@ namespace Emby.Xtream.Plugin.Tests
 
             var service = MakeService();
 
+            // Hold both in flight at once. Without this they run one after the other and the test
+            // would pass even if movies and series shared a single gate, which is the thing it is
+            // supposed to rule out.
+            Handler.Gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
             var movies = service.SyncMoviesAsync(config, None, SaveConfig);
             var series = service.SyncSeriesAsync(config, None, SaveConfig);
 
+            Handler.Gate.SetResult(true);
+
             Assert.True(await movies);
-            Assert.True(await series);
+            Assert.True(await series, "Series sync must not be blocked by an in-flight movie sync");
         }
 
         [Fact]
