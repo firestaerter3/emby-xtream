@@ -4,6 +4,21 @@ function (BaseView, loading) {
 
     var pluginId = 'b7e3c4a1-9f2d-4e8b-a5c6-d1f0e2b3c4a5';
 
+    // Element.closest is missing on some of the older browsers Emby still serves this
+    // dashboard to. The per-title panels are re-rendered from innerHTML, so per-element
+    // listeners aren't an option and the delegated handlers need a reliable walk-up.
+    function closestByClass(el, className) {
+        while (el && el.nodeType === 1) {
+            if (el.classList
+                    ? el.classList.contains(className)
+                    : (' ' + el.className + ' ').indexOf(' ' + className + ' ') >= 0) {
+                return el;
+            }
+            el = el.parentNode;
+        }
+        return null;
+    }
+
     function View(view, params) {
         BaseView.apply(this, arguments);
 
@@ -197,7 +212,7 @@ function (BaseView, loading) {
             if (!listEl) return;
 
             listEl.addEventListener('click', function (e) {
-                var toggle = e.target.closest('.contentItemToggle');
+                var toggle = closestByClass(e.target, 'contentItemToggle');
                 if (toggle) {
                     e.preventDefault();
                     toggleContentItemPanel(
@@ -208,7 +223,7 @@ function (BaseView, loading) {
                     return;
                 }
 
-                var selectAll = e.target.closest('.contentItemSelectAll');
+                var selectAll = closestByClass(e.target, 'contentItemSelectAll');
                 if (selectAll) {
                     e.preventDefault();
                     toggleAllContentItems(
@@ -219,7 +234,7 @@ function (BaseView, loading) {
                     return;
                 }
 
-                var deselectAll = e.target.closest('.contentItemDeselectAll');
+                var deselectAll = closestByClass(e.target, 'contentItemDeselectAll');
                 if (deselectAll) {
                     e.preventDefault();
                     toggleAllContentItems(
@@ -231,7 +246,7 @@ function (BaseView, loading) {
             });
 
             listEl.addEventListener('change', function (e) {
-                var cb = e.target.closest('.contentItemCheckbox');
+                var cb = closestByClass(e.target, 'contentItemCheckbox');
                 if (!cb) return;
                 setContentExclusion(
                     self,
@@ -305,7 +320,7 @@ function (BaseView, loading) {
 
         // Danger zone toggles (event delegation on form)
         view.querySelector('.xtreamConfigForm').addEventListener('click', function (e) {
-            var header = e.target.closest('.danger-zone-header');
+            var header = closestByClass(e.target, 'danger-zone-header');
             if (!header) return;
             var zone = header.parentNode;
             zone.classList.toggle('open');

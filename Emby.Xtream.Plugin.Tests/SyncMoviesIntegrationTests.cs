@@ -327,6 +327,60 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.True(File.Exists(MovieStrmPath("Keep Me")));
         }
 
+        /// <summary>
+        /// A folder that matches an excluded title by name but holds no STRM was not written
+        /// by this plugin. Recursively deleting it would destroy user data (codex review of
+        /// PR #58, [P1]). Nothing in it may be touched.
+        /// </summary>
+        [Fact]
+        public async Task ExcludedMovie_FolderWithNoStrm_LeftCompletelyUntouched()
+        {
+            var config = DefaultConfig();
+            config.ExcludedVodStreamIds = new[] { 2 };
+
+            // A user's own folder that happens to share the provider's title.
+            var userDir = Path.Combine(TempDir.Path, "Movies", "Drop Me");
+            Directory.CreateDirectory(userDir);
+            var userFile = Path.Combine(userDir, "my-own-movie.mkv");
+            File.WriteAllText(userFile, "not written by the plugin");
+
+            RegisterVodStreams(VodStreamsJson(
+                VodStream(streamId: 2, name: "Drop Me", added: 1000)));
+
+            await MakeService().SyncMoviesAsync(config, None, SaveConfig);
+
+            Assert.True(Directory.Exists(userDir), "user folder must survive");
+            Assert.True(File.Exists(userFile), "user file must survive");
+        }
+
+        /// <summary>
+        /// When the folder IS plugin-written but the user has also put their own file in it,
+        /// remove the plugin's files and leave theirs, keeping the folder. Same semantics as
+        /// CleanupOrphans, which only ever deletes STRMs and prunes emptied directories.
+        /// </summary>
+        [Fact]
+        public async Task ExcludedMovie_FolderWithForeignFile_RemovesStrmKeepsRest()
+        {
+            var config = DefaultConfig();
+            config.ExcludedVodStreamIds = new[] { 2 };
+
+            var dir = Path.Combine(TempDir.Path, "Movies", "Drop Me");
+            Directory.CreateDirectory(dir);
+            var strm = Path.Combine(dir, "Drop Me.strm");
+            var poster = Path.Combine(dir, "poster.jpg");
+            File.WriteAllText(strm, "http://fake-xtream/movie/user/pass/2.mkv");
+            File.WriteAllText(poster, "user artwork");
+
+            RegisterVodStreams(VodStreamsJson(
+                VodStream(streamId: 2, name: "Drop Me", added: 1000)));
+
+            await MakeService().SyncMoviesAsync(config, None, SaveConfig);
+
+            Assert.False(File.Exists(strm), "plugin STRM should be removed");
+            Assert.True(File.Exists(poster), "user artwork must survive");
+            Assert.True(Directory.Exists(dir), "folder must survive because it still has content");
+        }
+
         [Fact]
         public async Task ExcludedMovie_FolderWithTmdbSuffix_Deleted()
         {

@@ -84,6 +84,18 @@ Folder matching reuses the existing `StripFolderIdSuffix`, so a title is found w
 as `Some Movie`, `Some Movie [tmdbid=123]` or `Some Show [tvdbid=456]`. This keeps removal correct
 across changes to the metadata-ID naming settings.
 
+**Removal deletes files, not folders.** Matching is by title alone, so a matched folder is not
+necessarily ours. The pass therefore:
+
+1. Skips any matched folder containing no `.strm` at all — that folder was not written by this
+   plugin, and a user's own `Ben-Hur` directory must survive excluding the provider's `Ben-Hur`.
+2. Deletes only `.strm` and `.nfo` files inside it, then prunes whatever that emptied.
+
+Anything the user placed alongside our files survives, and the folder itself survives if it still
+holds content. This is the same contract `CleanupOrphans` has always had. The first implementation
+called `Directory.Delete(dir, recursive: true)` on a name match, which an independent review
+correctly flagged as capable of destroying user data.
+
 Two read-only endpoints (`GET /XtreamTuner/Items/Vod` and `/XtreamTuner/Items/Series`) return
 `{Id, Name}` for one category. The config UI calls them lazily when a category row is expanded.
 
@@ -107,3 +119,9 @@ Two read-only endpoints (`GET /XtreamTuner/Items/Vod` and `/XtreamTuner/Items/Se
   provider field would otherwise blank an entire category listing.
 - **The literal "don't re-add what I deleted on disk" ask is not covered.** Users must untick the title
   in config. This is a deliberate trade against the silent-suppression risk in Alternative 1.
+- **A renamed title leaves its old folder behind.** Exclusion is by ID, but the folder is located by
+  the item's *current* cleaned title. If the provider renames a title, or the user changes the
+  name-cleaning terms or the category-to-folder mapping after it was written, the old directory no
+  longer matches and stays until orphan cleanup reaches it. Accepted rather than fixed: a stable fix
+  needs an ownership marker written into every item folder plus a migration for existing libraries,
+  and the consequence here is a stale folder, not lost data.
