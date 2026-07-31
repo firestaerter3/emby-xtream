@@ -54,9 +54,16 @@ reversible, and impossible to trigger by accident.
 ### 3. Rely on orphan cleanup for removal (Jellyfin's approach) — REJECTED FOR EMBY
 
 Jellyfin filters excluded items out at fetch time and lets the orphan pass delete the leftover folders.
-That does not transfer: on Emby `CleanupOrphans` defaults to `false`, and when it is on, the 20%
-`OrphanSafetyThreshold` blocks any sizeable deselect. The common case would be a user unticking thirty
-movies, running a sync, seeing all thirty folders still present, and reporting the filter as broken.
+That does not transfer to Emby, for two reasons.
+
+`CleanupOrphans` is user-toggleable, so removal would silently stop working for anyone who turns it
+off. (It defaults to `true` as of #42; it defaulted to `false` when this feature was designed, which
+made the gap starker, but the argument does not depend on the default — only on the setting being
+something a user can switch.)
+
+More importantly, the 20% `OrphanSafetyThreshold` blocks any sizeable deselect even with cleanup
+enabled. A user unticking thirty of a hundred movies would run a sync, see all thirty folders still
+present, and reasonably report the filter as broken.
 
 ## Decision
 
