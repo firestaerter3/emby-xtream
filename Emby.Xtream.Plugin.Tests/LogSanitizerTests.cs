@@ -60,10 +60,13 @@ namespace Emby.Xtream.Plugin.Tests
         {
             // A credential that occurs inside the marker text must not chew up an earlier
             // redaction. A single pass never revisits what it already replaced.
+            //
+            // Assert the whole line: a Contains check would also pass on "<<redacted>>", which is
+            // exactly the regression this test exists to catch.
             var result = LogSanitizer.SanitizeLine(
                 "user bob logged in", "bob", "redacted", "", "");
 
-            Assert.Contains("<redacted>", result);
+            Assert.Equal("user <redacted> logged in", result);
         }
 
         [Fact]
