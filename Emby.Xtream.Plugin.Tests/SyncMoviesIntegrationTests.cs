@@ -145,7 +145,7 @@ namespace Emby.Xtream.Plugin.Tests
             // Pre-write an orphan for "Old Movie"
             var orphanPath = MovieStrmPath("Old Movie");
             Directory.CreateDirectory(Path.GetDirectoryName(orphanPath));
-            File.WriteAllText(orphanPath, "orphan");
+            File.WriteAllText(orphanPath, "http://fake-xtream/movie/user/pass/99.mkv");
 
             // Provider returns a different movie only
             var json = VodStreamsJson(VodStream(streamId: 2, name: "New Movie", added: 1000));
@@ -179,7 +179,7 @@ namespace Emby.Xtream.Plugin.Tests
                 var name = $"Movie {i:D2}";
                 var dir = Path.Combine(moviesRoot, name);
                 Directory.CreateDirectory(dir);
-                File.WriteAllText(Path.Combine(dir, name + ".strm"), $"stream {i}");
+                File.WriteAllText(Path.Combine(dir, name + ".strm"), $"http://fake-xtream/movie/user/pass/{i}.mkv");
             }
 
             // Provider returns only movie 1 → 11 orphans out of 12 = 91.7%
@@ -213,7 +213,7 @@ namespace Emby.Xtream.Plugin.Tests
                 var name = $"Movie {i:D2}";
                 var dir = Path.Combine(moviesRoot, name);
                 Directory.CreateDirectory(dir);
-                File.WriteAllText(Path.Combine(dir, name + ".strm"), $"stream {i}");
+                File.WriteAllText(Path.Combine(dir, name + ".strm"), $"http://fake-xtream/movie/user/pass/{i}.mkv");
             }
 
             // Provider returns movies 1–10 → movies 11 and 12 become orphans
@@ -389,7 +389,7 @@ namespace Emby.Xtream.Plugin.Tests
 
             var staleDir = Path.Combine(TempDir.Path, "Movies", "Drop Me [tmdbid=550]");
             Directory.CreateDirectory(staleDir);
-            File.WriteAllText(Path.Combine(staleDir, "Drop Me [tmdbid=550].strm"), "http://old");
+            File.WriteAllText(Path.Combine(staleDir, "Drop Me [tmdbid=550].strm"), "http://fake-xtream/movie/user/pass/7.mkv");
 
             RegisterVodStreams(VodStreamsJson(
                 VodStream(streamId: 2, name: "Drop Me", added: 1000)));

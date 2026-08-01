@@ -18,14 +18,27 @@ namespace Emby.Xtream.Plugin.Tests.Fakes
         private readonly List<(string UrlSubstring, Queue<(string Body, HttpStatusCode Status)> Responses)> _rules
             = new List<(string, Queue<(string, HttpStatusCode)>)>();
 
+        /// <summary>Guards _rules, its queues, and ReceivedUrls.</summary>
+        private readonly object _sync = new object();
+
         public List<string> ReceivedUrls { get; } = new List<string>();
+
+        /// <summary>
+        /// Optional gate. When set, every request waits on it before responding.
+        /// </summary>
+        /// <remarks>
+        /// Responses are otherwise produced synchronously, so a caller runs to completion before it
+        /// ever returns its Task. That makes it impossible to hold two calls genuinely in flight,
+        /// which is exactly what a concurrency test needs. Complete this to let requests through.
+        /// </remarks>
+        public TaskCompletionSource<bool> Gate { get; set; }
 
         /// <summary>Register a single response for URLs containing <paramref name="urlSubstring"/>.</summary>
         public void RespondWith(string urlSubstring, string body, HttpStatusCode status = HttpStatusCode.OK)
         {
             var q = new Queue<(string, HttpStatusCode)>();
             q.Enqueue((body, status));
-            _rules.Add((urlSubstring, q));
+            lock (_sync) { _rules.Add((urlSubstring, q)); }
         }
 
         /// <summary>Register multiple ordered responses for the same URL pattern.</summary>
@@ -34,24 +47,36 @@ namespace Emby.Xtream.Plugin.Tests.Fakes
             var q = new Queue<(string, HttpStatusCode)>();
             foreach (var b in bodies)
                 q.Enqueue((b, status));
-            _rules.Add((urlSubstring, q));
+            lock (_sync) { _rules.Add((urlSubstring, q)); }
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var url = request.RequestUri?.ToString() ?? string.Empty;
-            ReceivedUrls.Add(url);
-
-            foreach (var (urlSubstring, queue) in _rules)
+            var gate = Gate;
+            if (gate != null)
             {
-                if (url.Contains(urlSubstring) && queue.Count > 0)
+                await gate.Task.ConfigureAwait(false);
+            }
+
+            var url = request.RequestUri?.ToString() ?? string.Empty;
+
+            // One lock over all shared state. Releasing the gate resumes several requests at once
+            // on thread-pool threads, and Queue<T> is not thread-safe: concurrent dequeues can
+            // hand back the wrong body or throw.
+            lock (_sync)
+            {
+                ReceivedUrls.Add(url);
+
+                foreach (var (urlSubstring, queue) in _rules)
                 {
-                    var (body, status) = queue.Dequeue();
-                    var response = new HttpResponseMessage(status)
+                    if (url.Contains(urlSubstring) && queue.Count > 0)
                     {
-                        Content = new StringContent(body, Encoding.UTF8, "application/json")
-                    };
-                    return Task.FromResult(response);
+                        var (body, status) = queue.Dequeue();
+                        return new HttpResponseMessage(status)
+                        {
+                            Content = new StringContent(body, Encoding.UTF8, "application/json")
+                        };
+                    }
                 }
             }
 

@@ -178,7 +178,7 @@ namespace Emby.Xtream.Plugin.Tests
             // Pre-write an orphan episode for "Old Show"
             var orphanStrm = EpisodeStrmPath("Old Show", season: 1, episode: 1, title: "Gone");
             Directory.CreateDirectory(Path.GetDirectoryName(orphanStrm));
-            File.WriteAllText(orphanStrm, "orphan");
+            File.WriteAllText(orphanStrm, "http://fake-xtream/series/user/pass/99.mp4");
 
             // Provider returns only "New Show"
             var list = SeriesListJson(Series(seriesId: 2, name: "New Show", lastModified: "3000"));
@@ -511,7 +511,7 @@ namespace Emby.Xtream.Plugin.Tests
 
             var staleSeasonDir = Path.Combine(TempDir.Path, "Shows", "Drop Show", "Season 01");
             Directory.CreateDirectory(staleSeasonDir);
-            File.WriteAllText(Path.Combine(staleSeasonDir, "Drop Show - S01E01.strm"), "http://old");
+            File.WriteAllText(Path.Combine(staleSeasonDir, "Drop Show - S01E01.strm"), "http://fake-xtream/series/user/pass/7.mp4");
 
             Handler.RespondWith("action=get_series", SeriesListJson(
                 Series(seriesId: 2, name: "Drop Show", lastModified: "1000")));

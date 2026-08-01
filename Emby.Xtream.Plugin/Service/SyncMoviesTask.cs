@@ -44,11 +44,17 @@ namespace Emby.Xtream.Plugin.Service
                 return;
             }
             progress.Report(0);
-            await svc.SyncMoviesAsync(
+            var ran = await svc.SyncMoviesAsync(
                 config,
                 cancellationToken,
                 () => Plugin.Instance.SaveConfiguration(),
                 progress).ConfigureAwait(false);
+            if (!ran)
+            {
+                // The IsRunning check above is a fast path; the service holds the real gate.
+                _logger.Info("Movie sync already running — skipping scheduled run.");
+                return;
+            }
             progress.Report(100);
         }
     }

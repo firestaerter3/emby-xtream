@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Emby.Xtream.Plugin.Service
@@ -36,15 +38,7 @@ namespace Emby.Xtream.Plugin.Service
 
             var s = line;
 
-            // Redact specific config values if non-empty
-            if (!string.IsNullOrEmpty(username))
-                s = s.Replace(username, "<redacted>");
-            if (!string.IsNullOrEmpty(password))
-                s = s.Replace(password, "<redacted>");
-            if (!string.IsNullOrEmpty(dispatcharrUser))
-                s = s.Replace(dispatcharrUser, "<redacted>");
-            if (!string.IsNullOrEmpty(dispatcharrPass))
-                s = s.Replace(dispatcharrPass, "<redacted>");
+            s = RedactCredentials(s, username, password, dispatcharrUser, dispatcharrPass);
 
             // Redact IP addresses, but preserve version numbers (e.g. Version=1.2.0.0)
             // Replace version patterns with placeholders first, then redact IPs, then restore
@@ -70,6 +64,55 @@ namespace Emby.Xtream.Plugin.Service
             s = ProviderHostRegex.Replace(s, "$1<provider-host>$3$4");
 
             return s;
+        }
+
+        /// <summary>
+        /// Redacts every configured credential from <paramref name="line"/>, in both its raw and
+        /// percent-encoded form.
+        /// </summary>
+        /// <remarks>
+        /// Credentials go into generated URLs escaped, so a password of <c>p/w</c> appears in a
+        /// stream URL as <c>p%2Fw</c>. Redacting only one form leaks the other into the log a user
+        /// attaches to a bug report.
+        ///
+        /// Every form of every credential goes into one alternation, longest first, applied in a
+        /// single pass. Replacing them one at a time is not safe no matter how the credentials are
+        /// ordered: a short value can land inside another value's escaped form and split it, which
+        /// both stops the longer one from matching and leaves readable pieces of it behind. A
+        /// single pass also cannot match inside text it has already replaced.
+        /// </remarks>
+        private static string RedactCredentials(string line, params string[] values)
+        {
+            var candidates = values
+                .Where(v => !string.IsNullOrEmpty(v))
+                .SelectMany(v => new[] { v, TryEscape(v) })
+                .Where(v => !string.IsNullOrEmpty(v))
+                .Distinct(StringComparer.Ordinal)
+                .OrderByDescending(v => v.Length)
+                .ToList();
+
+            if (candidates.Count == 0)
+            {
+                return line;
+            }
+
+            // Alternation is leftmost-first, so listing longest first makes the longest candidate
+            // win at any position where several could match.
+            var pattern = string.Join("|", candidates.Select(Regex.Escape));
+            return Regex.Replace(line, pattern, "<redacted>");
+        }
+
+        private static string TryEscape(string value)
+        {
+            try
+            {
+                return Uri.EscapeDataString(value);
+            }
+            catch (UriFormatException)
+            {
+                // Nothing to add for a value the escaper rejects; the raw form is still covered.
+                return null;
+            }
         }
     }
 }

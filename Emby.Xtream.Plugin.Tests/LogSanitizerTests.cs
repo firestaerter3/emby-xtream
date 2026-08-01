@@ -22,6 +22,87 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public void RedactsLongerCredentialBeforeShorterOverlappingOne()
+        {
+            // Username "abc" is a prefix of password "abc/secret". Redacting the short one first
+            // rewrites the long one out of existence before its own turn, and the "/secret" tail
+            // survives into the downloadable log.
+            var result = LogSanitizer.SanitizeLine(
+                "auth abc/secret here", "abc", "abc/secret", "", "");
+
+            Assert.DoesNotContain("secret", result);
+        }
+
+        [Fact]
+        public void RedactsLongerCredentialBeforeShorterOverlappingOne_EscapedForm()
+        {
+            var result = LogSanitizer.SanitizeLine(
+                "url http://h/movie/abc/abc%2Fsecret/1.mkv", "abc", "abc/secret", "", "");
+
+            Assert.DoesNotContain("secret", result);
+        }
+
+        [Fact]
+        public void ShortCredentialCannotSplitAnotherCredentialsEscapedForm()
+        {
+            // "%20" lands inside the escaped form of "p q" ("p%20q"). Replacing one value at a
+            // time would split it, so the longer value stops matching and its readable characters
+            // survive. One pass over all forms, longest first, cannot do that.
+            var result = LogSanitizer.SanitizeLine(
+                "url http://h/movie/u/p%20q/1.mkv", "%20", "p q", "", "");
+
+            Assert.DoesNotContain("p%20q", result);
+            Assert.DoesNotContain("%20q", result);
+        }
+
+        [Fact]
+        public void RedactionMarkerIsNotRescannedByLaterValues()
+        {
+            // A credential that occurs inside the marker text must not chew up an earlier
+            // redaction. A single pass never revisits what it already replaced.
+            //
+            // Assert the whole line: a Contains check would also pass on "<<redacted>>", which is
+            // exactly the regression this test exists to catch.
+            var result = LogSanitizer.SanitizeLine(
+                "user bob logged in", "bob", "redacted", "", "");
+
+            Assert.Equal("user <redacted> logged in", result);
+        }
+
+        [Fact]
+        public void RedactsPercentEncodedCredentialsInUrls()
+        {
+            // Credentials go into generated URLs escaped, so the escaped form is what actually
+            // appears in a logged stream URL. Redacting only the raw form leaks it into the log a
+            // user attaches to a bug report.
+            var result = LogSanitizer.SanitizeLine(
+                "Playing http://host/movie/us%20er/p%2Fw/1.mkv", "us er", "p/w", "", "");
+
+            Assert.DoesNotContain("us%20er", result);
+            Assert.DoesNotContain("p%2Fw", result);
+        }
+
+        [Fact]
+        public void RedactsRawCredentialsEvenWhenEscapedFormDiffers()
+        {
+            // The raw form still has to go: not every log line is a URL.
+            var result = LogSanitizer.SanitizeLine(
+                "Configured account us er / p/w", "us er", "p/w", "", "");
+
+            Assert.DoesNotContain("us er", result);
+            Assert.DoesNotContain("p/w", result);
+        }
+
+        [Fact]
+        public void RedactsPercentEncodedDispatcharrCredentials()
+        {
+            var result = LogSanitizer.SanitizeLine(
+                "Dispatcharr auth for d%20user", "", "", "d user", "d pass");
+
+            Assert.DoesNotContain("d%20user", result);
+        }
+
+        [Fact]
         public void RedactsConfiguredUsername()
         {
             var result = LogSanitizer.SanitizeLine(

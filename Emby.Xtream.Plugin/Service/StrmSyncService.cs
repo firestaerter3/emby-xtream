@@ -127,6 +127,52 @@ namespace Emby.Xtream.Plugin.Service
         private SyncProgress _seriesProgress = new SyncProgress();
         private SyncProgress _episodeProgress = new SyncProgress();
 
+        // Single-flight gates. Each sync replaces its progress object wholesale and shares a
+        // written-path set, so two overlapping runs of the same kind corrupt each other's state.
+        // Movies and series are gated separately because they touch different roots and are
+        // deliberately runnable at the same time. RetryFailedAsync takes the movie gate: it writes
+        // movie files and reuses _movieProgress.
+        private readonly SemaphoreSlim _movieSyncGate = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim _seriesSyncGate = new SemaphoreSlim(1, 1);
+
+        /// <summary>Lowest usable value for <see cref="PluginConfiguration.SyncParallelism"/>.</summary>
+        private const int MinSyncParallelism = 1;
+
+        /// <summary>Highest usable value for <see cref="PluginConfiguration.SyncParallelism"/>.</summary>
+        private const int MaxSyncParallelism = 10;
+
+        /// <summary>
+        /// Returns a usable parallelism, correcting a persisted value that is out of range.
+        /// </summary>
+        /// <remarks>
+        /// The config UI validates this, but the value is persisted to XML and survives hand edits
+        /// and migrations. Zero is the dangerous one: <c>new SemaphoreSlim(0)</c> has no permits, so
+        /// the first task waits forever and the sync hangs with no way out but editing the file.
+        /// </remarks>
+        internal static int GetSyncParallelism(PluginConfiguration config)
+        {
+            var configured = config.SyncParallelism;
+            if (configured >= MinSyncParallelism && configured <= MaxSyncParallelism)
+            {
+                return configured;
+            }
+
+            return configured < MinSyncParallelism ? MinSyncParallelism : MaxSyncParallelism;
+        }
+
+        private int ResolveSyncParallelism(PluginConfiguration config)
+        {
+            var resolved = GetSyncParallelism(config);
+            if (resolved != config.SyncParallelism)
+            {
+                _logger.Warn(
+                    "SyncParallelism is {0}, which is outside the usable range {1}-{2} — using {3} for this run",
+                    config.SyncParallelism, MinSyncParallelism, MaxSyncParallelism, resolved);
+            }
+
+            return resolved;
+        }
+
         private static void ReportTaskProgress(SyncProgress syncProgress, IProgress<double> taskProgress)
         {
             if (taskProgress == null) return;
@@ -279,7 +325,39 @@ namespace Emby.Xtream.Plugin.Service
             return true;
         }
 
-        public async Task SyncMoviesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null)
+        /// <summary>
+        /// Syncs movie STRM files. At most one movie sync runs at a time.
+        /// </summary>
+        /// <returns>
+        /// False when a movie sync was already in progress and this request was ignored.
+        /// True when this call ran (check <see cref="SyncProgress.AbortReason"/> for a run that
+        /// started and then bailed on configuration).
+        /// </returns>
+        public async Task<bool> SyncMoviesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null)
+        {
+            // Single-flight gate, held for the whole operation. Callers check IsRunning first, but
+            // that is a fast path, not a lock: between the check and the assignment below, a second
+            // request or the scheduled task can pass it too. Two runs then share writtenPaths and
+            // the progress object, and whichever finishes first clears IsRunning while the other is
+            // still writing — admitting a third run mid-cleanup.
+            if (!await _movieSyncGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            {
+                _logger.Warn("Movie sync requested while one is already running — ignoring the duplicate request");
+                return false;
+            }
+
+            try
+            {
+                await SyncMoviesCoreAsync(config, cancellationToken, saveConfig, taskProgress).ConfigureAwait(false);
+                return true;
+            }
+            finally
+            {
+                _movieSyncGate.Release();
+            }
+        }
+
+        private async Task SyncMoviesCoreAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig, IProgress<double> taskProgress)
         {
             ApplyUserAgentToSharedClient();
             CheckAndUpgradeNamingVersion(config, saveConfig);
@@ -322,7 +400,15 @@ namespace Emby.Xtream.Plugin.Service
 
                 // Fetch streams for selected categories
                 _movieProgress.Phase = "Fetching VOD streams";
-                var fetchedStreams = await FetchVodStreamsAsync(config.SelectedVodCategoryIds, config, cancellationToken).ConfigureAwait(false);
+                var vodFetch = await FetchVodStreamsAsync(config.SelectedVodCategoryIds, config, cancellationToken).ConfigureAwait(false);
+                var fetchedStreams = vodFetch.Items;
+
+                if (vodFetch.HadFailures)
+                {
+                    _logger.Warn(
+                        "{0} of {1} VOD categories failed to answer — orphan cleanup will be skipped this run to avoid deleting files for the categories that did not report",
+                        vodFetch.FailedCategoryCount, vodFetch.RequestedCategoryCount);
+                }
 
                 // Per-item exclusions (issue #57): split the catalogue before anything else reads it.
                 // The excluded half is kept so its on-disk folders can be removed below.
@@ -382,7 +468,7 @@ namespace Emby.Xtream.Plugin.Service
                 _logger.Info("Starting movie STRM sync for {0} streams", allStreams.Count);
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
 
                 // Shared Dispatcharr VOD client — only queried per-movie, after smart-skip
                 Emby.Xtream.Plugin.Client.DispatcharrClient dispatcharrVodClient = null;
@@ -481,7 +567,7 @@ namespace Emby.Xtream.Plugin.Service
                         var streamUrl = string.Format(
                             CultureInfo.InvariantCulture,
                             "{0}/movie/{1}/{2}/{3}.{4}",
-                            config.BaseUrl, config.Username, config.Password, movie.StreamId, ext);
+                            config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), movie.StreamId, ext);
 
                         // Build list of STRM entries (multi-version via Dispatcharr, or single)
                         var strmEntries = new List<Tuple<string, string>>();
@@ -607,18 +693,25 @@ namespace Emby.Xtream.Plugin.Service
                         config, excludedMovies, config.MovieFolderMode, categoryNames, folderMappings, "Movies");
                 }
 
-                // Cleanup orphans
-                if (config.CleanupOrphans && _movieProgress.Failed == 0)
+                // Cleanup orphans. Skipped when any category failed to answer: those titles are
+                // missing from writtenPaths through no fault of their own, so deleting what is
+                // "orphaned" would delete a working category's library.
+                if (config.CleanupOrphans && _movieProgress.Failed == 0 && !vodFetch.HadFailures)
                 {
                     _movieProgress.Phase = "Cleaning up orphaned files";
                     var moviesRoot = Path.Combine(config.StrmLibraryPath, "Movies");
-                    _movieProgress.Deleted += CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold);
+                    _movieProgress.Deleted += CleanupOrphans(moviesRoot, writtenPaths, config.OrphanSafetyThreshold, config);
                 }
 
                 // Persist the highest Added timestamp seen so next sync can delta from here.
                 // Computed over the UNFILTERED catalogue: if the newest movie happens to be
                 // excluded, the watermark must still advance past it or every later sync
                 // re-processes everything after it.
+                //
+                // A partial fetch still advances the watermark. fetchedStreams holds only the
+                // categories that answered, so this moves past what was actually processed;
+                // freezing it because some other category 502'd would make every later sync
+                // re-process the categories that succeeded.
                 if (fetchedStreams.Count > 0)
                 {
                     var maxAdded = fetchedStreams.Max(m => m.Added);
@@ -664,7 +757,34 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        public async Task SyncSeriesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null)
+        /// <summary>
+        /// Syncs series STRM files. At most one series sync runs at a time.
+        /// </summary>
+        /// <returns>
+        /// False when a series sync was already in progress and this request was ignored.
+        /// True when this call ran.
+        /// </returns>
+        public async Task<bool> SyncSeriesAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig = null, IProgress<double> taskProgress = null)
+        {
+            // See SyncMoviesAsync for why the caller's IsRunning check is not sufficient.
+            if (!await _seriesSyncGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            {
+                _logger.Warn("Series sync requested while one is already running — ignoring the duplicate request");
+                return false;
+            }
+
+            try
+            {
+                await SyncSeriesCoreAsync(config, cancellationToken, saveConfig, taskProgress).ConfigureAwait(false);
+                return true;
+            }
+            finally
+            {
+                _seriesSyncGate.Release();
+            }
+        }
+
+        private async Task SyncSeriesCoreAsync(PluginConfiguration config, CancellationToken cancellationToken, Action saveConfig, IProgress<double> taskProgress)
         {
             ApplyUserAgentToSharedClient();
             CheckAndUpgradeNamingVersion(config, saveConfig);
@@ -711,7 +831,15 @@ namespace Emby.Xtream.Plugin.Service
                     : null;
 
                 _seriesProgress.Phase = "Fetching series list";
-                var fetchedSeries = await FetchSeriesListAsync(config.SelectedSeriesCategoryIds, config, cancellationToken).ConfigureAwait(false);
+                var seriesFetch = await FetchSeriesListAsync(config.SelectedSeriesCategoryIds, config, cancellationToken).ConfigureAwait(false);
+                var fetchedSeries = seriesFetch.Items;
+
+                if (seriesFetch.HadFailures)
+                {
+                    _logger.Warn(
+                        "{0} of {1} series categories failed to answer — orphan cleanup will be skipped this run to avoid deleting files for the categories that did not report",
+                        seriesFetch.FailedCategoryCount, seriesFetch.RequestedCategoryCount);
+                }
 
                 // Per-item exclusions (issue #57) — see the matching block in SyncMoviesAsync.
                 var excludedSeriesSet = ContentExclusionFilter.BuildSet(config.ExcludedSeriesIds);
@@ -794,7 +922,7 @@ namespace Emby.Xtream.Plugin.Service
                 }
 
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
 
                 // Episode hash cache: load stored hashes so we can skip file I/O for unchanged series
                 var storedHashes = DeserializeEpisodeHashes(config.SeriesEpisodeHashesJson);
@@ -922,6 +1050,26 @@ namespace Emby.Xtream.Plugin.Service
 
                         if (detail == null || detail.Episodes == null || detail.Episodes.Count == 0)
                         {
+                            // An empty payload for a series that already has files on disk is far
+                            // more likely to be a transient provider hiccup (or a tolerated
+                            // malformed episode map, see ADR-010) than a show that genuinely lost
+                            // every episode. Keep the existing files in the valid set and count the
+                            // series as failed, which holds the orphan-cleanup guard below. A real
+                            // removal is picked up by a later run that returns cleanly.
+                            var strandedStrms = FindExistingSeriesStrms(config, subFolder, seriesName);
+                            if (strandedStrms.Length > 0)
+                            {
+                                foreach (var strm in strandedStrms)
+                                {
+                                    lock (writtenPaths) { writtenPaths.Add(strm); }
+                                }
+
+                                _logger.Warn(
+                                    "Series '{0}' (id={1}) returned no episodes but has {2} STRM file(s) on disk — keeping them and skipping orphan cleanup this run",
+                                    series.Name, series.SeriesId, strandedStrms.Length);
+                                Interlocked.Increment(ref _seriesProgress.Failed);
+                            }
+
                             Interlocked.Increment(ref _seriesProgress.Completed);
                             ReportTaskProgress(_seriesProgress, taskProgress);
                             return;
@@ -1045,7 +1193,7 @@ namespace Emby.Xtream.Plugin.Service
                                 var streamUrl = string.Format(
                                     CultureInfo.InvariantCulture,
                                     "{0}/series/{1}/{2}/{3}.{4}",
-                                    config.BaseUrl, config.Username, config.Password, episode.Id, ext);
+                                    config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), episode.Id, ext);
 
                                 // Skip write if file content is already up to date (avoids Emby library re-scan)
                                 var fileExists = File.Exists(strmPath);
@@ -1121,12 +1269,13 @@ namespace Emby.Xtream.Plugin.Service
                         config, excludedSeriesItems, config.SeriesFolderMode, categoryNames, folderMappings, "Shows");
                 }
 
-                // Cleanup orphans
-                if (config.CleanupOrphans && _seriesProgress.Failed == 0)
+                // Cleanup orphans. Skipped when any category failed to answer — see the
+                // matching block in SyncMoviesAsync.
+                if (config.CleanupOrphans && _seriesProgress.Failed == 0 && !seriesFetch.HadFailures)
                 {
                     _seriesProgress.Phase = "Cleaning up orphaned files";
                     var showsRoot = Path.Combine(config.StrmLibraryPath, "Shows");
-                    var deletedEpisodes = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold);
+                    var deletedEpisodes = CleanupOrphans(showsRoot, writtenPaths, config.OrphanSafetyThreshold, config);
                     _seriesProgress.Deleted += deletedEpisodes;
                     _episodeProgress.Deleted = deletedEpisodes;
                 }
@@ -1203,18 +1352,51 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        public async Task RetryFailedAsync(CancellationToken cancellationToken)
+        /// <summary>
+        /// Re-attempts the items that failed in the last sync.
+        /// </summary>
+        /// <returns>False when a movie sync or another retry was already running.</returns>
+        public async Task<bool> RetryFailedAsync(CancellationToken cancellationToken)
         {
             List<FailedSyncItem> items;
             lock (_failedItemsLock) { items = _failedItems.ToList(); }
-            if (items.Count == 0) return;
+            if (items.Count == 0) return true;
 
-            var config = Plugin.Instance.Configuration;
-            _movieProgress = new SyncProgress { IsRunning = true, Phase = "Retrying failed items", Total = items.Count };
+            // Shares _movieProgress with SyncMoviesAsync and writes into the same movie tree, so it
+            // takes the same gate rather than racing a sync that is already underway.
+            if (!await _movieSyncGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            {
+                _logger.Warn("Retry requested while a movie sync is already running — ignoring the duplicate request");
+                return false;
+            }
 
+            // Nothing between acquiring a gate and its finally may throw, or the gate is held for
+            // good and every later movie sync is refused until Emby restarts. The series
+            // WaitAsync below throws on a cancelled token, and Plugin.Instance.Configuration
+            // throws when ApplicationPaths is not initialised yet, so both sit inside.
+            var seriesGateHeld = false;
+            var retryStarted = false;
             try
             {
-                var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                // A retry batch can contain series items, and those write episodes under Shows.
+                // Without the series gate a concurrent series sync would not have the
+                // retry-written paths in its valid set, so its orphan cleanup would delete them —
+                // and they would pass the ownership check precisely because the retry wrote them.
+                if (items.Any(i => i.ItemType == "Series"))
+                {
+                    seriesGateHeld = await _seriesSyncGate.WaitAsync(0, cancellationToken).ConfigureAwait(false);
+                    if (!seriesGateHeld)
+                    {
+                        _logger.Warn("Retry requested while a series sync is already running — ignoring the duplicate request");
+                        return false;
+                    }
+                }
+
+                var config = Plugin.Instance.Configuration;
+                _movieProgress = new SyncProgress { IsRunning = true, Phase = "Retrying failed items", Total = items.Count };
+                retryStarted = true;
+
+                var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
                 var categoryNames = new Dictionary<int, string>();
                 var folderMappings = FolderMappingParser.Parse(config.MovieFolderMappings);
                 var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1253,11 +1435,25 @@ namespace Emby.Xtream.Plugin.Service
                     foreach (var s in succeeded)
                         _failedItems.Remove(s);
                 }
+
+                return true;
             }
             finally
             {
-                _movieProgress.IsRunning = false;
-                _movieProgress.Phase = "Retry complete";
+                // Only report a finished retry if one actually started. Bailing out because the
+                // series gate was taken leaves the previous run's progress object in place, and
+                // stamping "Retry complete" on it would describe a run that never happened.
+                if (retryStarted)
+                {
+                    _movieProgress.IsRunning = false;
+                    _movieProgress.Phase = "Retry complete";
+                }
+
+                if (seriesGateHeld)
+                {
+                    _seriesSyncGate.Release();
+                }
+                _movieSyncGate.Release();
             }
         }
 
@@ -1285,7 +1481,7 @@ namespace Emby.Xtream.Plugin.Service
             var streamUrl = string.Format(
                 CultureInfo.InvariantCulture,
                 "{0}/movie/{1}/{2}/{3}.{4}",
-                config.BaseUrl, config.Username, config.Password, item.StreamId, ext);
+                config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), item.StreamId, ext);
 
             var fileExists = File.Exists(strmPath);
 
@@ -1355,7 +1551,7 @@ namespace Emby.Xtream.Plugin.Service
                     var ext = !string.IsNullOrEmpty(ep.ContainerExtension) ? ep.ContainerExtension : "mp4";
                     var epUrl = string.Format(CultureInfo.InvariantCulture,
                         "{0}/series/{1}/{2}/{3}.{4}",
-                        config.BaseUrl, config.Username, config.Password, ep.Id, ext);
+                        config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), ep.Id, ext);
 
                     var fileExists = File.Exists(epPath);
 
@@ -1612,7 +1808,7 @@ namespace Emby.Xtream.Plugin.Service
             // Fallback: derive categories from series list
             _logger.Info("get_series_categories returned empty, deriving from series list");
             var seriesList = await FetchSeriesListAsync(null, config, cancellationToken).ConfigureAwait(false);
-            return seriesList
+            return seriesList.Items
                 .Where(s => s.CategoryId.HasValue)
                 .GroupBy(s => s.CategoryId.Value)
                 .Select(g => new Category
@@ -1625,14 +1821,17 @@ namespace Emby.Xtream.Plugin.Service
                 .ToList();
         }
 
-        private async Task<List<VodStreamInfo>> FetchVodStreamsAsync(
+        private async Task<CatalogueFetchResult<VodStreamInfo>> FetchVodStreamsAsync(
             int[] categoryIds, PluginConfiguration config, CancellationToken cancellationToken)
         {
+            var result = new CatalogueFetchResult<VodStreamInfo>();
             var allStreams = new List<VodStreamInfo>();
 
             if (categoryIds == null || categoryIds.Length == 0)
             {
-                // Fetch all VOD streams
+                // Fetch all VOD streams. A throw here propagates: the caller's outer catch
+                // aborts the sync before cleanup, which is the correct outcome for the
+                // whole-catalogue request failing.
                 var url = string.Format(
                     CultureInfo.InvariantCulture,
                     "{0}/player_api.php?username={1}&password={2}&action=get_vod_streams",
@@ -1644,7 +1843,8 @@ namespace Emby.Xtream.Plugin.Service
             }
             else
             {
-                var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                result.RequestedCategoryCount = categoryIds.Length;
+                var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
                 var tasks = categoryIds.Select(async catId =>
                 {
                     await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1668,12 +1868,15 @@ namespace Emby.Xtream.Plugin.Service
                             s.CategoryId = catId;
                         }
 
-                        return streams;
+                        return Tuple.Create(streams, true);
                     }
                     catch (Exception ex)
                     {
+                        // Report the failure rather than returning an empty list. An empty list
+                        // is indistinguishable from an empty category and would let orphan
+                        // cleanup delete this category's existing files.
                         _logger.Warn("Failed to fetch VOD streams for category {0}: {1}", catId, ex.Message);
-                        return new List<VodStreamInfo>();
+                        return Tuple.Create(new List<VodStreamInfo>(), false);
                     }
                     finally
                     {
@@ -1682,21 +1885,30 @@ namespace Emby.Xtream.Plugin.Service
                 });
 
                 var results = await Task.WhenAll(tasks).ConfigureAwait(false);
-                foreach (var result in results)
+                foreach (var r in results)
                 {
-                    allStreams.AddRange(result);
+                    if (r.Item2)
+                    {
+                        allStreams.AddRange(r.Item1);
+                    }
+                    else
+                    {
+                        result.FailedCategoryCount++;
+                    }
                 }
 
                 // Deduplicate by StreamId (first occurrence wins, keeping its assigned category)
                 allStreams = allStreams.GroupBy(s => s.StreamId).Select(g => g.First()).ToList();
             }
 
-            return allStreams;
+            result.Items = allStreams;
+            return result;
         }
 
-        private async Task<List<SeriesInfo>> FetchSeriesListAsync(
+        private async Task<CatalogueFetchResult<SeriesInfo>> FetchSeriesListAsync(
             int[] categoryIds, PluginConfiguration config, CancellationToken cancellationToken)
         {
+            var result = new CatalogueFetchResult<SeriesInfo>();
             var allSeries = new List<SeriesInfo>();
 
             if (categoryIds == null || categoryIds.Length == 0)
@@ -1712,7 +1924,8 @@ namespace Emby.Xtream.Plugin.Service
             }
             else
             {
-                var semaphore = new SemaphoreSlim(config.SyncParallelism);
+                result.RequestedCategoryCount = categoryIds.Length;
+                var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
                 var tasks = categoryIds.Select(async catId =>
                 {
                     await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1734,12 +1947,13 @@ namespace Emby.Xtream.Plugin.Service
                             s.CategoryId = catId;
                         }
 
-                        return series;
+                        return Tuple.Create(series, true);
                     }
                     catch (Exception ex)
                     {
+                        // See FetchVodStreamsAsync: a failure must not look like an empty category.
                         _logger.Warn("Failed to fetch series for category {0}: {1}", catId, ex.Message);
-                        return new List<SeriesInfo>();
+                        return Tuple.Create(new List<SeriesInfo>(), false);
                     }
                     finally
                     {
@@ -1748,15 +1962,58 @@ namespace Emby.Xtream.Plugin.Service
                 });
 
                 var results = await Task.WhenAll(tasks).ConfigureAwait(false);
-                foreach (var result in results)
+                foreach (var r in results)
                 {
-                    allSeries.AddRange(result);
+                    if (r.Item2)
+                    {
+                        allSeries.AddRange(r.Item1);
+                    }
+                    else
+                    {
+                        result.FailedCategoryCount++;
+                    }
                 }
 
                 allSeries = allSeries.GroupBy(s => s.SeriesId).Select(g => g.First()).ToList();
             }
 
-            return allSeries;
+            result.Items = allSeries;
+            return result;
+        }
+
+        /// <summary>
+        /// Finds the STRM files already on disk for <paramref name="seriesName"/>, if any.
+        /// </summary>
+        /// <remarks>
+        /// Used only on the empty-detail path, so the per-series readdir stays off the hot loop.
+        /// Folder names carry an optional metadata-ID suffix, so the comparison strips it the same
+        /// way the pre-fetch smart-skip index does.
+        /// </remarks>
+        private string[] FindExistingSeriesStrms(PluginConfiguration config, string subFolder, string seriesName)
+        {
+            try
+            {
+                var parent = Path.Combine(config.StrmLibraryPath, subFolder);
+                if (!Directory.Exists(parent))
+                {
+                    return Array.Empty<string>();
+                }
+
+                foreach (var dir in Directory.GetDirectories(parent))
+                {
+                    var stripped = StripFolderIdSuffix(Path.GetFileName(dir));
+                    if (string.Equals(stripped, seriesName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Directory.GetFiles(dir, "*.strm", SearchOption.AllDirectories);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug("Could not probe existing STRM files for series '{0}': {1}", seriesName, ex.Message);
+            }
+
+            return Array.Empty<string>();
         }
 
         private async Task<SeriesDetailInfo> FetchSeriesDetailAsync(
@@ -1851,32 +2108,22 @@ namespace Emby.Xtream.Plugin.Service
 
                 try
                 {
-                    // Ownership check: a folder holding no STRM was not written by this plugin.
-                    // Matching is by title alone, so without this a user's own "Ben-Hur" folder
-                    // would be destroyed by excluding the provider's "Ben-Hur".
-                    var strmFiles = Directory.GetFiles(existingDir, "*.strm", SearchOption.AllDirectories);
-                    if (strmFiles.Length == 0)
+                    // Delete only the files this plugin actually wrote, verified by content, then
+                    // prune whatever that emptied. Matching is by title alone, so a match is not
+                    // proof of ownership: without this a user's own "Ben-Hur" folder would be
+                    // destroyed by excluding the provider's "Ben-Hur", and a hand-written .nfo or a
+                    // trailer.strm sitting beside our output would go with it. See ADR-014.
+                    var deletedFiles = StrmOwnership.DeleteOwnedFiles(
+                        existingDir, config.BaseUrl, config.DispatcharrUrl, out var folderGone);
+
+                    if (deletedFiles == 0)
                     {
                         _logger.Debug(
-                            "Skipping '{0}' for excluded item '{1}': no STRM files, so this folder isn't ours",
+                            "Skipping '{0}' for excluded item '{1}': nothing in it was written by this plugin",
                             existingDir, sanitized);
                         continue;
                     }
 
-                    // Delete only what we wrote, then prune whatever that emptied. Anything the
-                    // user put alongside it survives, and so does the folder if it still holds
-                    // content. Same contract as CleanupOrphans.
-                    foreach (var file in Directory.GetFiles(existingDir, "*.*", SearchOption.AllDirectories))
-                    {
-                        var ext = Path.GetExtension(file);
-                        if (string.Equals(ext, ".strm", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(ext, ".nfo", StringComparison.OrdinalIgnoreCase))
-                        {
-                            File.Delete(file);
-                        }
-                    }
-
-                    var folderGone = TryPruneEmptyTree(existingDir);
                     dirIndex.Remove(sanitized);
                     removed++;
                     _logger.Info(
@@ -1900,34 +2147,9 @@ namespace Emby.Xtream.Plugin.Service
             return removed;
         }
 
-        /// <summary>
-        /// Deletes <paramref name="dir"/> and any subdirectory of it that is empty, deepest first.
-        /// Stops at the first level that still holds something.
-        /// </summary>
-        /// <param name="dir">The directory to prune.</param>
-        /// <returns>True if <paramref name="dir"/> itself was removed.</returns>
-        private static bool TryPruneEmptyTree(string dir)
-        {
-            if (!Directory.Exists(dir))
-            {
-                return true;
-            }
 
-            foreach (var sub in Directory.GetDirectories(dir))
-            {
-                TryPruneEmptyTree(sub);
-            }
-
-            if (Directory.GetFileSystemEntries(dir).Length == 0)
-            {
-                Directory.Delete(dir);
-                return true;
-            }
-
-            return false;
-        }
-
-        private int CleanupOrphans(string rootPath, HashSet<string> validPaths, double safetyThreshold)
+        private int CleanupOrphans(
+            string rootPath, HashSet<string> validPaths, double safetyThreshold, PluginConfiguration config)
         {
             if (!Directory.Exists(rootPath))
             {
@@ -1935,45 +2157,75 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             var existingStrms = Directory.GetFiles(rootPath, "*.strm", SearchOption.AllDirectories);
-            var orphanCount = existingStrms.Count(s => !validPaths.Contains(s));
 
-            if (safetyThreshold > 0 && existingStrms.Length > 10 && orphanCount > 0)
+            // Nothing was written or preserved this run, but files exist on disk. That is a
+            // provider returning an empty catalogue, not the user deleting their whole library.
+            // The ratio guard below cannot catch this at small N (it only applies above 10 files),
+            // so refuse outright rather than emptying the library. See ADR-013.
+            if (validPaths.Count == 0 && existingStrms.Length > 0)
             {
-                double ratio = (double)orphanCount / existingStrms.Length;
+                _logger.Warn(
+                    "Orphan cleanup skipped: the catalogue produced no files this run but {0} STRM file(s) exist under {1} — refusing to treat an empty catalogue as a deletion",
+                    existingStrms.Length, rootPath);
+                return 0;
+            }
+
+            // Being a .strm under our library root is not proof we wrote it. Verify ownership
+            // before considering anything for deletion — a user's own STRM that the provider
+            // never listed would otherwise look exactly like an orphan. Only orphan candidates
+            // are read, so the cost stays proportional to deletions, not to library size.
+            var orphans = existingStrms
+                .Where(s => !validPaths.Contains(s))
+                .Where(s => StrmOwnership.IsOwnedStrm(s, config.BaseUrl, config.DispatcharrUrl))
+                .ToList();
+
+            var foreignCount = existingStrms.Length - validPaths.Count - orphans.Count;
+            if (foreignCount > 0)
+            {
+                _logger.Info(
+                    "Orphan cleanup: leaving {0} STRM file(s) under {1} that this plugin did not write",
+                    foreignCount, rootPath);
+            }
+
+            // Ratio is taken over the files we could actually have written (what we wrote or kept,
+            // plus the orphans we own). Counting foreign files in the denominator would dilute the
+            // ratio and make the guard fire less often than intended.
+            var ownedTotal = validPaths.Count + orphans.Count;
+            if (safetyThreshold > 0 && ownedTotal > 10 && orphans.Count > 0)
+            {
+                double ratio = (double)orphans.Count / ownedTotal;
                 if (ratio > safetyThreshold)
                 {
                     _logger.Warn(
                         "Orphan cleanup skipped: {0}/{1} ({2:P0}) exceeds safety threshold {3:P0} — possible provider issue",
-                        orphanCount, existingStrms.Length, ratio, safetyThreshold);
+                        orphans.Count, ownedTotal, ratio, safetyThreshold);
                     return 0;
                 }
             }
+
             var removed = 0;
 
-            foreach (var strmFile in existingStrms)
+            foreach (var strmFile in orphans)
             {
-                if (!validPaths.Contains(strmFile))
+                try
                 {
-                    try
-                    {
-                        File.Delete(strmFile);
-                        removed++;
+                    File.Delete(strmFile);
+                    removed++;
 
-                        // Remove empty parent directories
-                        var dir = Path.GetDirectoryName(strmFile);
-                        while (!string.IsNullOrEmpty(dir) &&
-                               !string.Equals(dir, rootPath, StringComparison.OrdinalIgnoreCase) &&
-                               Directory.Exists(dir) &&
-                               Directory.GetFileSystemEntries(dir).Length == 0)
-                        {
-                            Directory.Delete(dir);
-                            dir = Path.GetDirectoryName(dir);
-                        }
-                    }
-                    catch (Exception ex)
+                    // Remove empty parent directories
+                    var dir = Path.GetDirectoryName(strmFile);
+                    while (!string.IsNullOrEmpty(dir) &&
+                           !string.Equals(dir, rootPath, StringComparison.OrdinalIgnoreCase) &&
+                           Directory.Exists(dir) &&
+                           Directory.GetFileSystemEntries(dir).Length == 0)
                     {
-                        _logger.Debug("Failed to cleanup orphan '{0}': {1}", strmFile, ex.Message);
+                        Directory.Delete(dir);
+                        dir = Path.GetDirectoryName(dir);
                     }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug("Failed to cleanup orphan '{0}': {1}", strmFile, ex.Message);
                 }
             }
 

@@ -528,10 +528,20 @@ namespace Emby.Xtream.Plugin.Api
 
             try
             {
-                await syncService.SyncMoviesAsync(
+                var ran = await syncService.SyncMoviesAsync(
                     config,
                     CancellationToken.None,
                     () => Plugin.Instance.SaveConfiguration()).ConfigureAwait(false);
+
+                // The IsRunning check above is a fast path; the service holds the real gate and is
+                // the only thing that can answer this without a race.
+                if (!ran)
+                {
+                    result.Success = false;
+                    result.Message = "Movie sync is already running.";
+                    return result;
+                }
+
                 var progress = syncService.MovieProgress;
                 if (!string.IsNullOrEmpty(progress.AbortReason))
                 {
@@ -583,10 +593,19 @@ namespace Emby.Xtream.Plugin.Api
 
             try
             {
-                await syncService.SyncSeriesAsync(
+                var ran = await syncService.SyncSeriesAsync(
                     config,
                     CancellationToken.None,
                     () => Plugin.Instance.SaveConfiguration()).ConfigureAwait(false);
+
+                // See Post(SyncMovies): the service gate is authoritative, the check above is not.
+                if (!ran)
+                {
+                    result.Success = false;
+                    result.Message = "Series sync is already running.";
+                    return result;
+                }
+
                 var progress = syncService.SeriesProgress;
                 if (!string.IsNullOrEmpty(progress.AbortReason))
                 {
@@ -658,16 +677,32 @@ namespace Emby.Xtream.Plugin.Api
             if (syncService.FailedItems.Count == 0)
                 return new SyncResult { Success = false, Message = "No failed items to retry." };
 
-            await syncService.RetryFailedAsync(CancellationToken.None).ConfigureAwait(false);
-            var p = syncService.MovieProgress;
-            return new SyncResult
+            // Catch like the sibling sync endpoints do. RetryFailedAsync can throw (reading the
+            // configuration needs ApplicationPaths), and an uncaught exception here comes back as
+            // a generic ServiceStack error DTO instead of the SyncResult the UI expects.
+            try
             {
-                Success = true,
-                Message = "Retry complete.",
-                Total = p.Total,
-                Completed = p.Completed,
-                Failed = p.Failed
-            };
+                var ran = await syncService.RetryFailedAsync(CancellationToken.None).ConfigureAwait(false);
+
+                // The IsRunning check above is a fast path; the service holds the real gate.
+                // Without this the endpoint reports "Retry complete" for a retry that never started.
+                if (!ran)
+                    return new SyncResult { Success = false, Message = "A sync is already running." };
+
+                var p = syncService.MovieProgress;
+                return new SyncResult
+                {
+                    Success = true,
+                    Message = "Retry complete.",
+                    Total = p.Total,
+                    Completed = p.Completed,
+                    Failed = p.Failed
+                };
+            }
+            catch (Exception ex)
+            {
+                return new SyncResult { Success = false, Message = "Retry failed: " + ex.Message };
+            }
         }
 
         public object Get(GetDashboard request)
@@ -787,14 +822,38 @@ namespace Emby.Xtream.Plugin.Api
                     return result;
                 }
 
+                // Clear only what this plugin wrote. The library root can be shared with content
+                // the user manages themselves, and a recursive delete of the whole root took that
+                // with it — the same class of data loss as BUG-028, reached through a button
+                // instead of a sync. See ADR-014.
                 var dirs = Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly);
-                result.DeletedFolders = dirs.Length;
+                var removedFolders = 0;
+                var removedFiles = 0;
+                var keptFolders = 0;
 
-                Directory.Delete(root, true);
-                Directory.CreateDirectory(root);
+                foreach (var dir in dirs)
+                {
+                    var deleted = StrmOwnership.DeleteOwnedFiles(
+                        dir, config.BaseUrl, config.DispatcharrUrl, out var folderRemoved);
 
+                    removedFiles += deleted;
+                    if (folderRemoved)
+                    {
+                        removedFolders++;
+                    }
+                    else
+                    {
+                        keptFolders++;
+                    }
+                }
+
+                result.DeletedFolders = removedFolders;
                 result.Success = true;
-                result.Message = string.Format("Deleted {0} folders from {1}.", dirs.Length, folderName);
+                result.Message = keptFolders > 0
+                    ? string.Format(
+                        "Deleted {0} folders ({1} files) from {2}. Kept {3} folder(s) holding content this plugin did not write.",
+                        removedFolders, removedFiles, folderName, keptFolders)
+                    : string.Format("Deleted {0} folders ({1} files) from {2}.", removedFolders, removedFiles, folderName);
             }
             catch (Exception ex)
             {
@@ -1383,6 +1442,9 @@ namespace Emby.Xtream.Plugin.Api
             var sanitized = new StringBuilder();
             foreach (var line in lines)
             {
+                // Raw values, not escaped: SanitizeLine redacts both forms itself. Passing the
+                // escaped form here would leave the raw credentials unredacted in the log a user
+                // is about to attach to a bug report.
                 var s = LogSanitizer.SanitizeLine(line,
                     config.Username, config.Password,
                     config.DispatcharrUser, config.DispatcharrPass);
