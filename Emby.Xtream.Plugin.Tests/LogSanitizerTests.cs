@@ -43,6 +43,30 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public void ShortCredentialCannotSplitAnotherCredentialsEscapedForm()
+        {
+            // "%20" lands inside the escaped form of "p q" ("p%20q"). Replacing one value at a
+            // time would split it, so the longer value stops matching and its readable characters
+            // survive. One pass over all forms, longest first, cannot do that.
+            var result = LogSanitizer.SanitizeLine(
+                "url http://h/movie/u/p%20q/1.mkv", "%20", "p q", "", "");
+
+            Assert.DoesNotContain("p%20q", result);
+            Assert.DoesNotContain("%20q", result);
+        }
+
+        [Fact]
+        public void RedactionMarkerIsNotRescannedByLaterValues()
+        {
+            // A credential that occurs inside the marker text must not chew up an earlier
+            // redaction. A single pass never revisits what it already replaced.
+            var result = LogSanitizer.SanitizeLine(
+                "user bob logged in", "bob", "redacted", "", "");
+
+            Assert.Contains("<redacted>", result);
+        }
+
+        [Fact]
         public void RedactsPercentEncodedCredentialsInUrls()
         {
             // Credentials go into generated URLs escaped, so the escaped form is what actually

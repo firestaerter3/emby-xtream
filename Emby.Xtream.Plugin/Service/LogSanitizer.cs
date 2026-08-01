@@ -38,22 +38,7 @@ namespace Emby.Xtream.Plugin.Service
 
             var s = line;
 
-            // Redact specific config values if non-empty. Callers pass the raw values; both the
-            // raw and percent-encoded forms are redacted here, because generated URLs carry the
-            // escaped form while other log lines carry the raw one.
-            //
-            // Longest first. A shorter value that is a prefix of a longer one would otherwise
-            // rewrite it out of existence before its own turn: username "abc" against password
-            // "abc/secret" leaves "<redacted>/secret", and the "/secret" tail reaches the
-            // downloadable log.
-            var values = new[] { username, password, dispatcharrUser, dispatcharrPass }
-                .Where(v => !string.IsNullOrEmpty(v))
-                .OrderByDescending(v => v.Length);
-
-            foreach (var value in values)
-            {
-                s = RedactValue(s, value);
-            }
+            s = RedactCredentials(s, username, password, dispatcharrUser, dispatcharrPass);
 
             // Redact IP addresses, but preserve version numbers (e.g. Version=1.2.0.0)
             // Replace version patterns with placeholders first, then redact IPs, then restore
@@ -82,39 +67,52 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         /// <summary>
-        /// Redacts <paramref name="value"/> from <paramref name="line"/> in both its raw and
-        /// percent-encoded forms.
+        /// Redacts every configured credential from <paramref name="line"/>, in both its raw and
+        /// percent-encoded form.
         /// </summary>
         /// <remarks>
         /// Credentials go into generated URLs escaped, so a password of <c>p/w</c> appears in a
         /// stream URL as <c>p%2Fw</c>. Redacting only one form leaks the other into the log a user
         /// attaches to a bug report.
+        ///
+        /// Every form of every credential goes into one alternation, longest first, applied in a
+        /// single pass. Replacing them one at a time is not safe no matter how the credentials are
+        /// ordered: a short value can land inside another value's escaped form and split it, which
+        /// both stops the longer one from matching and leaves readable pieces of it behind. A
+        /// single pass also cannot match inside text it has already replaced.
         /// </remarks>
-        private static string RedactValue(string line, string value)
+        private static string RedactCredentials(string line, params string[] values)
         {
-            if (string.IsNullOrEmpty(value))
+            var candidates = values
+                .Where(v => !string.IsNullOrEmpty(v))
+                .SelectMany(v => new[] { v, TryEscape(v) })
+                .Where(v => !string.IsNullOrEmpty(v))
+                .Distinct(StringComparer.Ordinal)
+                .OrderByDescending(v => v.Length)
+                .ToList();
+
+            if (candidates.Count == 0)
             {
                 return line;
             }
 
-            var s = line.Replace(value, "<redacted>");
+            // Alternation is leftmost-first, so listing longest first makes the longest candidate
+            // win at any position where several could match.
+            var pattern = string.Join("|", candidates.Select(Regex.Escape));
+            return Regex.Replace(line, pattern, "<redacted>");
+        }
 
-            string escaped;
+        private static string TryEscape(string value)
+        {
             try
             {
-                escaped = Uri.EscapeDataString(value);
+                return Uri.EscapeDataString(value);
             }
             catch (UriFormatException)
             {
-                return s;
+                // Nothing to add for a value the escaper rejects; the raw form is still covered.
+                return null;
             }
-
-            if (!string.Equals(escaped, value, StringComparison.Ordinal))
-            {
-                s = s.Replace(escaped, "<redacted>");
-            }
-
-            return s;
         }
     }
 }
