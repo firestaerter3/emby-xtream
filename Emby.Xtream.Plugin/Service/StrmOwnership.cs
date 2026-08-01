@@ -86,7 +86,7 @@ namespace Emby.Xtream.Plugin.Service
         /// </remarks>
         /// <param name="nfoPath">Full path to a <c>.nfo</c> file.</param>
         /// <param name="ownedStrmsInTree">Owned STRM paths found anywhere under the item folder.</param>
-        public static bool IsOwnedNfo(string nfoPath, ICollection<string> ownedStrmsInTree)
+        private static bool IsOwnedNfo(string nfoPath, ICollection<string> ownedStrmsInTree)
         {
             if (ownedStrmsInTree == null || ownedStrmsInTree.Count == 0)
             {
@@ -182,7 +182,7 @@ namespace Emby.Xtream.Plugin.Service
         /// </summary>
         /// <param name="dir">The directory to prune.</param>
         /// <returns>True if <paramref name="dir"/> itself was removed.</returns>
-        public static bool TryPruneEmptyTree(string dir)
+        private static bool TryPruneEmptyTree(string dir)
         {
             if (!Directory.Exists(dir))
             {

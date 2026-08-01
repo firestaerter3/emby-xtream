@@ -817,9 +817,8 @@ namespace Emby.Xtream.Plugin.Api
 
                 foreach (var dir in dirs)
                 {
-                    bool folderRemoved;
-                    var deleted = Emby.Xtream.Plugin.Service.StrmOwnership.DeleteOwnedFiles(
-                        dir, config.BaseUrl, config.DispatcharrUrl, out folderRemoved);
+                    var deleted = StrmOwnership.DeleteOwnedFiles(
+                        dir, config.BaseUrl, config.DispatcharrUrl, out var folderRemoved);
 
                     removedFiles += deleted;
                     if (folderRemoved)
