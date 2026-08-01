@@ -97,8 +97,9 @@ Moonshine's alternative workaround (hardcoding `'xtream-tuner' not in mgmt_id`) 
 - It introduced a hard regression: Dispatcharr-sourced station IDs were discarded, breaking existing setups
 - The root cause belongs in Channel Identifiarr, not the plugin
 
-PR #21 was closed on 2026-03-24. Its branch is `claude/integrate-channel-identifier-art-8YDiZ`, and
-this section is the record of why the code was not taken; the reasoning matters more than the branch.
+PR #21 was closed on 2026-03-24 and its branch deleted on 2026-08-01, so this section is now the
+only record of the approach and why it was not taken. The code is recoverable from the closed PR on
+GitHub if it is ever needed again.
 
 The rejection still stands even though the upstream fix was never merged: the four objections are
 about the approach, not about whether Channel Identifiarr eventually got fixed.
