@@ -1073,8 +1073,18 @@ namespace Emby.Xtream.Plugin.Api
         {
             try
             {
-                var testFile = System.IO.Path.Combine(path, ".xtream_write_test");
-                File.WriteAllText(testFile, string.Empty);
+                // Unique per call, and CreateNew so we can never truncate a file that was
+                // already there. A fixed name would clobber a user file of that name, and two
+                // concurrent probes would delete each other's. Deleting something we did not
+                // create is the whole failure mode this guard exists to prevent.
+                var testFile = System.IO.Path.Combine(
+                    path, ".xtream_write_test_" + Guid.NewGuid().ToString("N"));
+
+                using (new FileStream(testFile, FileMode.CreateNew, FileAccess.Write))
+                {
+                }
+
+                // delete-ok: removes the file the CreateNew above proved this call created.
                 File.Delete(testFile);
                 return true;
             }
@@ -1296,6 +1306,7 @@ namespace Emby.Xtream.Plugin.Api
                 {
                     // Back up current DLL
                     if (File.Exists(bakPath))
+                        // delete-ok: plugin DLL backup in the plugins directory, not library content.
                         File.Delete(bakPath);
                     File.Move(currentDll, bakPath);
 
@@ -1303,6 +1314,7 @@ namespace Emby.Xtream.Plugin.Api
                     File.Move(tempPath, currentDll);
 
                     // Clean up backup on success
+                    // delete-ok: plugin DLL backup in the plugins directory, not library content.
                     try { File.Delete(bakPath); } catch { }
                 }
                 catch
@@ -1315,6 +1327,7 @@ namespace Emby.Xtream.Plugin.Api
                     }
                     catch { }
 
+                    // delete-ok: downloaded update temp file, not library content.
                     try { File.Delete(tempPath); } catch { }
                     throw;
                 }

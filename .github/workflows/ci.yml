@@ -22,6 +22,15 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # Cheap and independent of the build, so they report before a compile error can hide
+      # them. The guard runs its own self-test first: a guard that cannot reject is the same
+      # problem as a test that cannot fail.
+      - name: Test delete-site guard
+        run: python3 scripts/test-check-delete-sites.py
+
+      - name: Check delete sites
+        run: python3 scripts/check-delete-sites.py
+
       - name: Restore tests
         run: dotnet restore Emby.Xtream.Plugin.Tests/
 
@@ -37,6 +46,39 @@ jobs:
         with:
           name: test-results
           path: '**/*.trx'
+
+  mutation:
+    name: Mutation (delete paths)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Stryker 4.16 ships as net8.0. Installing both runtimes is cleaner than
+      # forcing roll-forward, and keeps the failure mode obvious if either moves.
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Install Stryker
+        run: dotnet tool install -g dotnet-stryker --version 4.16.0
+
+      # Scoped to StrmOwnership and the delete methods of StrmSyncService. These are the
+      # only paths that remove a user's files, and a test that cannot fail there is worse
+      # than no test: it reads as coverage. Breaks below 75%; see stryker-config.json.
+      - name: Mutation test delete paths
+        working-directory: Emby.Xtream.Plugin.Tests
+        run: $HOME/.dotnet/tools/dotnet-stryker --config-file ../stryker-config.json
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: Emby.Xtream.Plugin.Tests/StrykerOutput/**/reports/*
+          if-no-files-found: ignore
 
   qodana:
     name: Qodana

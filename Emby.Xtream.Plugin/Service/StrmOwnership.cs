@@ -85,14 +85,13 @@ namespace Emby.Xtream.Plugin.Service
         /// in the library — a user's <c>movie.nfo</c>, a hand-edited episode NFO — is foreign.
         /// </remarks>
         /// <param name="nfoPath">Full path to a <c>.nfo</c> file.</param>
-        /// <param name="ownedStrmsInTree">Owned STRM paths found anywhere under the item folder.</param>
+        /// <param name="ownedStrmsInTree">
+        /// Owned STRM paths found anywhere under the item folder. Never empty: the only caller
+        /// returns before reaching here when nothing in the folder is ours. A null/empty guard
+        /// used to sit here and mutation testing showed it was unreachable.
+        /// </param>
         private static bool IsOwnedNfo(string nfoPath, ICollection<string> ownedStrmsInTree)
         {
-            if (ownedStrmsInTree == null || ownedStrmsInTree.Count == 0)
-            {
-                return false;
-            }
-
             if (string.Equals(Path.GetFileName(nfoPath), ShowNfoName, StringComparison.OrdinalIgnoreCase))
             {
                 // A tvshow.nfo only exists because we wrote episodes under it.
@@ -133,6 +132,12 @@ namespace Emby.Xtream.Plugin.Service
             {
                 // Resolve ownership across the whole tree BEFORE deleting anything, because the
                 // NFO rule is defined in terms of the STRM files that were there.
+                //
+                // The "*.strm" glob is a deletion boundary, not a speed filter. IsOwnedStrm only
+                // inspects content, so widening this pattern would let any file that happens to
+                // contain the provider URL be classified as ours and deleted — a user's notes.txt
+                // holding a copy of a stream link, for instance. Extension and content both have
+                // to agree. Locked by DeleteOwnedFiles_NonStrmFileWithProviderUrlSurvives.
                 ownedStrms = Directory
                     .GetFiles(dir, "*.strm", SearchOption.AllDirectories)
                     .Where(f => IsOwnedStrm(f, baseUrl, dispatcharrUrl))

@@ -2209,6 +2209,8 @@ namespace Emby.Xtream.Plugin.Service
             {
                 try
                 {
+                    // delete-ok: `orphans` is already filtered through StrmOwnership.IsOwnedStrm
+                    // above, so every path here is one this plugin wrote.
                     File.Delete(strmFile);
                     removed++;
 
@@ -2219,6 +2221,7 @@ namespace Emby.Xtream.Plugin.Service
                            Directory.Exists(dir) &&
                            Directory.GetFileSystemEntries(dir).Length == 0)
                     {
+                        // delete-ok: prunes a directory the loop condition just proved empty.
                         Directory.Delete(dir);
                         dir = Path.GetDirectoryName(dir);
                     }
