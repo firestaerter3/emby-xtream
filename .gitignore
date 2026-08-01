@@ -66,3 +66,7 @@ docs/superpowers/
 
 # Mutation testing output
 StrykerOutput/
+
+# Python bytecode
+__pycache__/
+*.pyc
