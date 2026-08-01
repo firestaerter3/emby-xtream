@@ -1,7 +1,7 @@
 # ADR-006: Channel Identifiarr ManagementId Bug and Fix
 
 **Date**: 2026-03-25
-**Status**: FIX PUSHED (PR #7 updated, awaiting merge)
+**Status**: NOT ACCEPTED UPSTREAM — PR #7 was closed without being merged, and issue #6 is still open (checked 2026-08-01)
 **Affects**: Channel Identifiarr `backend/app.py` (`scan_emby_missing_listings`)
 **Issue**: [Pharaoh-Labs/channelidentifiarr#6](https://github.com/Pharaoh-Labs/channelidentifiarr/issues/6)
 **PR**: [Pharaoh-Labs/channelidentifiarr#7](https://github.com/Pharaoh-Labs/channelidentifiarr/pull/7)
@@ -80,7 +80,13 @@ Moonshine's alternative workaround (hardcoding `'xtream-tuner' not in mgmt_id`) 
 - Setups with Dispatcharr: only channels with `tvc_guide_stationid` get station IDs. Stream ID collisions are eliminated.
 - Setups without Dispatcharr: unchanged behaviour (ManagementId parsing, works for M3U tuners).
 - Name/number matching between Emby and Dispatcharr may miss channels with slightly different names. Those channels simply don't get a Gracenote lineup — they fall back to Xtream EPG via the plugin. This is acceptable.
-- PR #7 has been updated with the mutual-exclusion fix (commit `84c8183`). Awaiting merge by upstream maintainer.
+- PR #7 was updated with the mutual-exclusion fix (commit `84c8183`) but the upstream maintainer
+  closed it without merging, and issue #6 remains open. The bug described here is therefore still
+  present in Channel Identifiarr. Anyone running it alongside this plugin should expect the phantom
+  lineup providers described above, and either apply the patch locally or avoid "Scan Missing
+  Listings" on an Xtream tuner.
+- This does not affect the plugin itself. Gracenote station IDs reach the plugin through Dispatcharr
+  (see [ADR-007](007-stamp-gracenote-logos.md)), which never depended on the upstream fix.
 
 ## Rejected Alternative
 
@@ -90,6 +96,12 @@ Moonshine's alternative workaround (hardcoding `'xtream-tuner' not in mgmt_id`) 
 - It duplicated Channel Identifiarr's matching algorithm (imperfectly — used LCS instead of Python's `SequenceMatcher`)
 - It introduced a hard regression: Dispatcharr-sourced station IDs were discarded, breaking existing setups
 - The root cause belongs in Channel Identifiarr, not the plugin
+
+PR #21 was closed on 2026-03-24. Its branch is `claude/integrate-channel-identifier-art-8YDiZ`, and
+this section is the record of why the code was not taken; the reasoning matters more than the branch.
+
+The rejection still stands even though the upstream fix was never merged: the four objections are
+about the approach, not about whether Channel Identifiarr eventually got fixed.
 
 ## Related
 
