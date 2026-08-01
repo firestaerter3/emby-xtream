@@ -116,6 +116,51 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public void DeleteOwnedFiles_NfoOnlyMatchesItsOwnSiblingStrm()
+        {
+            // Two owned STRMs, one NFO that names only one of them. An "all must match" rule would
+            // keep the NFO; an "any" rule deletes it. With a single STRM in the folder the two are
+            // indistinguishable, which is why the earlier test could not tell them apart.
+            var dir = MovieDir("Two Versions");
+            WriteFile(dir, "Two Versions.strm", OwnedMovieUrl);
+            WriteFile(dir, "Two Versions - Version 2.strm", OwnedMovieUrl);
+            var matchingNfo = WriteFile(dir, "Two Versions.nfo", "<movie />");
+
+            bool folderRemoved;
+            var deleted = StrmOwnership.DeleteOwnedFiles(dir, "http://fake-xtream", null, out folderRemoved);
+
+            Assert.Equal(3, deleted);
+            Assert.False(File.Exists(matchingNfo));
+            Assert.True(folderRemoved);
+        }
+
+        [Fact]
+        public void DeleteOwnedFiles_ForeignNfoWithNoSiblingStrmSurvives()
+        {
+            var dir = MovieDir("Mixed Nfo");
+            WriteFile(dir, "Mixed Nfo.strm", OwnedMovieUrl);
+            var orphanNfo = WriteFile(dir, "Something Else.nfo", "<movie />");
+
+            bool folderRemoved;
+            StrmOwnership.DeleteOwnedFiles(dir, "http://fake-xtream", null, out folderRemoved);
+
+            Assert.True(File.Exists(orphanNfo), "An NFO with no matching STRM of ours is not ours");
+            Assert.False(folderRemoved, "The folder still holds the user's NFO");
+        }
+
+        [Fact]
+        public void DeleteOwnedFiles_MissingDirectory_ReportsRemoved()
+        {
+            var dir = MovieDir("Never Existed");
+
+            bool folderRemoved;
+            var deleted = StrmOwnership.DeleteOwnedFiles(dir, "http://fake-xtream", null, out folderRemoved);
+
+            Assert.Equal(0, deleted);
+            Assert.True(folderRemoved, "A folder that is not there counts as already gone");
+        }
+
+        [Fact]
         public void DeleteOwnedFiles_NothingOwned_DeletesNothing()
         {
             var dir = MovieDir("Ben-Hur");
@@ -126,6 +171,7 @@ namespace Emby.Xtream.Plugin.Tests
 
             Assert.Equal(0, deleted);
             Assert.True(File.Exists(theirs));
+            Assert.False(folderRemoved, "A folder we own nothing in must not be reported as removed");
         }
 
         [Fact]

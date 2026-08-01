@@ -1075,6 +1075,7 @@ namespace Emby.Xtream.Plugin.Api
             {
                 var testFile = System.IO.Path.Combine(path, ".xtream_write_test");
                 File.WriteAllText(testFile, string.Empty);
+                // delete-ok: removes the probe file this line just wrote, nothing else.
                 File.Delete(testFile);
                 return true;
             }
@@ -1295,6 +1296,7 @@ namespace Emby.Xtream.Plugin.Api
                 try
                 {
                     // Back up current DLL
+                    // delete-ok: plugin DLL backup in the plugins directory, not library content.
                     if (File.Exists(bakPath))
                         File.Delete(bakPath);
                     File.Move(currentDll, bakPath);
@@ -1303,6 +1305,7 @@ namespace Emby.Xtream.Plugin.Api
                     File.Move(tempPath, currentDll);
 
                     // Clean up backup on success
+                    // delete-ok: plugin DLL backup in the plugins directory, not library content.
                     try { File.Delete(bakPath); } catch { }
                 }
                 catch
@@ -1315,6 +1318,7 @@ namespace Emby.Xtream.Plugin.Api
                     }
                     catch { }
 
+                    // delete-ok: downloaded update temp file, not library content.
                     try { File.Delete(tempPath); } catch { }
                     throw;
                 }

@@ -63,3 +63,6 @@ Thumbs.db
 # Internal planning / spec drafts — kept local, not published
 docs/plans/
 docs/superpowers/
+
+# Mutation testing output
+StrykerOutput/

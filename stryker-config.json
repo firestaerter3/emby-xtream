@@ -1,0 +1,20 @@
+{
+  "stryker-config": {
+    "project": "Emby.Xtream.Plugin.csproj",
+    "mutate": [
+      "**/Service/StrmOwnership.cs",
+      "**/Service/StrmSyncService.cs{1992..2243}"
+    ],
+    "reporters": [
+      "progress",
+      "html",
+      "json"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 80,
+      "break": 75
+    },
+    "concurrency": 4
+  }
+}
