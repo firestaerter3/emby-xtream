@@ -149,6 +149,24 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public void DeleteOwnedFiles_NonStrmFileWithProviderUrlSurvives()
+        {
+            // Ownership needs extension AND content to agree. Content alone is not enough: a user
+            // can paste a stream link into their own notes, and widening the glob would make that
+            // file deletable. This test is what stops the pattern from drifting.
+            var dir = MovieDir("With Notes");
+            WriteFile(dir, "With Notes.strm", OwnedMovieUrl);
+            var notes = WriteFile(dir, "notes.txt", OwnedMovieUrl + "\nmy own notes");
+
+            bool folderRemoved;
+            StrmOwnership.DeleteOwnedFiles(dir, "http://fake-xtream", null, out folderRemoved);
+
+            Assert.True(File.Exists(notes),
+                "A non-STRM file must survive even when its contents look like ours");
+            Assert.False(folderRemoved, "The folder still holds the user's notes");
+        }
+
+        [Fact]
         public void DeleteOwnedFiles_MissingDirectory_ReportsRemoved()
         {
             var dir = MovieDir("Never Existed");

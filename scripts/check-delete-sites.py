@@ -25,10 +25,31 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent / "Emby.Xtream.Plugin"
 SANCTIONED_FILE = "Service/StrmOwnership.cs"
 
 DELETE_CALL = re.compile(r"\b(?:File|Directory)\.Delete\s*\(")
-JUSTIFICATION = re.compile(r"delete-ok:\s*\S")
 
-# How many lines above a delete we will look for its justification.
-LOOKBACK = 4
+# Must be a real line comment carrying a reason, not the text "delete-ok:" appearing
+# anywhere. A string literal or an unrelated neighbouring line must not approve a delete.
+JUSTIFICATION = re.compile(r"^\s*//\s*delete-ok:\s*\S")
+
+# Any line comment, used to walk the contiguous comment block above a delete.
+COMMENT_LINE = re.compile(r"^\s*//")
+
+
+def is_justified(lines, index: int) -> bool:
+    """True when a `// delete-ok:` comment sits in the comment block directly above."""
+    # A trailing comment on the delete line itself also counts.
+    trailing = lines[index].split("//", 1)
+    if len(trailing) == 2 and re.match(r"\s*delete-ok:\s*\S", trailing[1]):
+        return True
+
+    # Walk upwards only while the lines are still comments. The first non-comment line
+    # ends the block, so a justification further up cannot reach across real code.
+    i = index - 1
+    while i >= 0 and COMMENT_LINE.match(lines[i]):
+        if JUSTIFICATION.match(lines[i]):
+            return True
+        i -= 1
+
+    return False
 
 
 def find_unjustified(root: Path):
@@ -46,8 +67,7 @@ def find_unjustified(root: Path):
         for i, line in enumerate(lines):
             if not DELETE_CALL.search(line):
                 continue
-            window = lines[max(0, i - LOOKBACK): i + 1]
-            if any(JUSTIFICATION.search(w) for w in window):
+            if is_justified(lines, i):
                 continue
             problems.append((rel, i + 1, line.strip()))
 
@@ -70,8 +90,8 @@ def main() -> int:
         print(f"    {text}")
     print(
         "\nEvery delete outside Service/StrmOwnership.cs must be reachable only for content\n"
-        "this plugin wrote, or carry a justification comment within"
-        f" {LOOKBACK} lines above it:\n"
+        "this plugin wrote, or carry a justification in the comment block directly above it\n"
+        "(or trailing on the same line):\n"
         "\n    // delete-ok: <why this cannot touch user content>\n"
         "\nIf it can touch the STRM library, route it through StrmOwnership instead. See ADR-014."
     )

@@ -133,9 +133,11 @@ namespace Emby.Xtream.Plugin.Service
                 // Resolve ownership across the whole tree BEFORE deleting anything, because the
                 // NFO rule is defined in terms of the STRM files that were there.
                 //
-                // The "*.strm" glob is a speed filter, not a correctness one: IsOwnedStrm decides
-                // by content, so widening the pattern changes nothing observable. Mutation testing
-                // reports this literal as a surviving mutant for that reason. It is expected.
+                // The "*.strm" glob is a deletion boundary, not a speed filter. IsOwnedStrm only
+                // inspects content, so widening this pattern would let any file that happens to
+                // contain the provider URL be classified as ours and deleted — a user's notes.txt
+                // holding a copy of a stream link, for instance. Extension and content both have
+                // to agree. Locked by DeleteOwnedFiles_NonStrmFileWithProviderUrlSurvives.
                 ownedStrms = Directory
                     .GetFiles(dir, "*.strm", SearchOption.AllDirectories)
                     .Where(f => IsOwnedStrm(f, baseUrl, dispatcharrUrl))

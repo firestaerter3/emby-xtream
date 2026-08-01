@@ -1073,9 +1073,12 @@ namespace Emby.Xtream.Plugin.Api
         {
             try
             {
-                var testFile = System.IO.Path.Combine(path, ".xtream_write_test");
+                // Unique per call. A fixed name would truncate a file of that name if the user
+                // happened to have one, and two concurrent probes would delete each other's.
+                var testFile = System.IO.Path.Combine(
+                    path, ".xtream_write_test_" + Guid.NewGuid().ToString("N"));
                 File.WriteAllText(testFile, string.Empty);
-                // delete-ok: removes the probe file this line just wrote, nothing else.
+                // delete-ok: removes the uniquely-named probe file this call just created.
                 File.Delete(testFile);
                 return true;
             }
@@ -1296,8 +1299,8 @@ namespace Emby.Xtream.Plugin.Api
                 try
                 {
                     // Back up current DLL
-                    // delete-ok: plugin DLL backup in the plugins directory, not library content.
                     if (File.Exists(bakPath))
+                        // delete-ok: plugin DLL backup in the plugins directory, not library content.
                         File.Delete(bakPath);
                     File.Move(currentDll, bakPath);
 
