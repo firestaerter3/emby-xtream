@@ -22,7 +22,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # Cheap and independent of the build, so it reports before a compile error can hide it.
+      # Cheap and independent of the build, so they report before a compile error can hide
+      # them. The guard runs its own self-test first: a guard that cannot reject is the same
+      # problem as a test that cannot fail.
+      - name: Test delete-site guard
+        run: python3 scripts/test-check-delete-sites.py
+
       - name: Check delete sites
         run: python3 scripts/check-delete-sites.py
 

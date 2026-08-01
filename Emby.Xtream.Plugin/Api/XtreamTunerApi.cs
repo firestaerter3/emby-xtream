@@ -1073,12 +1073,18 @@ namespace Emby.Xtream.Plugin.Api
         {
             try
             {
-                // Unique per call. A fixed name would truncate a file of that name if the user
-                // happened to have one, and two concurrent probes would delete each other's.
+                // Unique per call, and CreateNew so we can never truncate a file that was
+                // already there. A fixed name would clobber a user file of that name, and two
+                // concurrent probes would delete each other's. Deleting something we did not
+                // create is the whole failure mode this guard exists to prevent.
                 var testFile = System.IO.Path.Combine(
                     path, ".xtream_write_test_" + Guid.NewGuid().ToString("N"));
-                File.WriteAllText(testFile, string.Empty);
-                // delete-ok: removes the uniquely-named probe file this call just created.
+
+                using (new FileStream(testFile, FileMode.CreateNew, FileAccess.Write))
+                {
+                }
+
+                // delete-ok: removes the file the CreateNew above proved this call created.
                 File.Delete(testFile);
                 return true;
             }

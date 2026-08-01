@@ -35,12 +35,14 @@ COMMENT_LINE = re.compile(r"^\s*//")
 
 
 def is_justified(lines, index: int) -> bool:
-    """True when a `// delete-ok:` comment sits in the comment block directly above."""
-    # A trailing comment on the delete line itself also counts.
-    trailing = lines[index].split("//", 1)
-    if len(trailing) == 2 and re.match(r"\s*delete-ok:\s*\S", trailing[1]):
-        return True
+    """True when a `// delete-ok:` comment sits in the comment block directly above.
 
+    Deliberately does not accept a trailing comment on the delete line itself. Finding the
+    real `//` there means knowing which ones are inside string literals, and
+    ``File.Delete("http://delete-ok: x")`` would sail past a naive split. Dropping the
+    form is cheaper and more trustworthy than parsing C# strings in a guard script, and no
+    call site wanted it.
+    """
     # Walk upwards only while the lines are still comments. The first non-comment line
     # ends the block, so a justification further up cannot reach across real code.
     i = index - 1
@@ -90,8 +92,8 @@ def main() -> int:
         print(f"    {text}")
     print(
         "\nEvery delete outside Service/StrmOwnership.cs must be reachable only for content\n"
-        "this plugin wrote, or carry a justification in the comment block directly above it\n"
-        "(or trailing on the same line):\n"
+        "this plugin wrote, or carry a justification on its own comment line in the block\n"
+        "directly above the call:\n"
         "\n    // delete-ok: <why this cannot touch user content>\n"
         "\nIf it can touch the STRM library, route it through StrmOwnership instead. See ADR-014."
     )
