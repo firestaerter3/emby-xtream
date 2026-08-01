@@ -1370,31 +1370,31 @@ namespace Emby.Xtream.Plugin.Service
                 return false;
             }
 
-            // A retry batch can contain series items, and those write episodes under Shows. Without
-            // the series gate a concurrent series sync would not have the retry-written paths in
-            // its valid set, so its orphan cleanup would delete them — and they would pass the
-            // ownership check precisely because the retry wrote them.
-            var needsSeriesGate = items.Any(i => i.ItemType == "Series");
+            // Nothing between acquiring a gate and its finally may throw, or the gate is held for
+            // good and every later movie sync is refused until Emby restarts. The series
+            // WaitAsync below throws on a cancelled token, and Plugin.Instance.Configuration
+            // throws when ApplicationPaths is not initialised yet, so both sit inside.
             var seriesGateHeld = false;
-            if (needsSeriesGate)
-            {
-                seriesGateHeld = await _seriesSyncGate.WaitAsync(0, cancellationToken).ConfigureAwait(false);
-                if (!seriesGateHeld)
-                {
-                    _movieSyncGate.Release();
-                    _logger.Warn("Retry requested while a series sync is already running — ignoring the duplicate request");
-                    return false;
-                }
-            }
-
-            // Everything after the acquire must be inside the try. Plugin.Instance.Configuration
-            // can throw (ApplicationPaths may not be initialised yet), and a throw between the
-            // acquire and the try would hold the gate forever — every later movie sync would be
-            // refused until Emby restarts.
+            var retryStarted = false;
             try
             {
+                // A retry batch can contain series items, and those write episodes under Shows.
+                // Without the series gate a concurrent series sync would not have the
+                // retry-written paths in its valid set, so its orphan cleanup would delete them —
+                // and they would pass the ownership check precisely because the retry wrote them.
+                if (items.Any(i => i.ItemType == "Series"))
+                {
+                    seriesGateHeld = await _seriesSyncGate.WaitAsync(0, cancellationToken).ConfigureAwait(false);
+                    if (!seriesGateHeld)
+                    {
+                        _logger.Warn("Retry requested while a series sync is already running — ignoring the duplicate request");
+                        return false;
+                    }
+                }
+
                 var config = Plugin.Instance.Configuration;
                 _movieProgress = new SyncProgress { IsRunning = true, Phase = "Retrying failed items", Total = items.Count };
+                retryStarted = true;
 
                 var semaphore = new SemaphoreSlim(ResolveSyncParallelism(config));
                 var categoryNames = new Dictionary<int, string>();
@@ -1440,8 +1440,15 @@ namespace Emby.Xtream.Plugin.Service
             }
             finally
             {
-                _movieProgress.IsRunning = false;
-                _movieProgress.Phase = "Retry complete";
+                // Only report a finished retry if one actually started. Bailing out because the
+                // series gate was taken leaves the previous run's progress object in place, and
+                // stamping "Retry complete" on it would describe a run that never happened.
+                if (retryStarted)
+                {
+                    _movieProgress.IsRunning = false;
+                    _movieProgress.Phase = "Retry complete";
+                }
+
                 if (seriesGateHeld)
                 {
                     _seriesSyncGate.Release();
