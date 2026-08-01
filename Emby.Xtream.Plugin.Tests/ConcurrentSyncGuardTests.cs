@@ -36,8 +36,8 @@ namespace Emby.Xtream.Plugin.Tests
             Handler.Gate.SetResult(true);
             var results = await Task.WhenAll(first, second);
 
-            Assert.Equal(1, System.Array.FindAll(results, r => r).Length);
-            Assert.Equal(1, System.Array.FindAll(results, r => !r).Length);
+            Assert.Single(results, r => r);
+            Assert.Single(results, r => !r);
         }
 
         [Fact]
@@ -60,8 +60,8 @@ namespace Emby.Xtream.Plugin.Tests
             Handler.Gate.SetResult(true);
             var results = await Task.WhenAll(first, second);
 
-            Assert.Equal(1, System.Array.FindAll(results, r => r).Length);
-            Assert.Equal(1, System.Array.FindAll(results, r => !r).Length);
+            Assert.Single(results, r => r);
+            Assert.Single(results, r => !r);
         }
 
         [Fact]

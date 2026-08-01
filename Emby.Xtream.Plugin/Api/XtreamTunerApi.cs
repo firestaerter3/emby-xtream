@@ -1427,8 +1427,11 @@ namespace Emby.Xtream.Plugin.Api
             var sanitized = new StringBuilder();
             foreach (var line in lines)
             {
+                // Raw values, not escaped: SanitizeLine redacts both forms itself. Passing the
+                // escaped form here would leave the raw credentials unredacted in the log a user
+                // is about to attach to a bug report.
                 var s = LogSanitizer.SanitizeLine(line,
-                    Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty),
+                    config.Username, config.Password,
                     config.DispatcharrUser, config.DispatcharrPass);
                 sanitized.AppendLine(s);
             }
