@@ -677,7 +677,13 @@ namespace Emby.Xtream.Plugin.Api
             if (syncService.FailedItems.Count == 0)
                 return new SyncResult { Success = false, Message = "No failed items to retry." };
 
-            await syncService.RetryFailedAsync(CancellationToken.None).ConfigureAwait(false);
+            var ran = await syncService.RetryFailedAsync(CancellationToken.None).ConfigureAwait(false);
+
+            // The IsRunning check above is a fast path; the service holds the real gate. Without
+            // this the endpoint reports "Retry complete" for a retry that never started.
+            if (!ran)
+                return new SyncResult { Success = false, Message = "A sync is already running." };
+
             var p = syncService.MovieProgress;
             return new SyncResult
             {
