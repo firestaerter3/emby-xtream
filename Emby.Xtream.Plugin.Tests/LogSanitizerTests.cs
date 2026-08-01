@@ -22,6 +22,27 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public void RedactsLongerCredentialBeforeShorterOverlappingOne()
+        {
+            // Username "abc" is a prefix of password "abc/secret". Redacting the short one first
+            // rewrites the long one out of existence before its own turn, and the "/secret" tail
+            // survives into the downloadable log.
+            var result = LogSanitizer.SanitizeLine(
+                "auth abc/secret here", "abc", "abc/secret", "", "");
+
+            Assert.DoesNotContain("secret", result);
+        }
+
+        [Fact]
+        public void RedactsLongerCredentialBeforeShorterOverlappingOne_EscapedForm()
+        {
+            var result = LogSanitizer.SanitizeLine(
+                "url http://h/movie/abc/abc%2Fsecret/1.mkv", "abc", "abc/secret", "", "");
+
+            Assert.DoesNotContain("secret", result);
+        }
+
+        [Fact]
         public void RedactsPercentEncodedCredentialsInUrls()
         {
             // Credentials go into generated URLs escaped, so the escaped form is what actually

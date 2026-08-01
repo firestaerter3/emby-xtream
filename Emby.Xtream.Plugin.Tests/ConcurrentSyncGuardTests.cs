@@ -110,6 +110,34 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public async Task RetryWithCancelledToken_DoesNotLeakTheMovieGate()
+        {
+            // Acquiring the series gate throws on a cancelled token. If that happens outside the
+            // try, the movie gate is never released and every later movie sync is refused until
+            // Emby restarts.
+            var config = DefaultConfig();
+            Handler.RespondWith("get_vod_streams",
+                VodStreamsJson(VodStream(streamId: 1, name: "Test Movie", added: 1000)));
+
+            var service = MakeService();
+            using (var cts = new System.Threading.CancellationTokenSource())
+            {
+                cts.Cancel();
+                try
+                {
+                    await service.RetryFailedAsync(cts.Token);
+                }
+                catch (System.OperationCanceledException)
+                {
+                    // Expected on a cancelled token; the gate must still be free.
+                }
+            }
+
+            Assert.True(await service.SyncMoviesAsync(config, None, SaveConfig),
+                "The movie gate must be free after a cancelled retry");
+        }
+
+        [Fact]
         public async Task RejectedSync_DoesNotClobberRunningSyncProgress()
         {
             var config = DefaultConfig();

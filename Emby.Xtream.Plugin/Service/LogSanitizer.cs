@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Emby.Xtream.Plugin.Service
@@ -40,10 +41,19 @@ namespace Emby.Xtream.Plugin.Service
             // Redact specific config values if non-empty. Callers pass the raw values; both the
             // raw and percent-encoded forms are redacted here, because generated URLs carry the
             // escaped form while other log lines carry the raw one.
-            s = RedactValue(s, username);
-            s = RedactValue(s, password);
-            s = RedactValue(s, dispatcharrUser);
-            s = RedactValue(s, dispatcharrPass);
+            //
+            // Longest first. A shorter value that is a prefix of a longer one would otherwise
+            // rewrite it out of existence before its own turn: username "abc" against password
+            // "abc/secret" leaves "<redacted>/secret", and the "/secret" tail reaches the
+            // downloadable log.
+            var values = new[] { username, password, dispatcharrUser, dispatcharrPass }
+                .Where(v => !string.IsNullOrEmpty(v))
+                .OrderByDescending(v => v.Length);
+
+            foreach (var value in values)
+            {
+                s = RedactValue(s, value);
+            }
 
             // Redact IP addresses, but preserve version numbers (e.g. Version=1.2.0.0)
             // Replace version patterns with placeholders first, then redact IPs, then restore

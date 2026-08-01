@@ -127,12 +127,26 @@ namespace Emby.Xtream.Plugin.Service
                 return 0;
             }
 
-            // Resolve ownership across the whole tree BEFORE deleting anything, because the NFO
-            // rule is defined in terms of the STRM files that were there.
-            var ownedStrms = Directory
-                .GetFiles(dir, "*.strm", SearchOption.AllDirectories)
-                .Where(f => IsOwnedStrm(f, baseUrl, dispatcharrUrl))
-                .ToList();
+            List<string> ownedStrms;
+            List<string> nfos;
+            try
+            {
+                // Resolve ownership across the whole tree BEFORE deleting anything, because the
+                // NFO rule is defined in terms of the STRM files that were there.
+                ownedStrms = Directory
+                    .GetFiles(dir, "*.strm", SearchOption.AllDirectories)
+                    .Where(f => IsOwnedStrm(f, baseUrl, dispatcharrUrl))
+                    .ToList();
+                nfos = Directory.GetFiles(dir, "*.nfo", SearchOption.AllDirectories).ToList();
+            }
+            catch (Exception)
+            {
+                // An access error or a filesystem race must not escape. The delete-all endpoint
+                // wraps its whole folder loop in one try/catch, so letting this out would stop
+                // cleanup for every remaining folder. Retaining this one folder is the safe
+                // outcome, and it is reported as kept rather than removed.
+                return 0;
+            }
 
             if (ownedStrms.Count == 0)
             {
@@ -151,7 +165,7 @@ namespace Emby.Xtream.Plugin.Service
                 }
             }
 
-            foreach (var nfo in Directory.GetFiles(dir, "*.nfo", SearchOption.AllDirectories))
+            foreach (var nfo in nfos)
             {
                 if (IsOwnedNfo(nfo, ownedStrms) && TryDelete(nfo))
                 {
