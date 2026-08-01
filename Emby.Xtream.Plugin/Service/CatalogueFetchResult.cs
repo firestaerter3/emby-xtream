@@ -24,7 +24,7 @@ namespace Emby.Xtream.Plugin.Service
         public List<T> Items { get; set; } = new List<T>();
 
         /// <summary>True when at least one requested category failed to answer.</summary>
-        public bool HadFailures { get { return FailedCategoryCount > 0; } }
+        public bool HadFailures => FailedCategoryCount > 0;
 
         /// <summary>How many requested categories failed.</summary>
         public int FailedCategoryCount { get; set; }

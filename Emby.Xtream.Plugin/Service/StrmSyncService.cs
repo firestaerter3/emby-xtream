@@ -136,10 +136,10 @@ namespace Emby.Xtream.Plugin.Service
         private readonly SemaphoreSlim _seriesSyncGate = new SemaphoreSlim(1, 1);
 
         /// <summary>Lowest usable value for <see cref="PluginConfiguration.SyncParallelism"/>.</summary>
-        internal const int MinSyncParallelism = 1;
+        private const int MinSyncParallelism = 1;
 
         /// <summary>Highest usable value for <see cref="PluginConfiguration.SyncParallelism"/>.</summary>
-        internal const int MaxSyncParallelism = 10;
+        private const int MaxSyncParallelism = 10;
 
         /// <summary>
         /// Returns a usable parallelism, correcting a persisted value that is out of range.
@@ -2106,9 +2106,8 @@ namespace Emby.Xtream.Plugin.Service
                     // proof of ownership: without this a user's own "Ben-Hur" folder would be
                     // destroyed by excluding the provider's "Ben-Hur", and a hand-written .nfo or a
                     // trailer.strm sitting beside our output would go with it. See ADR-014.
-                    bool folderGone;
                     var deletedFiles = StrmOwnership.DeleteOwnedFiles(
-                        existingDir, config.BaseUrl, config.DispatcharrUrl, out folderGone);
+                        existingDir, config.BaseUrl, config.DispatcharrUrl, out var folderGone);
 
                     if (deletedFiles == 0)
                     {
