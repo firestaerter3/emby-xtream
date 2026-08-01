@@ -1,3 +1,4 @@
+using System;
 using System.Text.RegularExpressions;
 
 namespace Emby.Xtream.Plugin.Service
@@ -36,15 +37,13 @@ namespace Emby.Xtream.Plugin.Service
 
             var s = line;
 
-            // Redact specific config values if non-empty
-            if (!string.IsNullOrEmpty(username))
-                s = s.Replace(username, "<redacted>");
-            if (!string.IsNullOrEmpty(password))
-                s = s.Replace(password, "<redacted>");
-            if (!string.IsNullOrEmpty(dispatcharrUser))
-                s = s.Replace(dispatcharrUser, "<redacted>");
-            if (!string.IsNullOrEmpty(dispatcharrPass))
-                s = s.Replace(dispatcharrPass, "<redacted>");
+            // Redact specific config values if non-empty. Callers pass the raw values; both the
+            // raw and percent-encoded forms are redacted here, because generated URLs carry the
+            // escaped form while other log lines carry the raw one.
+            s = RedactValue(s, username);
+            s = RedactValue(s, password);
+            s = RedactValue(s, dispatcharrUser);
+            s = RedactValue(s, dispatcharrPass);
 
             // Redact IP addresses, but preserve version numbers (e.g. Version=1.2.0.0)
             // Replace version patterns with placeholders first, then redact IPs, then restore
@@ -68,6 +67,42 @@ namespace Emby.Xtream.Plugin.Service
 
             // Redact hostnames in stream URLs
             s = ProviderHostRegex.Replace(s, "$1<provider-host>$3$4");
+
+            return s;
+        }
+
+        /// <summary>
+        /// Redacts <paramref name="value"/> from <paramref name="line"/> in both its raw and
+        /// percent-encoded forms.
+        /// </summary>
+        /// <remarks>
+        /// Credentials go into generated URLs escaped, so a password of <c>p/w</c> appears in a
+        /// stream URL as <c>p%2Fw</c>. Redacting only one form leaks the other into the log a user
+        /// attaches to a bug report.
+        /// </remarks>
+        private static string RedactValue(string line, string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return line;
+            }
+
+            var s = line.Replace(value, "<redacted>");
+
+            string escaped;
+            try
+            {
+                escaped = Uri.EscapeDataString(value);
+            }
+            catch (UriFormatException)
+            {
+                return s;
+            }
+
+            if (!string.Equals(escaped, value, StringComparison.Ordinal))
+            {
+                s = s.Replace(escaped, "<redacted>");
+            }
 
             return s;
         }

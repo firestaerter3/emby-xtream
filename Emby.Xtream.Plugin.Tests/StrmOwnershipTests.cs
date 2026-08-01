@@ -62,6 +62,22 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public void IsOwnedStrm_HostPrefixWithoutPathBoundary_IsNotOwned()
+        {
+            // A bare prefix match means a BaseUrl of http://nas also claims the user's
+            // http://nas-backup/... file, and this class deletes what it claims.
+            var path = WriteFile(MovieDir("A"), "A.strm", "http://nas-backup/media/Movie.mkv");
+            Assert.False(StrmOwnership.IsOwnedStrm(path, "http://nas", null));
+        }
+
+        [Fact]
+        public void IsOwnedStrm_HostPrefixWithPathBoundary_IsOwned()
+        {
+            var path = WriteFile(MovieDir("B"), "B.strm", "http://nas/movie/user/pass/1.mkv");
+            Assert.True(StrmOwnership.IsOwnedStrm(path, "http://nas", null));
+        }
+
+        [Fact]
         public void IsOwnedStrm_EmptyFile_IsNotOwned()
         {
             var path = WriteFile(MovieDir("A"), "A.strm", "");

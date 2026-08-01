@@ -64,7 +64,16 @@ namespace Emby.Xtream.Plugin.Service
                 return false;
             }
 
-            return content.StartsWith(url.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+            var prefix = url.TrimEnd('/');
+            if (!content.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // Require a path boundary. A bare prefix match means a configured BaseUrl of
+            // http://nas also claims a user's http://nas-backup/media/Movie.mkv, and this class
+            // deletes what it claims.
+            return content.Length == prefix.Length || content[prefix.Length] == '/';
         }
 
         /// <summary>
@@ -180,15 +189,25 @@ namespace Emby.Xtream.Plugin.Service
                 return true;
             }
 
-            foreach (var sub in Directory.GetDirectories(dir))
+            try
             {
-                TryPruneEmptyTree(sub);
-            }
+                foreach (var sub in Directory.GetDirectories(dir))
+                {
+                    TryPruneEmptyTree(sub);
+                }
 
-            if (Directory.GetFileSystemEntries(dir).Length == 0)
+                if (Directory.GetFileSystemEntries(dir).Length == 0)
+                {
+                    Directory.Delete(dir);
+                    return true;
+                }
+            }
+            catch (Exception)
             {
-                Directory.Delete(dir);
-                return true;
+                // A file can appear between the emptiness check and the delete, or permissions can
+                // block it. The Try prefix promises this does not throw, and the delete-all endpoint
+                // wraps its whole folder loop in one try/catch — letting this escape would abort the
+                // remaining folders and report the entire operation as failed.
             }
 
             return false;

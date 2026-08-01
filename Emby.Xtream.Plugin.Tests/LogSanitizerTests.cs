@@ -22,6 +22,39 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public void RedactsPercentEncodedCredentialsInUrls()
+        {
+            // Credentials go into generated URLs escaped, so the escaped form is what actually
+            // appears in a logged stream URL. Redacting only the raw form leaks it into the log a
+            // user attaches to a bug report.
+            var result = LogSanitizer.SanitizeLine(
+                "Playing http://host/movie/us%20er/p%2Fw/1.mkv", "us er", "p/w", "", "");
+
+            Assert.DoesNotContain("us%20er", result);
+            Assert.DoesNotContain("p%2Fw", result);
+        }
+
+        [Fact]
+        public void RedactsRawCredentialsEvenWhenEscapedFormDiffers()
+        {
+            // The raw form still has to go: not every log line is a URL.
+            var result = LogSanitizer.SanitizeLine(
+                "Configured account us er / p/w", "us er", "p/w", "", "");
+
+            Assert.DoesNotContain("us er", result);
+            Assert.DoesNotContain("p/w", result);
+        }
+
+        [Fact]
+        public void RedactsPercentEncodedDispatcharrCredentials()
+        {
+            var result = LogSanitizer.SanitizeLine(
+                "Dispatcharr auth for d%20user", "", "", "d user", "d pass");
+
+            Assert.DoesNotContain("d%20user", result);
+        }
+
+        [Fact]
         public void RedactsConfiguredUsername()
         {
             var result = LogSanitizer.SanitizeLine(
