@@ -342,11 +342,29 @@ namespace Emby.Xtream.Plugin.Client
                                 if (response.StatusCode == HttpStatusCode.Unauthorized)
                                 {
                                     _logger.Debug("Dispatcharr token expired, refreshing");
-                                    var refreshed = await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
-                                    if (!refreshed)
+
+                                    // Route HTTP 401 recovery through the same gate as EnsureTokenAsync
+                                    // so a burst of concurrent 401s collapses to a single refresh/login.
+                                    // Capture the token that was rejected so we can tell whether another
+                                    // caller has already replaced it by the time we hold the lock.
+                                    var rejectedToken = _accessToken;
+                                    await _tokenGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                                    try
                                     {
-                                        await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
-                                        if (_accessToken == null) return null;
+                                        if (_accessToken == rejectedToken)
+                                        {
+                                            var refreshed = _refreshToken != null
+                                                && await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+                                            if (!refreshed)
+                                            {
+                                                await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+                                                if (_accessToken == null) return null;
+                                            }
+                                        }
+                                    }
+                                    finally
+                                    {
+                                        _tokenGate.Release();
                                     }
 
                                     using (var retryRequest = new HttpRequestMessage(HttpMethod.Get, url))
