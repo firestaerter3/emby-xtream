@@ -33,6 +33,15 @@ namespace Emby.Xtream.Plugin.Tests.Fakes
         /// </remarks>
         public TaskCompletionSource<bool> Gate { get; set; }
 
+        /// <summary>
+        /// Optional per-URL gates. When a request URL contains a key from this dictionary,
+        /// the request awaits that entry's TCS instead of the global <see cref="Gate"/>.
+        /// Lets a test hold one specific request in flight while letting other matching
+        /// requests proceed.
+        /// </summary>
+        public System.Collections.Generic.Dictionary<string, TaskCompletionSource<bool>> UrlGates { get; }
+            = new System.Collections.Generic.Dictionary<string, TaskCompletionSource<bool>>();
+
         /// <summary>Register a single response for URLs containing <paramref name="urlSubstring"/>.</summary>
         public void RespondWith(string urlSubstring, string body, HttpStatusCode status = HttpStatusCode.OK)
         {
@@ -52,13 +61,33 @@ namespace Emby.Xtream.Plugin.Tests.Fakes
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var gate = Gate;
-            if (gate != null)
+            var url = request.RequestUri?.ToString() ?? string.Empty;
+
+            TaskCompletionSource<bool> perUrlGate = null;
+            lock (_sync)
             {
-                await gate.Task.ConfigureAwait(false);
+                foreach (var kv in UrlGates)
+                {
+                    if (url.Contains(kv.Key))
+                    {
+                        perUrlGate = kv.Value;
+                        break;
+                    }
+                }
             }
 
-            var url = request.RequestUri?.ToString() ?? string.Empty;
+            if (perUrlGate != null)
+            {
+                await perUrlGate.Task.ConfigureAwait(false);
+            }
+            else
+            {
+                var gate = Gate;
+                if (gate != null)
+                {
+                    await gate.Task.ConfigureAwait(false);
+                }
+            }
 
             // One lock over all shared state. Releasing the gate resumes several requests at once
             // on thread-pool threads, and Queue<T> is not thread-safe: concurrent dequeues can

@@ -335,7 +335,13 @@ namespace Emby.Xtream.Plugin.Client
                     {
                         using (var request = new HttpRequestMessage(HttpMethod.Get, url))
                         {
-                            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
+                            // Capture the token at request-build time so the "already replaced?"
+                            // check after the gate is acquired compares against what we actually
+                            // sent, not whatever `_accessToken` happens to hold when the 401
+                            // response arrives (which may have been rotated by another caller
+                            // that already handled its own rejection).
+                            var sentAccessToken = _accessToken;
+                            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", sentAccessToken);
 
                             using (var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
                             {
@@ -345,9 +351,10 @@ namespace Emby.Xtream.Plugin.Client
 
                                     // Route HTTP 401 recovery through the same gate as EnsureTokenAsync
                                     // so a burst of concurrent 401s collapses to a single refresh/login.
-                                    // Capture the token that was rejected so we can tell whether another
-                                    // caller has already replaced it by the time we hold the lock.
-                                    var rejectedToken = _accessToken;
+                                    // Compare against the token we actually sent on the rejected request:
+                                    // if the cache has moved on past it, another caller already handled
+                                    // the rejection and we should skip the refresh.
+                                    var rejectedToken = sentAccessToken;
                                     await _tokenGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                                     try
                                     {
