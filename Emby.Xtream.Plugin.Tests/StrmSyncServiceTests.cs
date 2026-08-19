@@ -690,6 +690,84 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdAsync_LookupCanceled_Propagates()
+        {
+            // Regression (CodeRabbit PR #65 review): OperationCanceledException must NOT be
+            // swallowed into a Debug log. If the caller cancels the sync, the per-item file
+            // write loop must see the cancellation and stop instead of treating it as a TMDB
+            // outage and writing more files.
+            var movie = new VodStreamInfo { Name = "The Matrix", TmdbId = "" };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = true,
+            };
+            using var cts = new System.Threading.CancellationTokenSource();
+            cts.Cancel();
+
+            await Assert.ThrowsAsync<System.OperationCanceledException>(() =>
+                StrmSyncService.ResolveMovieTmdbIdAsync(
+                    movie, "The Matrix", config,
+                    (n, y, ct) =>
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        return System.Threading.Tasks.Task.FromResult("603");
+                    },
+                    new NullLogger(),
+                    cts.Token));
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdAsync_NonCancellationException_StillSwallowed()
+        {
+            // The cancellation-aware catch must not widen the swallow. A real
+            // HttpRequestException or TaskCanceledException-without-cancellation should
+            // still be logged-and-nulled, not rethrown, so the sync continues for the
+            // remaining movies.
+            var movie = new VodStreamInfo { Name = "The Matrix", TmdbId = "" };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = true,
+            };
+            var result = await StrmSyncService.ResolveMovieTmdbIdAsync(
+                movie, "The Matrix", config,
+                (n, y, ct) => throw new System.Net.Http.HttpRequestException("TMDB down"),
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
+
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdForRetryAsync_LookupCanceled_Propagates()
+        {
+            // Same regression on the retry-path resolver: cancellation must propagate.
+            var item = new FailedSyncItem { Name = "The Matrix", TmdbId = null, StreamId = 1 };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = true,
+            };
+            using var cts = new System.Threading.CancellationTokenSource();
+            cts.Cancel();
+
+            await Assert.ThrowsAsync<System.OperationCanceledException>(() =>
+                StrmSyncService.ResolveMovieTmdbIdForRetryAsync(
+                    item, "The Matrix", config,
+                    (n, y, ct) =>
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        return System.Threading.Tasks.Task.FromResult("603");
+                    },
+                    new NullLogger(),
+                    cts.Token));
+        }
+
+        [Fact]
         public async System.Threading.Tasks.Task ResolveMovieTmdbIdForRetryAsync_NfoOnly_PerformsLookup_WhenProviderTmdbMissing()
         {
             // Retry path: when EnableNfoFiles is on and the provider supplied no TMDB ID,
