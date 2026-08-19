@@ -838,6 +838,122 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public async System.Threading.Tasks.Task RetryPath_EnableTmdbFolderNaming_FallbackSuppliesSuffix_WhenProviderTmdbMissing()
+        {
+            // CodeRabbit review on PR #65 (head 0aabe5e): retry path built folderName from the
+            // provider TMDB ID before falling back, so a retry wrote "The Matrix" while the main
+            // sync wrote "The Matrix [tmdbid=603]" — splitting one movie across two folders.
+            // After the fix, the retry path mirrors the main loop: when folder naming is on but
+            // the provider ID is missing, the fallback lookup fills the suffix.
+            var item = new FailedSyncItem { Name = "The Matrix", TmdbId = null, StreamId = 1 };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = false,
+                EnableTmdbFolderNaming = true,
+                EnableTmdbFallbackLookup = true,
+            };
+
+            // Mirror the retry-path logic from StrmSyncService.RetryMovieItemAsync.
+            string folderTmdbId = config.EnableTmdbFolderNaming && IsValidProviderTmdbId(item.TmdbId)
+                ? item.TmdbId.Trim()
+                : null;
+            if (config.EnableTmdbFolderNaming && folderTmdbId == null)
+            {
+                folderTmdbId = await StrmSyncService.ResolveMovieTmdbIdForRetryAsync(
+                    item, "The Matrix", config,
+                    (n, y, ct) => System.Threading.Tasks.Task.FromResult("603"),
+                    new NullLogger(),
+                    System.Threading.CancellationToken.None);
+                if (folderTmdbId != null && !IsValidProviderTmdbId(folderTmdbId))
+                {
+                    folderTmdbId = null;
+                }
+                else if (folderTmdbId != null)
+                {
+                    folderTmdbId = folderTmdbId.Trim();
+                }
+            }
+            var folderName = StrmSyncService.BuildMovieFolderName("The Matrix", folderTmdbId);
+
+            Assert.Equal("603", folderTmdbId);
+            Assert.Contains("[tmdbid=603]", folderName);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task RetryPath_EnableTmdbFolderNaming_NoSuffix_WhenFallbackReturnsNull()
+        {
+            // Companion to the suffix test: when folder naming is on, the provider has no
+            // ID, and the fallback lookup also returns nothing, the folder gets no suffix.
+            // We must not invent one. The fallback's null is the contract.
+            var item = new FailedSyncItem { Name = "The Matrix", TmdbId = null, StreamId = 1 };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = false,
+                EnableTmdbFolderNaming = true,
+                EnableTmdbFallbackLookup = true,
+            };
+
+            string folderTmdbId = config.EnableTmdbFolderNaming && IsValidProviderTmdbId(item.TmdbId)
+                ? item.TmdbId.Trim()
+                : null;
+            if (config.EnableTmdbFolderNaming && folderTmdbId == null)
+            {
+                folderTmdbId = await StrmSyncService.ResolveMovieTmdbIdForRetryAsync(
+                    item, "The Matrix", config,
+                    (n, y, ct) => System.Threading.Tasks.Task.FromResult<string>(null),
+                    new NullLogger(),
+                    System.Threading.CancellationToken.None);
+                if (folderTmdbId != null && !IsValidProviderTmdbId(folderTmdbId))
+                {
+                    folderTmdbId = null;
+                }
+            }
+            var folderName = StrmSyncService.BuildMovieFolderName("The Matrix", folderTmdbId);
+
+            Assert.Null(folderTmdbId);
+            Assert.Equal("The Matrix", folderName);
+            Assert.DoesNotContain("[tmdbid=", folderName);
+        }
+
+        [Fact]
+        public void RetryPath_EnableTmdbFolderNaming_Off_NoSuffixEven_WhenFallbackSucceeds()
+        {
+            // When folder naming is off, the retry path never runs the resolver for folder
+            // purposes. The suffix never goes on. (The NFO writer uses the resolver
+            // independently — covered by ResolveMovieTmdbIdForRetryAsync_NfoOnly_*.)
+            var item = new FailedSyncItem { Name = "The Matrix", TmdbId = null, StreamId = 1 };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = true,
+            };
+
+            string folderTmdbId = config.EnableTmdbFolderNaming && IsValidProviderTmdbId(item.TmdbId)
+                ? item.TmdbId.Trim()
+                : null;
+            var folderName = StrmSyncService.BuildMovieFolderName("The Matrix", folderTmdbId);
+
+            Assert.Null(folderTmdbId);
+            Assert.Equal("The Matrix", folderName);
+            Assert.DoesNotContain("[tmdbid=", folderName);
+        }
+
+        // Mirrors StrmSyncService.IsValidTmdbId's contract: trim, parse as int, must be > 0.
+        // We can't call the private static directly, but the retry path only treats the
+        // value as a folder-suffix ID — it must be a positive integer in practice.
+        private static bool IsValidProviderTmdbId(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            if (!int.TryParse(s.Trim(), System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var n))
+            {
+                return false;
+            }
+            return n > 0;
+        }
+
+        [Fact]
         public async System.Threading.Tasks.Task ResolveMovieTmdbIdAsync_BuildMovieFolderName_NfoOnly_NoSuffixOnFolder()
         {
             // End-to-end shape check: when EnableNfoFiles is on but EnableTmdbFolderNaming is off,

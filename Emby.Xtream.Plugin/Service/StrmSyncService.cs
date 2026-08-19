@@ -1511,9 +1511,34 @@ namespace Emby.Xtream.Plugin.Service
             // emitting the retry NFO in a folder the main loop never wrote.
             // The NFO writer and the TMDB fallback lookup only run when EnableNfoFiles wants
             // them — see ResolveMovieTmdbIdForRetryAsync for the gate.
+            //
+            // When folder naming is on but the provider did not supply a TMDB ID, run the
+            // resolver before building the folder name. The main sync loop does this for the
+            // same reason: a retry that wrote "The Matrix" (no suffix) while the main loop
+            // already wrote "The Matrix [tmdbid=603]" would split one movie across two
+            // folders. The resolver returns the provider ID if valid, else the fallback
+            // result, else null — so the suffix appears whenever the main loop would have
+            // applied it. We only run it when folder naming is on; otherwise the folder name
+            // never carries the suffix and an extra network lookup is wasted.
             var folderTmdbId = config.EnableTmdbFolderNaming && IsValidTmdbId(item.TmdbId)
                 ? item.TmdbId.Trim()
                 : null;
+            if (config.EnableTmdbFolderNaming && folderTmdbId == null)
+            {
+                folderTmdbId = await ResolveMovieTmdbIdForRetryAsync(
+                    item, cleanedName, config,
+                    (n, y, ct) => _tmdbLookupService.LookupTmdbIdAsync(n, y, ct),
+                    _logger,
+                    cancellationToken).ConfigureAwait(false);
+                if (folderTmdbId != null && !IsValidTmdbId(folderTmdbId))
+                {
+                    folderTmdbId = null;
+                }
+                else if (folderTmdbId != null)
+                {
+                    folderTmdbId = folderTmdbId.Trim();
+                }
+            }
             var folderName = BuildMovieFolderName(cleanedName, folderTmdbId);
             if (string.IsNullOrWhiteSpace(folderName)) return;
 
