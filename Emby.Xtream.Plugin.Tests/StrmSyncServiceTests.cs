@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using Emby.Xtream.Plugin.Client.Models;
 using Emby.Xtream.Plugin.Service;
 using MediaBrowser.Model.Logging;
 using Xunit;
@@ -567,6 +568,224 @@ namespace Emby.Xtream.Plugin.Tests
         {
             var config = new PluginConfiguration();
             Assert.True(config.CleanupOrphans);
+        }
+
+        // -----------------------------------------------------------------
+        // ResolveMovieTmdbIdAsync — NFO / folder naming coupling (issue #63)
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdAsync_NfoOnly_PerformsLookup_WhenProviderTmdbMissing()
+        {
+            // Regression: when EnableNfoFiles is on but EnableTmdbFolderNaming is off,
+            // the lookup must still run so the NFO can carry a <uniqueid type="tmdb">.
+            // Previously the whole tmdbId block was gated on EnableTmdbFolderNaming,
+            // so NFO-only configs got empty NFO files for any title without a provider ID.
+            var movie = new VodStreamInfo { Name = "The Matrix", TmdbId = "" };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = true,
+            };
+            int callCount = 0;
+            var result = await StrmSyncService.ResolveMovieTmdbIdAsync(
+                movie, "The Matrix", config,
+                (n, y, ct) => { callCount++; return System.Threading.Tasks.Task.FromResult("603"); },
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
+
+            Assert.Equal("603", result);
+            Assert.Equal(1, callCount);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdAsync_NfoOnly_SkipsLookup_WhenProviderTmdbIsValid()
+        {
+            // When the provider already supplies a valid TMDB ID, the fallback lookup
+            // must not run — even if both flags want the ID resolved. Cheap short-circuit.
+            var movie = new VodStreamInfo { Name = "The Matrix", TmdbId = "603" };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = true,
+            };
+            int callCount = 0;
+            var result = await StrmSyncService.ResolveMovieTmdbIdAsync(
+                movie, "The Matrix", config,
+                (n, y, ct) => { callCount++; return System.Threading.Tasks.Task.FromResult("999"); },
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
+
+            Assert.Equal("603", result);
+            Assert.Equal(0, callCount);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdAsync_BothFlagsOff_NoLookup()
+        {
+            // Neither flag wants the ID — short-circuit, no fallback, even when
+            // EnableTmdbFallbackLookup is on. Lookup is opt-in by feature flag.
+            var movie = new VodStreamInfo { Name = "The Matrix", TmdbId = "" };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = false,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = true,
+            };
+            int callCount = 0;
+            var result = await StrmSyncService.ResolveMovieTmdbIdAsync(
+                movie, "The Matrix", config,
+                (n, y, ct) => { callCount++; return System.Threading.Tasks.Task.FromResult("603"); },
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
+
+            Assert.Null(result);
+            Assert.Equal(0, callCount);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdAsync_NfoOnly_NoFallback_ReturnsNull()
+        {
+            // EnableTmdbFallbackLookup off: lookup does not run; NFO writer will skip
+            // the file because the tmdbId is null. Folder naming is also off so this
+            // case is "no ID resolution at all".
+            var movie = new VodStreamInfo { Name = "The Matrix", TmdbId = "" };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = false,
+            };
+            var result = await StrmSyncService.ResolveMovieTmdbIdAsync(
+                movie, "The Matrix", config,
+                (n, y, ct) => System.Threading.Tasks.Task.FromResult("603"),
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
+
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdAsync_LookupThrows_ReturnsNull()
+        {
+            // TMDB outage should not crash the sync. The exception is swallowed
+            // and logged at Debug; the resolver returns null so the NFO writer
+            // skips the file and folder naming falls back to the title-only form.
+            var movie = new VodStreamInfo { Name = "The Matrix", TmdbId = "" };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = true,
+            };
+            var result = await StrmSyncService.ResolveMovieTmdbIdAsync(
+                movie, "The Matrix", config,
+                (n, y, ct) => throw new System.Net.Http.HttpRequestException("TMDB down"),
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
+
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdForRetryAsync_NfoOnly_PerformsLookup_WhenProviderTmdbMissing()
+        {
+            // Retry path: when EnableNfoFiles is on and the provider supplied no TMDB ID,
+            // the caller invokes this helper to run the fallback lookup. The helper itself
+            // is gated on EnableTmdbFallbackLookup, not EnableNfoFiles — the caller decides
+            // whether to invoke it.
+            var item = new FailedSyncItem { Name = "The Matrix", TmdbId = null, StreamId = 1 };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = true,
+            };
+            var result = await StrmSyncService.ResolveMovieTmdbIdForRetryAsync(
+                item, "The Matrix", config,
+                (n, y, ct) => System.Threading.Tasks.Task.FromResult("603"),
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
+
+            Assert.Equal("603", result);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdForRetryAsync_NoFallback_ReturnsNull()
+        {
+            // No fallback configured: the helper has nothing to do when the provider
+            // didn't supply a valid ID. Returns null. The caller's EnableNfoFiles gate
+            // decides whether to invoke the helper at all.
+            var item = new FailedSyncItem { Name = "The Matrix", TmdbId = null, StreamId = 1 };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = false,
+            };
+            int callCount = 0;
+            var result = await StrmSyncService.ResolveMovieTmdbIdForRetryAsync(
+                item, "The Matrix", config,
+                (n, y, ct) => { callCount++; return System.Threading.Tasks.Task.FromResult("603"); },
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
+
+            Assert.Null(result);
+            Assert.Equal(0, callCount);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdForRetryAsync_ProviderTmdbValid_NoFallback()
+        {
+            // Provider supplied a valid ID — the helper short-circuits, even when the
+            // fallback would otherwise be enabled.
+            var item = new FailedSyncItem { Name = "The Matrix", TmdbId = "603", StreamId = 1 };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = true,
+            };
+            int callCount = 0;
+            var result = await StrmSyncService.ResolveMovieTmdbIdForRetryAsync(
+                item, "The Matrix", config,
+                (n, y, ct) => { callCount++; return System.Threading.Tasks.Task.FromResult("999"); },
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
+
+            Assert.Equal("603", result);
+            Assert.Equal(0, callCount);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task ResolveMovieTmdbIdAsync_BuildMovieFolderName_NfoOnly_NoSuffixOnFolder()
+        {
+            // End-to-end shape check: when EnableNfoFiles is on but EnableTmdbFolderNaming is off,
+            // a movie with a valid provider TMDB ID gets NFO content (we hand-verify the resolver
+            // returns the ID) AND the folder name does NOT carry the [tmdbid=…] suffix.
+            var movie = new VodStreamInfo { Name = "The Matrix", TmdbId = "603" };
+            var config = new PluginConfiguration
+            {
+                EnableNfoFiles = true,
+                EnableTmdbFolderNaming = false,
+                EnableTmdbFallbackLookup = true,
+            };
+            var tmdbId = await StrmSyncService.ResolveMovieTmdbIdAsync(
+                movie, "The Matrix", config,
+                (n, y, ct) => System.Threading.Tasks.Task.FromResult("999"),
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
+
+            // The main loop gates the folder on EnableTmdbFolderNaming, so the folder
+            // name gets null even though the resolver ran for NFO purposes.
+            var folderTmdbId = config.EnableTmdbFolderNaming ? tmdbId : null;
+            var folderName = StrmSyncService.BuildMovieFolderName("The Matrix", folderTmdbId);
+
+            Assert.Equal("603", tmdbId); // resolver still resolves for NFO
+            Assert.Equal("The Matrix", folderName); // no [tmdbid=…] suffix
+            Assert.DoesNotContain("[tmdbid=", folderName);
         }
 
         // -----------------------------------------------------------------
