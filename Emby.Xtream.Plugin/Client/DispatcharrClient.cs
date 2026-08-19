@@ -30,6 +30,13 @@ namespace Emby.Xtream.Plugin.Client
         private string _refreshToken;
         private DateTime _tokenExpiry = DateTime.MinValue;
 
+        // Serializes the cold-login / refresh path so N parallel callers on a
+        // fresh client cannot all POST /api/accounts/token/ simultaneously.
+        // Dispatcharr rate-limits that storm with 429s. The fast-path cache
+        // check stays outside the lock; queued callers re-check inside and
+        // short-circuit on the populated cache.
+        private readonly SemaphoreSlim _tokenGate = new SemaphoreSlim(1, 1);
+
         public DispatcharrClient(ILogger logger, HttpMessageHandler handler = null)
         {
             _logger = logger;
@@ -373,15 +380,35 @@ namespace Emby.Xtream.Plugin.Client
 
         private async Task EnsureTokenAsync(string baseUrl, CancellationToken cancellationToken)
         {
-            if (_accessToken != null && DateTime.UtcNow < _tokenExpiry) return;
+            // Fast path: cache is warm, no work needed.
+            if (IsTokenValid()) return;
 
-            if (_refreshToken != null)
+            // Slow path: serialize so only one caller logs in / refreshes.
+            // Re-check inside the lock so callers that queued behind a cold
+            // login short-circuit on the now-populated cache instead of
+            // each issuing their own POST /api/accounts/token/.
+            await _tokenGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                var refreshed = await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
-                if (refreshed) return;
-            }
+                if (IsTokenValid()) return;
 
-            await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+                if (_refreshToken != null)
+                {
+                    var refreshed = await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+                    if (refreshed) return;
+                }
+
+                await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _tokenGate.Release();
+            }
+        }
+
+        private bool IsTokenValid()
+        {
+            return _accessToken != null && DateTime.UtcNow < _tokenExpiry;
         }
 
         private async Task<LoginResponse> LoginAsync(string baseUrl, CancellationToken cancellationToken)
