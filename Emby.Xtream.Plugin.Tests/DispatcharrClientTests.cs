@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -8,6 +9,7 @@ using System.Threading.Tasks;
 using Emby.Xtream.Plugin.Client;
 using Emby.Xtream.Plugin.Client.Models;
 using Emby.Xtream.Plugin.Service;
+using Emby.Xtream.Plugin.Tests.Fakes;
 using MediaBrowser.Model.Logging;
 using Xunit;
 
@@ -642,6 +644,99 @@ namespace Emby.Xtream.Plugin.Tests
         // -------------------------------------------------------------------------
         // Helpers
         // -------------------------------------------------------------------------
+
+        // -------------------------------------------------------------------------
+        // EnsureTokenAsync — cold-stampede regression
+        //
+        // Bug: N parallel callers on a fresh DispatcharrClient all observed
+        // _accessToken == null, all passed the cache check, and all POSTed
+        // /api/accounts/token/. Dispatcharr rate-limited the storm with 429s.
+        // Fix: serialize the login path with a SemaphoreSlim; only the first
+        // caller should reach the wire, the rest must short-circuit on cache.
+        // -------------------------------------------------------------------------
+
+        [Fact]
+        public async Task ParallelCallers_OnlyOneLoginPostOnColdToken()
+        {
+            // The fake blocks every request until Gate is set. Without that, the
+            // first caller's login would complete synchronously before the others
+            // even started, hiding the race. Releasing the gate makes N callers
+            // race for the cache check simultaneously.
+            var handler = new FakeHttpHandler();
+            handler.Gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var loginJson = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
+            handler.RespondWithSequence("/api/accounts/token/", Enumerable.Repeat(loginJson, 1));
+            // After login, every API call hits a different endpoint and gets a body.
+            // Sequence of N because N parallel callers will each consume one body.
+            handler.RespondWithSequence("api/channels/profiles/", Enumerable.Repeat("[]", 4));
+            handler.RespondWithSequence("api/channels/channels/", Enumerable.Repeat("[]", 4));
+            handler.RespondWith("api/accounts/token/", loginJson);
+
+            var client = new DispatcharrClient(new NullLogger(), handler);
+            client.Configure("admin", "pass");
+
+            // Fire several concurrent calls that all go through EnsureTokenAsync.
+            // Each calls a different endpoint so the requests are distinguishable
+            // in ReceivedUrls once the gate opens.
+            var callers = new Task[]
+            {
+                client.GetProfilesAsync("http://localhost:8080", CancellationToken.None),
+                client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None),
+                client.GetProfilesAsync("http://localhost:8080", CancellationToken.None),
+                client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None),
+            };
+
+            // Give the tasks a moment to actually reach the gate. Without this
+            // they could be queued on the thread pool and never get started
+            // before we release.
+            await Task.Delay(50);
+            handler.Gate.SetResult(true);
+
+            await Task.WhenAll(callers);
+
+            var loginPosts = handler.ReceivedUrls
+                .Count(u => u.Contains("/api/accounts/token/"));
+            Assert.Equal(1, loginPosts);
+        }
+
+        [Fact]
+        public async Task ParallelCallers_AfterLogin_SecondCallDoesNotRelogin()
+        {
+            // After the first cold login populates the cache, a subsequent
+            // parallel burst must NOT trigger a second login — even if those
+            // callers happen to start before the first caller's response
+            // populates _accessToken. The SemaphoreSlim's slow-path re-check
+            // inside the lock is what makes this work.
+            var handler = new FakeHttpHandler();
+            handler.Gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var loginJson = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
+            // Register only ONE login response. If the fix is wrong, the second
+            // batch of callers will try to login and the handler will throw
+            // "no registered response".
+            handler.RespondWithSequence("/api/accounts/token/", new[] { loginJson });
+            handler.RespondWithSequence("api/channels/profiles/", Enumerable.Repeat("[]", 4));
+            handler.RespondWithSequence("api/channels/channels/", Enumerable.Repeat("[]", 4));
+
+            var client = new DispatcharrClient(new NullLogger(), handler);
+            client.Configure("admin", "pass");
+
+            var first = client.GetProfilesAsync("http://localhost:8080", CancellationToken.None);
+            await Task.Delay(50);
+            handler.Gate.SetResult(true);
+            await first;
+
+            // Token cache is populated. A second burst must reuse it.
+            handler.ReceivedUrls.Clear();
+            var second = Task.WhenAll(
+                client.GetProfilesAsync("http://localhost:8080", CancellationToken.None),
+                client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None),
+                client.GetProfilesAsync("http://localhost:8080", CancellationToken.None));
+            await second;
+
+            Assert.DoesNotContain(handler.ReceivedUrls, u => u.Contains("/api/accounts/token/"));
+        }
 
         private static async Task<(
             System.Collections.Generic.Dictionary<int, string> UuidMap,
