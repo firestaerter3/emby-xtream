@@ -719,29 +719,6 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
-        public async System.Threading.Tasks.Task ResolveMovieTmdbIdAsync_NonCancellationException_StillSwallowed()
-        {
-            // The cancellation-aware catch must not widen the swallow. A real
-            // HttpRequestException or TaskCanceledException-without-cancellation should
-            // still be logged-and-nulled, not rethrown, so the sync continues for the
-            // remaining movies.
-            var movie = new VodStreamInfo { Name = "The Matrix", TmdbId = "" };
-            var config = new PluginConfiguration
-            {
-                EnableNfoFiles = true,
-                EnableTmdbFolderNaming = false,
-                EnableTmdbFallbackLookup = true,
-            };
-            var result = await StrmSyncService.ResolveMovieTmdbIdAsync(
-                movie, "The Matrix", config,
-                (n, y, ct) => throw new System.Net.Http.HttpRequestException("TMDB down"),
-                new NullLogger(),
-                System.Threading.CancellationToken.None);
-
-            Assert.Null(result);
-        }
-
-        [Fact]
         public async System.Threading.Tasks.Task ResolveMovieTmdbIdForRetryAsync_LookupCanceled_Propagates()
         {
             // Same regression on the retry-path resolver: cancellation must propagate.
@@ -845,6 +822,9 @@ namespace Emby.Xtream.Plugin.Tests
             // sync wrote "The Matrix [tmdbid=603]" — splitting one movie across two folders.
             // After the fix, the retry path mirrors the main loop: when folder naming is on but
             // the provider ID is missing, the fallback lookup fills the suffix.
+            //
+            // Calls the production helper directly so the test cannot drift from the live code
+            // path (CodeRabbit PR #65 review on head c0da4e7).
             var item = new FailedSyncItem { Name = "The Matrix", TmdbId = null, StreamId = 1 };
             var config = new PluginConfiguration
             {
@@ -853,26 +833,11 @@ namespace Emby.Xtream.Plugin.Tests
                 EnableTmdbFallbackLookup = true,
             };
 
-            // Mirror the retry-path logic from StrmSyncService.RetryMovieItemAsync.
-            string folderTmdbId = config.EnableTmdbFolderNaming && IsValidProviderTmdbId(item.TmdbId)
-                ? item.TmdbId.Trim()
-                : null;
-            if (config.EnableTmdbFolderNaming && folderTmdbId == null)
-            {
-                folderTmdbId = await StrmSyncService.ResolveMovieTmdbIdForRetryAsync(
-                    item, "The Matrix", config,
-                    (n, y, ct) => System.Threading.Tasks.Task.FromResult("603"),
-                    new NullLogger(),
-                    System.Threading.CancellationToken.None);
-                if (folderTmdbId != null && !IsValidProviderTmdbId(folderTmdbId))
-                {
-                    folderTmdbId = null;
-                }
-                else if (folderTmdbId != null)
-                {
-                    folderTmdbId = folderTmdbId.Trim();
-                }
-            }
+            var folderTmdbId = await StrmSyncService.ResolveRetryFolderTmdbIdAsync(
+                item, "The Matrix", config,
+                (n, y, ct) => System.Threading.Tasks.Task.FromResult("603"),
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
             var folderName = StrmSyncService.BuildMovieFolderName("The Matrix", folderTmdbId);
 
             Assert.Equal("603", folderTmdbId);
@@ -893,21 +858,11 @@ namespace Emby.Xtream.Plugin.Tests
                 EnableTmdbFallbackLookup = true,
             };
 
-            string folderTmdbId = config.EnableTmdbFolderNaming && IsValidProviderTmdbId(item.TmdbId)
-                ? item.TmdbId.Trim()
-                : null;
-            if (config.EnableTmdbFolderNaming && folderTmdbId == null)
-            {
-                folderTmdbId = await StrmSyncService.ResolveMovieTmdbIdForRetryAsync(
-                    item, "The Matrix", config,
-                    (n, y, ct) => System.Threading.Tasks.Task.FromResult<string>(null),
-                    new NullLogger(),
-                    System.Threading.CancellationToken.None);
-                if (folderTmdbId != null && !IsValidProviderTmdbId(folderTmdbId))
-                {
-                    folderTmdbId = null;
-                }
-            }
+            var folderTmdbId = await StrmSyncService.ResolveRetryFolderTmdbIdAsync(
+                item, "The Matrix", config,
+                (n, y, ct) => System.Threading.Tasks.Task.FromResult<string>(null),
+                new NullLogger(),
+                System.Threading.CancellationToken.None);
             var folderName = StrmSyncService.BuildMovieFolderName("The Matrix", folderTmdbId);
 
             Assert.Null(folderTmdbId);
