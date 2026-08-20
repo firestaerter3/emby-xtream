@@ -30,6 +30,13 @@ namespace Emby.Xtream.Plugin.Client
         private string _refreshToken;
         private DateTime _tokenExpiry = DateTime.MinValue;
 
+        // Serializes the cold-login / refresh path so N parallel callers on a
+        // fresh client cannot all POST /api/accounts/token/ simultaneously.
+        // Dispatcharr rate-limits that storm with 429s. The fast-path cache
+        // check stays outside the lock; queued callers re-check inside and
+        // short-circuit on the populated cache.
+        private readonly SemaphoreSlim _tokenGate = new SemaphoreSlim(1, 1);
+
         public DispatcharrClient(ILogger logger, HttpMessageHandler handler = null)
         {
             _logger = logger;
@@ -328,18 +335,43 @@ namespace Emby.Xtream.Plugin.Client
                     {
                         using (var request = new HttpRequestMessage(HttpMethod.Get, url))
                         {
-                            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
+                            // Capture the token at request-build time so the "already replaced?"
+                            // check after the gate is acquired compares against what we actually
+                            // sent, not whatever `_accessToken` happens to hold when the 401
+                            // response arrives (which may have been rotated by another caller
+                            // that already handled its own rejection).
+                            var sentAccessToken = _accessToken;
+                            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", sentAccessToken);
 
                             using (var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
                             {
                                 if (response.StatusCode == HttpStatusCode.Unauthorized)
                                 {
                                     _logger.Debug("Dispatcharr token expired, refreshing");
-                                    var refreshed = await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
-                                    if (!refreshed)
+
+                                    // Route HTTP 401 recovery through the same gate as EnsureTokenAsync
+                                    // so a burst of concurrent 401s collapses to a single refresh/login.
+                                    // Compare against the token we actually sent on the rejected request:
+                                    // if the cache has moved on past it, another caller already handled
+                                    // the rejection and we should skip the refresh.
+                                    var rejectedToken = sentAccessToken;
+                                    await _tokenGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                                    try
                                     {
-                                        await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
-                                        if (_accessToken == null) return null;
+                                        if (_accessToken == rejectedToken)
+                                        {
+                                            var refreshed = _refreshToken != null
+                                                && await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+                                            if (!refreshed)
+                                            {
+                                                await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+                                                if (_accessToken == null) return null;
+                                            }
+                                        }
+                                    }
+                                    finally
+                                    {
+                                        _tokenGate.Release();
                                     }
 
                                     using (var retryRequest = new HttpRequestMessage(HttpMethod.Get, url))
@@ -373,15 +405,35 @@ namespace Emby.Xtream.Plugin.Client
 
         private async Task EnsureTokenAsync(string baseUrl, CancellationToken cancellationToken)
         {
-            if (_accessToken != null && DateTime.UtcNow < _tokenExpiry) return;
+            // Fast path: cache is warm, no work needed.
+            if (IsTokenValid()) return;
 
-            if (_refreshToken != null)
+            // Slow path: serialize so only one caller logs in / refreshes.
+            // Re-check inside the lock so callers that queued behind a cold
+            // login short-circuit on the now-populated cache instead of
+            // each issuing their own POST /api/accounts/token/.
+            await _tokenGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                var refreshed = await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
-                if (refreshed) return;
-            }
+                if (IsTokenValid()) return;
 
-            await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+                if (_refreshToken != null)
+                {
+                    var refreshed = await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+                    if (refreshed) return;
+                }
+
+                await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _tokenGate.Release();
+            }
+        }
+
+        private bool IsTokenValid()
+        {
+            return _accessToken != null && DateTime.UtcNow < _tokenExpiry;
         }
 
         private async Task<LoginResponse> LoginAsync(string baseUrl, CancellationToken cancellationToken)

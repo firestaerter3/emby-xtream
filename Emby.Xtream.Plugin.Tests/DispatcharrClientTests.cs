@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -8,6 +9,7 @@ using System.Threading.Tasks;
 using Emby.Xtream.Plugin.Client;
 using Emby.Xtream.Plugin.Client.Models;
 using Emby.Xtream.Plugin.Service;
+using Emby.Xtream.Plugin.Tests.Fakes;
 using MediaBrowser.Model.Logging;
 using Xunit;
 
@@ -642,6 +644,244 @@ namespace Emby.Xtream.Plugin.Tests
         // -------------------------------------------------------------------------
         // Helpers
         // -------------------------------------------------------------------------
+
+        // -------------------------------------------------------------------------
+        // EnsureTokenAsync — cold-stampede regression
+        //
+        // Bug: N parallel callers on a fresh DispatcharrClient all observed
+        // _accessToken == null, all passed the cache check, and all POSTed
+        // /api/accounts/token/. Dispatcharr rate-limited the storm with 429s.
+        // Fix: serialize the login path with a SemaphoreSlim; only the first
+        // caller should reach the wire, the rest must short-circuit on cache.
+        // -------------------------------------------------------------------------
+
+        [Fact]
+        public async Task ParallelCallers_OnlyOneLoginPostOnColdToken()
+        {
+            // The fake blocks every request until Gate is set. Without that, the
+            // first caller's login would complete synchronously before the others
+            // even started, hiding the race. Releasing the gate makes N callers
+            // race for the cache check simultaneously.
+            var handler = new FakeHttpHandler();
+            handler.Gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var loginJson = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
+            handler.RespondWithSequence("/api/accounts/token/", Enumerable.Repeat(loginJson, 1));
+            // After login, every API call hits a different endpoint and gets a body.
+            // Sequence of N because N parallel callers will each consume one body.
+            handler.RespondWithSequence("api/channels/profiles/", Enumerable.Repeat("[]", 4));
+            handler.RespondWithSequence("api/channels/channels/", Enumerable.Repeat("[]", 4));
+            handler.RespondWith("api/accounts/token/", loginJson);
+
+            var client = new DispatcharrClient(new NullLogger(), handler);
+            client.Configure("admin", "pass");
+
+            // Fire several concurrent calls that all go through EnsureTokenAsync.
+            // Each calls a different endpoint so the requests are distinguishable
+            // in ReceivedUrls once the gate opens.
+            var callers = new Task[]
+            {
+                client.GetProfilesAsync("http://localhost:8080", CancellationToken.None),
+                client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None),
+                client.GetProfilesAsync("http://localhost:8080", CancellationToken.None),
+                client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None),
+            };
+
+            // Give the tasks a moment to actually reach the gate. Without this
+            // they could be queued on the thread pool and never get started
+            // before we release.
+            await Task.Delay(50);
+            handler.Gate.SetResult(true);
+
+            await Task.WhenAll(callers);
+
+            var loginPosts = handler.ReceivedUrls
+                .Count(u => u.Contains("/api/accounts/token/"));
+            Assert.Equal(1, loginPosts);
+        }
+
+        [Fact]
+        public async Task ParallelCallers_AfterLogin_SecondCallDoesNotRelogin()
+        {
+            // After the first cold login populates the cache, a subsequent
+            // parallel burst must NOT trigger a second login — even if those
+            // callers happen to start before the first caller's response
+            // populates _accessToken. The SemaphoreSlim's slow-path re-check
+            // inside the lock is what makes this work.
+            var handler = new FakeHttpHandler();
+            handler.Gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var loginJson = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
+            // Register only ONE login response. If the fix is wrong, the second
+            // batch of callers will try to login and the handler will throw
+            // "no registered response".
+            handler.RespondWithSequence("/api/accounts/token/", new[] { loginJson });
+            handler.RespondWithSequence("api/channels/profiles/", Enumerable.Repeat("[]", 4));
+            handler.RespondWithSequence("api/channels/channels/", Enumerable.Repeat("[]", 4));
+
+            var client = new DispatcharrClient(new NullLogger(), handler);
+            client.Configure("admin", "pass");
+
+            var first = client.GetProfilesAsync("http://localhost:8080", CancellationToken.None);
+            await Task.Delay(50);
+            handler.Gate.SetResult(true);
+            await first;
+
+            // Token cache is populated. A second burst must reuse it.
+            handler.ReceivedUrls.Clear();
+            var second = Task.WhenAll(
+                client.GetProfilesAsync("http://localhost:8080", CancellationToken.None),
+                client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None),
+                client.GetProfilesAsync("http://localhost:8080", CancellationToken.None));
+            await second;
+
+            Assert.DoesNotContain(handler.ReceivedUrls, u => u.Contains("/api/accounts/token/"));
+        }
+
+        [Fact]
+        public async Task ParallelCallers_After401_OnlyOneRefreshPost()
+        {
+            // HTTP 401 recovery must serialize through _tokenGate. Without the gate,
+            // N concurrent callers receiving 401 would each POST /api/accounts/token/refresh/
+            // (and on failure, /api/accounts/token/), recreating the stampede the
+            // EnsureTokenAsync fix solved for the cold-start path.
+
+            var handler = new FakeHttpHandler();
+            handler.Gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var tokenJson = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
+            // Refresh must return a NEW access token. If the fake returns the same token,
+            // the gate's `_accessToken == rejectedToken` check stays true and queued callers
+            // also issue a refresh — the very stampede we're testing for.
+            var refreshedTokenJson = JsonSerializer.Serialize(new { access = "tok-rotated", refresh = "ref" });
+
+            // Substring matcher walks rules in registration order, taking the first whose
+            // queue still has responses. We register priming success first, then the 401s
+            // for the parallel burst, then the post-retry successes — so the primer hits
+            // the priming success and the parallel burst hits the 401s.
+            // Prefix matching: `/api/accounts/token/refresh/` MUST come before
+            // `/api/accounts/token/` because the latter is a prefix of the former.
+            handler.RespondWithSequence("api/channels/profiles/",
+                new[] { "[]" });                                    // 1: priming success
+            handler.RespondWithSequence("api/channels/profiles/",
+                new[] { "", "" }, HttpStatusCode.Unauthorized);     // 2-3: parallel burst 401s
+            handler.RespondWithSequence("api/channels/profiles/",
+                new[] { "[]", "[]" });                              // 4-5: post-retry successes
+            handler.RespondWithSequence("api/channels/channels/",
+                new[] { "", "" }, HttpStatusCode.Unauthorized);     // 6-7: parallel burst 401s
+            handler.RespondWithSequence("api/channels/channels/",
+                new[] { "[]", "[]" });                              // 8-9: post-retry successes
+            handler.RespondWithSequence("/api/accounts/token/refresh/",
+                new[] { refreshedTokenJson });                     // 16: single refresh, rotated token
+            handler.RespondWithSequence("/api/accounts/token/",
+                new[] { tokenJson });                              // 17: priming login
+
+            var client = new DispatcharrClient(new NullLogger(), handler);
+            client.Configure("admin", "pass");
+
+            // Prime the cache so EnsureTokenAsync doesn't issue a login during the
+            // parallel burst. The primer call goes through the same gate, but only
+            // once, populating _accessToken and _refreshToken.
+            var primer = client.GetProfilesAsync("http://localhost:8080", CancellationToken.None);
+            await Task.Delay(50);
+            handler.Gate.SetResult(true);
+            await primer;
+
+            // Cache is warm. Reset the gate so the parallel burst gets serialized at
+            // the 401-recovery step. Clear ReceivedUrls so we count only the burst.
+            handler.Gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            handler.ReceivedUrls.Clear();
+
+            var callers = new Task[]
+            {
+                client.GetProfilesAsync("http://localhost:8080", CancellationToken.None),
+                client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None),
+                client.GetProfilesAsync("http://localhost:8080", CancellationToken.None),
+                client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None),
+            };
+            await Task.Delay(50);
+            handler.Gate.SetResult(true);
+            await Task.WhenAll(callers);
+
+            var refreshPosts = handler.ReceivedUrls
+                .Count(u => u.Contains("/api/accounts/token/refresh/"));
+            var loginPosts = handler.ReceivedUrls
+                .Count(u => u.Contains("/api/accounts/token/") && !u.Contains("refresh"));
+            Assert.Equal(1, refreshPosts);
+            Assert.Equal(0, loginPosts);
+        }
+
+        [Fact]
+        public async Task ParallelCallers_StaleDelayed401_DoesNotTriggerSecondRefresh()
+        {
+            // Stale-401 race: caller A sends a request with token A and receives a
+            // DELAYED 401 response. While A's response is in flight, caller B hits
+            // its own 401, refreshes token A → token B, and finishes. When A's
+            // delayed 401 finally arrives, the rejection comparison MUST use the
+            // token A actually sent (not the live _accessToken, which has since
+            // been rotated to B by caller B's recovery). Comparing against the
+            // live field would falsely match B → A would issue a redundant
+            // refresh on a token it never had rejected.
+            //
+            // Before the fix, rejectedToken was captured from _accessToken AFTER
+            // the response returned, so it read B; comparison matched; A issued a
+            // second refresh — recreating the stampede on the recovery path.
+
+            var handler = new FakeHttpHandler();
+
+            var tokenJson = JsonSerializer.Serialize(new { access = "tokA", refresh = "refA" });
+            var refreshedTokenJson = JsonSerializer.Serialize(new { access = "tokB", refresh = "refB" });
+
+            // Prime the cache with token A so the parallel burst reuses it.
+            handler.RespondWithSequence("api/channels/profiles/",
+                new[] { "[]" });                                       // 1: primer warm-up success
+            handler.RespondWithSequence("/api/accounts/token/",
+                new[] { tokenJson });                                 // 2: priming login
+
+            var client = new DispatcharrClient(new NullLogger(), handler);
+            client.Configure("admin", "pass");
+            await client.GetProfilesAsync("http://localhost:8080", CancellationToken.None);
+
+            // ----- Burst phase -----
+            // Hold caller A's profiles request in flight via a per-URL gate.
+            // Caller B's channels request runs immediately (no per-URL gate on it).
+            var profilesGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            handler.UrlGates["api/channels/profiles/"] = profilesGate;
+            handler.ReceivedUrls.Clear();
+
+            // Caller A: hits profiles endpoint, gets 401, but the response is held.
+            // Caller B: hits channels endpoint, gets 401 immediately, refreshes tokA→tokB, retries 200.
+            handler.RespondWithSequence("api/channels/profiles/",
+                new[] { "" }, HttpStatusCode.Unauthorized);            // 3: caller A first attempt 401 (delayed)
+            handler.RespondWithSequence("api/channels/channels/",
+                new[] { "" }, HttpStatusCode.Unauthorized);            // 4: caller B first attempt 401 (immediate)
+            handler.RespondWithSequence("api/channels/channels/",
+                new[] { "[]" });                                       // 5: caller B retry success
+            handler.RespondWithSequence("api/channels/profiles/",
+                new[] { "[]" });                                       // 6: caller A retry success (after skip)
+            handler.RespondWithSequence("/api/accounts/token/refresh/",
+                new[] { refreshedTokenJson });                         // 7: single refresh, rotated tokA→tokB
+
+            var callerA = client.GetProfilesAsync("http://localhost:8080", CancellationToken.None);
+            var callerB = client.GetChannelDataAsync("http://localhost:8080", CancellationToken.None);
+
+            // Wait long enough for caller B's full sequence (401 → refresh → retry) to complete.
+            // Caller A's request is still parked on profilesGate.
+            await callerB;
+
+            // Caller B is done. _accessToken is now tokB. Now release caller A's 401.
+            profilesGate.SetResult(true);
+            await callerA;
+
+            var refreshPosts = handler.ReceivedUrls
+                .Count(u => u.Contains("/api/accounts/token/refresh/"));
+            var loginPosts = handler.ReceivedUrls
+                .Count(u => u.Contains("/api/accounts/token/") && !u.Contains("refresh"));
+            // Exactly one refresh (caller B's). Caller A's delayed 401 must NOT trigger a second.
+            // Without the fix, this would be 2.
+            Assert.Equal(1, refreshPosts);
+            Assert.Equal(0, loginPosts);
+        }
 
         private static async Task<(
             System.Collections.Generic.Dictionary<int, string> UuidMap,
