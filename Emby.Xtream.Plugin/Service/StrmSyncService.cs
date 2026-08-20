@@ -493,36 +493,24 @@ namespace Emby.Xtream.Plugin.Service
                             return;
                         }
 
-                        // Determine TMDB ID for folder naming
+                        // Two distinct skip probes, picked by the flag combination:
+                        //   * Folder naming ON — folder path depends on the TMDB ID, so resolve
+                        //     first and probe the suffixed path. Otherwise we'd skip on a path
+                        //     that never gets written.
+                        //   * Folder naming OFF — probe the plain (un-suffixed) path first. If
+                        //     the STRM already exists, we skip without ever running the
+                        //     network fallback. Only resolve the TMDB ID when we'll proceed
+                        //     past the skip check (the NFO writer may still need it).
+                        //
+                        // See ADR-015 for the NFO/folder-naming decoupling context.
                         string tmdbId = null;
                         if (config.EnableTmdbFolderNaming)
                         {
-                            if (IsValidTmdbId(movie.TmdbId))
-                            {
-                                tmdbId = movie.TmdbId.Trim();
-                            }
-                            else if (config.EnableTmdbFallbackLookup)
-                            {
-                                var yearMatch2 = YearInTitleRegex.Match(cleanedName);
-                                int? yearForLookup = null;
-                                if (yearMatch2.Success)
-                                {
-                                    int y;
-                                    if (int.TryParse(yearMatch2.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out y))
-                                    {
-                                        yearForLookup = y;
-                                    }
-                                }
-
-                                try
-                                {
-                                    tmdbId = await _tmdbLookupService.LookupTmdbIdAsync(cleanedName, yearForLookup, cancellationToken).ConfigureAwait(false);
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.Debug("TMDB fallback error for '{0}': {1}", cleanedName, ex.Message);
-                                }
-                            }
+                            tmdbId = await ResolveMovieTmdbIdAsync(
+                                movie, cleanedName, config,
+                                (n, y, ct) => _tmdbLookupService.LookupTmdbIdAsync(n, y, ct),
+                                _logger,
+                                cancellationToken).ConfigureAwait(false);
                         }
 
                         var folderName = BuildMovieFolderName(cleanedName, tmdbId);
@@ -534,7 +522,6 @@ namespace Emby.Xtream.Plugin.Service
 
                         var subFolder = BuildContentFolderPath(
                             config.MovieFolderMode, movie.CategoryId, categoryNames, folderMappings, "Movies");
-
                         if (subFolder == null)
                         {
                             Interlocked.Increment(ref _movieProgress.Skipped);
@@ -558,6 +545,17 @@ namespace Emby.Xtream.Plugin.Service
                             Interlocked.Increment(ref _movieProgress.Completed);
                             ReportTaskProgress(_movieProgress, taskProgress);
                             return;
+                        }
+
+                        // Folder naming off + NFO on: defer the TMDB fallback lookup until after
+                        // the skip check. Movies that get skipped never trigger a network call.
+                        if (!config.EnableTmdbFolderNaming && config.EnableNfoFiles && tmdbId == null)
+                        {
+                            tmdbId = await ResolveMovieTmdbIdAsync(
+                                movie, cleanedName, config,
+                                (n, y, ct) => _tmdbLookupService.LookupTmdbIdAsync(n, y, ct),
+                                _logger,
+                                cancellationToken).ConfigureAwait(false);
                         }
 
                         var ext = !string.IsNullOrEmpty(movie.ContainerExtension)
@@ -1468,8 +1466,54 @@ namespace Emby.Xtream.Plugin.Service
             var cleanedName = config.EnableContentNameCleaning
                 ? ContentNameCleaner.CleanContentName(item.Name, config.ContentRemoveTerms)
                 : item.Name;
-            var folderName = BuildMovieFolderName(cleanedName, item.TmdbId);
+
+            // Folder naming on retry honours EnableTmdbFolderNaming like the main loop: the
+            // [tmdbid=…] suffix only goes on the folder when the user asked for it. Without
+            // this gate, an NFO-only retry would write "The Matrix [tmdbid=603]" while the
+            // main sync wrote "The Matrix", splitting one movie across two folders and
+            // emitting the retry NFO in a folder the main loop never wrote.
+            // The NFO writer and the TMDB fallback lookup only run when EnableNfoFiles wants
+            // them — see ResolveMovieTmdbIdForRetryAsync for the gate.
+            //
+            // When folder naming is on but the provider did not supply a TMDB ID, run the
+            // resolver before building the folder name. The main sync loop does this for the
+            // same reason: a retry that wrote "The Matrix" (no suffix) while the main loop
+            // already wrote "The Matrix [tmdbid=603]" would split one movie across two
+            // folders. The resolver returns the provider ID if valid, else the fallback
+            // result, else null — so the suffix appears whenever the main loop would have
+            // applied it. We only run it when folder naming is on; otherwise the folder name
+            // never carries the suffix and an extra network lookup is wasted.
+            // Folder-naming TMDB ID: provider-supplied when valid, otherwise a one-shot
+            // fallback lookup. The same call's result is reused for the NFO writer below
+            // so a config with both flags on does not pay for two TMDB lookups on the
+            // same item. The helper handles the provider/fallback split, validation,
+            // and trimming. When folder naming is off, this branch never runs and
+            // folderName is built without a suffix.
+            string tmdbId = null;
+            string folderTmdbId = null;
+            if (config.EnableTmdbFolderNaming)
+            {
+                folderTmdbId = await ResolveRetryFolderTmdbIdAsync(
+                    item, cleanedName, config,
+                    (n, y, ct) => _tmdbLookupService.LookupTmdbIdAsync(n, y, ct),
+                    _logger,
+                    cancellationToken).ConfigureAwait(false);
+                tmdbId = folderTmdbId;
+            }
+            var folderName = BuildMovieFolderName(cleanedName, folderTmdbId);
             if (string.IsNullOrWhiteSpace(folderName)) return;
+
+            // NFO writer needs the TMDB ID even when folder naming is off (issue #63).
+            // The folder-naming branch above already populated tmdbId when it ran, so
+            // only resolve when folder naming is off — the resolver does not run twice.
+            if (config.EnableNfoFiles && string.IsNullOrEmpty(tmdbId))
+            {
+                tmdbId = await ResolveMovieTmdbIdForRetryAsync(
+                    item, cleanedName, config,
+                    (n, y, ct) => _tmdbLookupService.LookupTmdbIdAsync(n, y, ct),
+                    _logger,
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             var subFolder = BuildContentFolderPath(
                 config.MovieFolderMode, item.CategoryId, categoryNames, folderMappings, "Movies");
@@ -1499,7 +1543,7 @@ namespace Emby.Xtream.Plugin.Service
 
             lock (writtenPaths) { writtenPaths.Add(strmPath); }
 
-            if (config.EnableNfoFiles && !string.IsNullOrEmpty(item.TmdbId))
+            if (config.EnableNfoFiles && !string.IsNullOrEmpty(tmdbId))
             {
                 var nfoPath = Path.Combine(movieDir, folderName + ".nfo");
                 var yearMatch = YearInTitleRegex.Match(cleanedName);
@@ -1510,7 +1554,7 @@ namespace Emby.Xtream.Plugin.Service
                     if (int.TryParse(yearMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out y))
                         nfoYear = y;
                 }
-                try { NfoWriter.WriteMovieNfo(nfoPath, cleanedName, item.TmdbId, nfoYear); }
+                try { NfoWriter.WriteMovieNfo(nfoPath, cleanedName, tmdbId, nfoYear); }
                 catch (Exception ex) { _logger.Debug("NFO write failed on retry for '{0}': {1}", item.Name, ex.Message); }
             }
 
@@ -1593,6 +1637,149 @@ namespace Emby.Xtream.Plugin.Service
             {
                 _logger.Debug("Failed to persist sync history: {0}", ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Resolves a movie's TMDB ID for any downstream consumer that needs one. The lookup runs
+        /// when EITHER <see cref="PluginConfiguration.EnableTmdbFolderNaming"/> OR
+        /// <see cref="PluginConfiguration.EnableNfoFiles"/> is set, so that an NFO-only config can
+        /// still resolve IDs to populate sidecar files. Returns null if neither flag wants a lookup
+        /// or both the provider-supplied ID and the fallback lookup produced nothing.
+        ///
+        /// Caller is responsible for deciding whether to use the returned ID for folder naming
+        /// (gate on <see cref="PluginConfiguration.EnableTmdbFolderNaming"/>) or for NFO content
+        /// (gate on <see cref="PluginConfiguration.EnableNfoFiles"/>) — this helper does not
+        /// enforce either, since the two are independent.
+        /// </summary>
+        internal static async Task<string> ResolveMovieTmdbIdAsync(
+            VodStreamInfo movie, string cleanedName, PluginConfiguration config,
+            Func<string, int?, CancellationToken, Task<string>> lookupTmdbIdAsync,
+            ILogger logger,
+            CancellationToken cancellationToken)
+        {
+            if (!config.EnableTmdbFolderNaming && !config.EnableNfoFiles)
+            {
+                return null;
+            }
+
+            if (IsValidTmdbId(movie.TmdbId))
+            {
+                return movie.TmdbId.Trim();
+            }
+
+            if (config.EnableTmdbFallbackLookup)
+            {
+                var yearMatch = YearInTitleRegex.Match(cleanedName);
+                int? yearForLookup = null;
+                if (yearMatch.Success)
+                {
+                    int y;
+                    if (int.TryParse(yearMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out y))
+                    {
+                        yearForLookup = y;
+                    }
+                }
+
+                try
+                {
+                    return await lookupTmdbIdAsync(cleanedName, yearForLookup, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    logger.Debug("TMDB fallback error for '{0}': {1}", cleanedName, ex.Message);
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Retry-path fallback TMDB lookup. The retry path only carries <see cref="FailedSyncItem"/>
+        /// (no full <see cref="VodStreamInfo"/>). Returns the provider-supplied ID when valid, or
+        /// runs the TMDB fallback lookup when <see cref="PluginConfiguration.EnableTmdbFallbackLookup"/>
+        /// is set. Returns null on lookup failure or when the lookup is disabled.
+        ///
+        /// The caller is responsible for gating this helper on <see cref="PluginConfiguration.EnableNfoFiles"/>
+        /// (or whichever flag needs the ID). Folder naming on retry is handled by the caller
+        /// separately because the retry path predates <see cref="PluginConfiguration.EnableTmdbFolderNaming"/>.
+        /// </summary>
+        internal static async Task<string> ResolveMovieTmdbIdForRetryAsync(
+            FailedSyncItem item, string cleanedName, PluginConfiguration config,
+            Func<string, int?, CancellationToken, Task<string>> lookupTmdbIdAsync,
+            ILogger logger,
+            CancellationToken cancellationToken)
+        {
+            if (IsValidTmdbId(item.TmdbId))
+            {
+                return item.TmdbId.Trim();
+            }
+
+            if (config.EnableTmdbFallbackLookup)
+            {
+                var yearMatch = YearInTitleRegex.Match(cleanedName);
+                int? yearForLookup = null;
+                if (yearMatch.Success)
+                {
+                    int y;
+                    if (int.TryParse(yearMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out y))
+                    {
+                        yearForLookup = y;
+                    }
+                }
+
+                try
+                {
+                    return await lookupTmdbIdAsync(cleanedName, yearForLookup, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    logger.Debug("TMDB fallback error for '{0}': {1}", item.Name, ex.Message);
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Retry-path folder-naming TMDB ID. Returns the provider-supplied ID when valid,
+        /// otherwise runs the fallback lookup; the returned value is validated as a usable
+        /// TMDB ID and trimmed. Returns null when folder naming should produce an unsuffixed
+        /// folder (no provider ID, no fallback hit, fallback disabled, or lookup failed).
+        ///
+        /// Encapsulates the retry-path branch so tests exercise the same code as production
+        /// — previously each test re-implemented the provider/fallback/validate/trim chain
+        /// inline, which let the tests pass even when the production shape drifted.
+        /// </summary>
+        internal static async Task<string> ResolveRetryFolderTmdbIdAsync(
+            FailedSyncItem item,
+            string cleanedName,
+            PluginConfiguration config,
+            Func<string, int?, CancellationToken, Task<string>> lookupTmdbIdAsync,
+            ILogger logger,
+            CancellationToken cancellationToken)
+        {
+            var folderTmdbId = IsValidTmdbId(item.TmdbId)
+                ? item.TmdbId.Trim()
+                : null;
+            if (folderTmdbId != null) return folderTmdbId;
+
+            folderTmdbId = await ResolveMovieTmdbIdForRetryAsync(
+                item, cleanedName, config,
+                lookupTmdbIdAsync, logger, cancellationToken).ConfigureAwait(false);
+
+            if (folderTmdbId != null && !IsValidTmdbId(folderTmdbId))
+            {
+                return null;
+            }
+            return folderTmdbId?.Trim();
         }
 
         internal static string BuildMovieFolderName(string cleanedName, string tmdbId)
