@@ -20,6 +20,8 @@ The reporter (VoltsLee, issue [#66](https://github.com/firestaerter3/emby-xtream
 
 The plugin has one declaration policy ("trust stats, suppress probing") that is correct for pass-through and wrong for transcoded streams. There is no way to distinguish the two cases from `stream_stats` alone — Dispatcharr does not currently expose the profile output codec via this endpoint.
 
+The no-probe rule for `/proxy/ts/stream/{uuid}` URLs is absolute (`docs/AGENTS.md → "Emby probes MediaSource.Path directly — disable for Dispatcharr"`): the probe opens a short-lived HTTP connection that Dispatcharr interprets as a client and tears down on close, so probing MUST stay disabled for these URLs regardless of stats availability. Any fix for the codec-mismatch bug must respect this rule.
+
 ## Alternatives Considered
 
 ### 1. Per-profile output codec map in plugin settings (reporter suggestion)
@@ -33,23 +35,14 @@ Add a config setting `DispatcharrProfileOutputCodecs: Dictionary<int, string>` k
 - The reporter's actual channel list spans multiple profiles — they'd need to enter all of them.
 - Adds UI surface that most users never need.
 
-### 2. Re-enable probing when the user opts out of stats codec (chosen)
+### 2. Re-enable probing when the user opts out of stats codec (originally chosen, then revised)
 
-Add a single boolean `DispatcharrUseStatsCodec` (default `true`, preserves current behavior). When `false`:
-- The plugin ignores `stats.VideoCodec`.
-- `hasStats` collapses to "audio-only or absent".
-- The dispatcharr-side `disableProbing` flag is dropped, so probing is allowed to run.
-- Emby probes the proxy URL and discovers the actual output codec on first tune (~100ms cost).
+Add a single boolean `DispatcharrUseStatsCodec` (default `true`). When `false`, drop the dispatcharr-side `disableProbing` flag so probing runs and Emby discovers the output codec.
 
-**Pros**:
-- Single user-facing toggle. No per-profile state to maintain.
-- Restores the plugin's correct behavior (declare nothing → let Emby discover).
-- Default `true` keeps all existing installs unchanged. Users who hit the bug flip a checkbox.
-- Probing is a well-understood mechanism. The dispatcharr-side teardown concern (ADR-001) is mitigated by `channel_shutdown_delay` — a Dispatcharr setting the user already controls.
-
+**Pros**: Single toggle, restores the correct behavior via the documented probing mechanism.
 **Cons**:
-- Adds ~100ms to first tune on Dispatcharr streams for affected users (acceptable, documented).
-- The dispatcharr teardown concern is back into scope for these users. Document the `channel_shutdown_delay` mitigation in the config flag's XML doc.
+- Violates the absolute no-probe rule in `docs/AGENTS.md` for `/proxy/ts/stream/{uuid}` URLs. CodeRabbit flagged this as a `🟠 Major` finding on PR #67 — the dispatcharr teardown concern returns even with `channel_shutdown_delay` set, because the teardown happens *before* `channel_shutdown_delay` starts ticking (the probe connection closes too quickly).
+- Re-introduces the documented retry-storm risk for affected users.
 
 ### 3. Always probe (no opt-out)
 
@@ -57,31 +50,49 @@ Drop the trust-stats-codec path entirely. Always let Emby probe.
 
 **Cons**: Breaks every existing Dispatcharr install. The teardown storm returns for users who haven't set `channel_shutdown_delay`. Too aggressive.
 
-### 4. Wait for Dispatcharr to add a `stream_profile_output_codec` field
+### 4. Leave the codec field unset on the MediaStream when the user opts out of stats codec (chosen)
+
+Add a single boolean `DispatcharrUseStatsCodec` (default `true`, preserves current behavior). When `false`, the plugin ignores `stats.VideoCodec` and leaves the codec field unset on the video `MediaStream`. Probing stays disabled (per `docs/AGENTS.md`). Resolution, FPS, bitrate, profile, level, and audio codec continue to flow from stats — only the video codec and its display title are gated.
+
+Emby's behaviour when codec is unset: it applies whatever decoder the actual MPEG-TS bytes need. Pass-through streams (H.264 bytes in, H.264 bytes out) play correctly because the decoder matches the bytes. Transcoded streams (HEVC source, H.264 bytes out) play correctly because the codec field does not falsely claim HEVC. There is a small visual cost: the player UI shows `"1080p"` instead of `"1080p H264"` for affected channels, but playback works.
+
+**Pros**:
+- Single user-facing toggle. No per-profile state to maintain.
+- Respects the absolute no-probe rule for Dispatcharr proxy URLs (`docs/AGENTS.md`).
+- Default `true` keeps all existing installs unchanged. Users who hit the bug flip a checkbox.
+- No probing cost, no teardown risk, no `channel_shutdown_delay` dependency.
+- Audio codec, resolution, FPS, bitrate, profile, and level keep flowing from stats regardless of the toggle.
+
+**Cons**:
+- The display title loses the codec label for affected channels (`"1080p"` instead of `"1080p H264"`). Acceptable: playback matters more than the label.
+- Users who set `DispatcharrUseStatsCodec = false` lose the codec hint Emby would otherwise have. This is the explicit trade-off the toggle captures.
+
+### 5. Wait for Dispatcharr to add a `stream_profile_output_codec` field
 
 Out of our control. Filing a Dispatcharr issue is a good follow-up, but the reporter's channels are broken *today*.
 
 ## Decision
 
-**Alternative 2**: add `DispatcharrUseStatsCodec` (default `true`). When `false`, the plugin ignores `stats.VideoCodec` and allows probing.
+**Alternative 4**: add `DispatcharrUseStatsCodec` (default `true`). When `false`, the plugin ignores `stats.VideoCodec` and leaves the codec field unset on the video `MediaStream`. Probing stays disabled.
 
-The decision logic is split into two static helpers, `XtreamTunerHost.ShouldSuppressProbing` and `XtreamTunerHost.ShouldDisableProbing`, so regression tests can pin the truth table without instantiating a full `MediaSourceInfo` (the static `_streamStats` cache blocks full integration tests — see the placeholder in `XtreamTunerHostTests.cs`).
+The decision logic is split into two static helpers, `XtreamTunerHost.ShouldSuppressProbing` and `XtreamTunerHost.ShouldDeclareVideoCodec`, so regression tests can pin the truth tables without instantiating a full `MediaSourceInfo` (the static `_streamStats` cache blocks full integration tests — see the placeholder in `XtreamTunerHostTests.cs`). A third helper, `XtreamTunerHost.BuildVideoDisplayTitle`, owns the four-shape display-title contract.
 
 Audio-only detection is preserved unchanged: `isAudioOnly` still reads `stats.AudioCodec` regardless of `DispatcharrUseStatsCodec`. The audio flag remains trustworthy in all configurations.
 
 ## Consequences
 
 - **Existing installs**: no behavior change. `DispatcharrUseStatsCodec = true` is the default and reproduces the legacy trust-stats-codec path verbatim.
-- **Affected users** (Dispatcharr stream profile transcoding): a single checkbox in Plugin Config. Probing restores correct codec discovery at the cost of ~100ms on first tune.
+- **Affected users** (Dispatcharr stream profile transcoding): a single checkbox in Plugin Config. The codec field is left unset on the `MediaStream`; Emby picks whatever decoder the actual bytes need. Display title shows resolution only (`"1080p"`) instead of resolution + codec.
 - **API surface**: `PluginConfiguration.DispatcharrUseStatsCodec` (new field, defaults to `true` — existing config XML files deserialize unchanged).
-- **Tests**: `XtreamTunerHostTests.cs` adds 11 regression rows (4-row Theory + 3-row Theory + 4 Facts) pinning both helpers and a hand-walk through the reporter's exact bug inputs.
+- **Tests**: `XtreamTunerHostTests.cs` pins both helpers and `BuildVideoDisplayTitle` (4-row Theory for ShouldSuppressProbing, 4-row Theory for ShouldDeclareVideoCodec, 5-row Theory for BuildVideoDisplayTitle, plus Facts covering the reporter's exact bug inputs end-to-end). All green.
+- **AGENTS.md alignment**: the fix lives entirely within the "don't probe, don't falsely declare" envelope. The absolute no-probe rule for `/proxy/ts/stream/{uuid}` URLs is unchanged.
 - **Future work**: file an upstream Dispatcharr issue asking for `stream_profile_output_codec` on the stream-stats endpoint. If/when shipped, `DispatcharrUseStatsCodec` can be deprecated and the plugin can auto-detect transcoding profiles.
-- **Operational note**: probe-induced teardown concern returns for opted-out users. Mitigation is the existing `channel_shutdown_delay` setting in Dispatcharr — users who opt out of stats codec must set it to a positive value to avoid the retry storm documented in ADR-001. The XML doc on the config field calls this out.
 
 ## Code Citations
 
 - Bug confirmed: `XtreamTunerHost.cs:1515-1521` (codec declaration from `stats.VideoCodec`).
 - Original probe-disable: `XtreamTunerHost.cs:1458` (`suppressProbing = disableProbing || hasStats`).
-- Fix (new helpers + escape route): `XtreamTunerHost.cs:1458-1468` (`ShouldDisableProbing` + `ShouldSuppressProbing` wiring).
+- Fix (new helpers + escape route): `XtreamTunerHost.cs:1446-1457` (audio detection + hasVideoCodecFromStats gating), `XtreamTunerHost.cs:1529-1543` (codec declaration + display title).
+- Static helpers for regression testing: `XtreamTunerHost.cs:1775-1834` (`ShouldSuppressProbing`, `ShouldDeclareVideoCodec`, `BuildVideoDisplayTitle`).
 - Config: `PluginConfiguration.cs:51-68` (new `DispatcharrUseStatsCodec` field).
-- Tests: `Emby.Xtream.Plugin.Tests/XtreamTunerHostTests.cs` (12 tests, 0 skipped, all green).
+- Tests: `Emby.Xtream.Plugin.Tests/XtreamTunerHostTests.cs` (regression rows for both helpers plus end-to-end hand-walk).

@@ -1446,32 +1446,30 @@ namespace Emby.Xtream.Plugin.Service
             // Audio-only channel: Dispatcharr stats are present but no video_codec exists.
             // The normal hasStats gate (VideoCodec != null) would fall through to the dummy
             // H.264 fallback, which causes Emby to expect a video stream that isn't there.
+            // Audio detection is independent of useStatsCodec — audio_codec is reliable in
+            // both pass-through and transcoded Dispatcharr stream profiles.
             bool isAudioOnly = stats != null
                 && stats.VideoCodec == null
                 && !string.IsNullOrEmpty(stats.AudioCodec);
 
-            // When useStatsCodec is false on a Dispatcharr URL, ignore the codec field from
-            // stream_stats entirely. That field is the codec Dispatcharr *ingested* from the
-            // source, not the codec it *emits*. If the Dispatcharr stream profile transcodes
-            // (e.g. HEVC source → H.264 output), declaring the source codec forces Emby to
-            // apply the wrong decoder and the channel fails to play (issue #66). By treating
-            // the codec as absent we let Emby probe the proxy URL and discover the actual
-            // output. Audio-only detection still works because it uses AudioCodec, which we
-            // keep honouring.
+            // When useStatsCodec is false, treat the video codec from stream_stats as absent:
+            // it is the codec Dispatcharr *ingested* from the source, not the codec it
+            // *emits*. If the Dispatcharr stream profile transcodes (e.g. HEVC source →
+            // H.264 output), declaring the source codec forces Emby to apply the wrong
+            // decoder and the channel fails to play (issue #66). Resolution, FPS, bitrate,
+            // and audio codec are independent of video transcoding and stay honoured.
             bool hasVideoCodecFromStats = stats?.VideoCodec != null && useStatsCodec;
             bool hasStats = hasVideoCodecFromStats || isAudioOnly;
 
             // Disable probing for Dispatcharr proxy URLs: the probe opens a short-lived HTTP
             // connection that Dispatcharr interprets as a client, and when it closes after
-            // analysis (~0.1s) Dispatcharr tears down the channel. The real playback connection
-            // then hits the teardown and fails, causing a rapid retry storm.
-            //
-            // Exception (issue #66): when the user has opted out of the stats codec
-            // (DispatcharrUseStatsCodec=false), the input codec is unknown to be the output
-            // codec, so the source MUST be probed to discover the actual output. Drop the
-            // disableProbing flag in that case — probing is exactly the user-requested escape.
-            bool effectiveDisableProbing = ShouldDisableProbing(disableProbing, useStatsCodec);
-            bool suppressProbing = ShouldSuppressProbing(effectiveDisableProbing, hasStats);
+            // analysis (~0.1s) Dispatcharr tears down the channel. The real playback
+            // connection then hits the teardown and fails, causing a rapid retry storm.
+            // AGENTS.md makes this rule absolute: probing MUST stay disabled for Dispatcharr
+            // proxy URLs regardless of stats availability. The fix for issue #66 lives in
+            // the codec declaration path (see ShouldDeclareVideoCodec + the MediaStream
+            // build below), not in relaxing this flag.
+            bool suppressProbing = ShouldSuppressProbing(disableProbing, hasStats);
 
             var audioCodecLower = hasStats && !string.IsNullOrEmpty(stats.AudioCodec)
                 ? stats.AudioCodec.ToLowerInvariant() : null;
@@ -1528,7 +1526,9 @@ namespace Emby.Xtream.Plugin.Service
                         }
                     }
 
-                    var videoCodec = MapVideoCodec(stats.VideoCodec);
+                    var videoCodec = ShouldDeclareVideoCodec(hasVideoCodecFromStats, useStatsCodec)
+                        ? MapVideoCodec(stats.VideoCodec)
+                        : null;
 
                     var videoStream = new MediaStream
                     {
@@ -1541,9 +1541,7 @@ namespace Emby.Xtream.Plugin.Service
 
                     if (width > 0) videoStream.Width = width;
                     if (height > 0) videoStream.Height = height;
-                    videoStream.DisplayTitle = height > 0
-                        ? $"{height}p {videoCodec.ToUpperInvariant()}"
-                        : videoCodec.ToUpperInvariant();
+                    videoStream.DisplayTitle = BuildVideoDisplayTitle(height, videoCodec);
                     if (stats.SourceFps.HasValue)
                     {
                         videoStream.RealFrameRate = (float)stats.SourceFps.Value;
@@ -1778,10 +1776,9 @@ namespace Emby.Xtream.Plugin.Service
         /// exercise the decision without instantiating a full MediaSourceInfo. Probing
         /// is suppressed on Dispatcharr URLs because the probe opens a short-lived HTTP
         /// connection that Dispatcharr interprets as a client and tears down on close,
-        /// causing a retry storm. The caller decides whether to pass through the
-        /// dispatcharr-side <paramref name="disableProbing"/> flag (issue #66: it must
-        /// be cleared when the user has opted out of stats codec, so probing actually
-        /// runs and Emby discovers the real output codec).
+        /// causing a retry storm. AGENTS.md makes this rule absolute for `/proxy/ts/stream/{uuid}`
+        /// URLs: probing MUST stay off regardless of stats availability. Issue #66 lives
+        /// in the codec-declaration path, not in relaxing this flag.
         /// </summary>
         internal static bool ShouldSuppressProbing(bool disableProbing, bool hasStats)
         {
@@ -1789,16 +1786,50 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         /// <summary>
-        /// Resolves the effective probing-disable flag for the Live TV MediaSource.
-        /// Issue #66: when the user has opted out of the stats codec
-        /// (<paramref name="useStatsCodec"/> = false), the input codec is unknown to
-        /// be the output codec, so probing must run. The dispatcharr-side
-        /// <paramref name="disableProbing"/> flag is dropped in that case. Extracted for
-        /// direct regression testing without instantiating a full MediaSourceInfo.
+        /// Decides whether the plugin should declare the video codec from stream_stats on
+        /// the Live TV <c>MediaStream</c>. When <paramref name="useStatsCodec"/> is false,
+        /// the codec field from stream_stats is the codec Dispatcharr *ingested* from the
+        /// source, not the codec it *emits*. Declaring it on a transcoded Dispatcharr stream
+        /// profile forces Emby to apply the wrong decoder (issue #66). The fix is to leave
+        /// the codec unset and let Emby pick whatever decoder the actual output bytes need
+        /// — without probing, since probing is forbidden for Dispatcharr proxy URLs.
         /// </summary>
-        internal static bool ShouldDisableProbing(bool disableProbing, bool useStatsCodec)
+        internal static bool ShouldDeclareVideoCodec(bool hasVideoCodecFromStats, bool useStatsCodec)
         {
-            return disableProbing && useStatsCodec;
+            // Truth table:
+            //   hasVideoCodecFromStats | useStatsCodec | declare?
+            //   true                   | true          | yes (legacy pass-through)
+            //   true                   | false         | no  (issue #66: opt-out)
+            //   false                  | true          | no  (no codec in stats)
+            //   false                  | false         | no  (no codec in stats)
+            // Belt-and-braces: the upstream caller already AND-ed these into
+            // hasVideoCodecFromStats, but re-checking useStatsCodec here means a caller
+            // that forgets to mask upstream still gets the right answer.
+            return hasVideoCodecFromStats && useStatsCodec;
+        }
+
+        /// <summary>
+        /// Builds the human-readable title for the Live TV video <c>MediaStream</c>.
+        /// Resolved by <see cref="ShouldDeclareVideoCodec"/>: when the codec is trusted,
+        /// include it ("1080p H264"); when it is not (issue #66 opt-out), fall back to
+        /// height-only ("1080p") so the user still gets a useful label without claiming
+        /// a specific codec.
+        /// </summary>
+        internal static string BuildVideoDisplayTitle(int height, string videoCodec)
+        {
+            if (height > 0 && !string.IsNullOrEmpty(videoCodec))
+            {
+                return $"{height}p {videoCodec.ToUpperInvariant()}";
+            }
+            if (height > 0)
+            {
+                return $"{height}p";
+            }
+            if (!string.IsNullOrEmpty(videoCodec))
+            {
+                return videoCodec.ToUpperInvariant();
+            }
+            return null;
         }
     }
 }

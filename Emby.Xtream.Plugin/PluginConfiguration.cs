@@ -58,12 +58,13 @@ namespace Emby.Xtream.Plugin
         /// source codec causes Emby to force the wrong decoder and the channel
         /// fails to play (issue #66).
         ///
-        /// Set to false to skip codec declarations on Dispatcharr URLs and let
-        /// Emby probe the proxy for the actual output codec. This re-enables
-        /// probing, which adds ~100ms on first tune per channel and may surface
-        /// the Dispatcharr teardown storm on installs whose
-        /// <c>channel_shutdown_delay</c> is zero (set it to a positive value in
-        /// Dispatcharr to avoid that).
+        /// Set to false to skip the video codec declaration on Dispatcharr URLs.
+        /// Emby then picks whatever decoder the actual MPEG-TS bytes need and the
+        /// channel plays. Probing stays disabled for Dispatcharr proxy URLs (see
+        /// <c>docs/AGENTS.md</c>). Trade-off: the player UI shows resolution only
+        /// (e.g. "1080p") instead of resolution + codec (e.g. "1080p H264") for the
+        /// affected channels. Resolution, FPS, bitrate, profile, level, and audio
+        /// codec keep flowing from <c>stream_stats</c> regardless of this flag.
         /// </summary>
         public bool DispatcharrUseStatsCodec { get; set; } = true;
         public int[] SelectedDispatcharrProfileIds { get; set; } = new int[0];
