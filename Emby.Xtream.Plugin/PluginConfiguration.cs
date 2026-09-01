@@ -48,6 +48,24 @@ namespace Emby.Xtream.Plugin
         public bool DispatcharrFallbackToXtream { get; set; } = true;
         public bool ForceAudioTranscode { get; set; }
         public bool DeclareDvbSubtitles { get; set; }
+
+        /// <summary>
+        /// When true (default), the plugin declares the codec Dispatcharr reports via
+        /// <c>stream_stats.video_codec</c> as the expected codec on the Live TV
+        /// MediaSource. That field is the codec Dispatcharr *ingested* from the
+        /// source, not the codec Dispatcharr *emits*. When the Dispatcharr stream
+        /// profile transcodes (e.g. HEVC source → H.264 output), declaring the
+        /// source codec causes Emby to force the wrong decoder and the channel
+        /// fails to play (issue #66).
+        ///
+        /// Set to false to skip codec declarations on Dispatcharr URLs and let
+        /// Emby probe the proxy for the actual output codec. This re-enables
+        /// probing, which adds ~100ms on first tune per channel and may surface
+        /// the Dispatcharr teardown storm on installs whose
+        /// <c>channel_shutdown_delay</c> is zero (set it to a positive value in
+        /// Dispatcharr to avoid that).
+        /// </summary>
+        public bool DispatcharrUseStatsCodec { get; set; } = true;
         public int[] SelectedDispatcharrProfileIds { get; set; } = new int[0];
         public string CachedDispatcharrProfiles { get; set; } = string.Empty;
 

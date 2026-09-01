@@ -910,7 +910,7 @@ namespace Emby.Xtream.Plugin.Service
 
             _streamStats.TryGetValue(streamId, out var stats);
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles);
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, config.DispatcharrUseStatsCodec);
             Logger.Info("[stream-timing] ch={0} CreateMediaSource={1}ms hasStats={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, stats != null);
 
             return new List<MediaSourceInfo> { mediaSource };
@@ -944,7 +944,7 @@ namespace Emby.Xtream.Plugin.Service
             Logger.Info("[stream-timing] ch={0} BuildUrl={1}ms isDispatcharr={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, isDispatcharr);
             sw.Restart();
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles);
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, config.DispatcharrUseStatsCodec);
             Logger.Info("[stream-timing] ch={0} CreateMediaSource={1}ms hasStats={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, stats != null);
 
             var httpClient = Plugin.CreateHttpClient();
@@ -1438,7 +1438,8 @@ namespace Emby.Xtream.Plugin.Service
         private MediaSourceInfo CreateMediaSourceInfo(
             int streamId, string streamUrl, StreamStatsInfo stats,
             bool disableProbing = false, bool forceAudioTranscode = false,
-            string userAgent = null, int fallbackBitrateMbps = 0, bool declareDvbSubtitles = false)
+            string userAgent = null, int fallbackBitrateMbps = 0, bool declareDvbSubtitles = false,
+            bool useStatsCodec = true)
         {
             var sourceId = "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture);
 
@@ -1449,13 +1450,28 @@ namespace Emby.Xtream.Plugin.Service
                 && stats.VideoCodec == null
                 && !string.IsNullOrEmpty(stats.AudioCodec);
 
-            bool hasStats = stats?.VideoCodec != null || isAudioOnly;
+            // When useStatsCodec is false on a Dispatcharr URL, ignore the codec field from
+            // stream_stats entirely. That field is the codec Dispatcharr *ingested* from the
+            // source, not the codec it *emits*. If the Dispatcharr stream profile transcodes
+            // (e.g. HEVC source → H.264 output), declaring the source codec forces Emby to
+            // apply the wrong decoder and the channel fails to play (issue #66). By treating
+            // the codec as absent we let Emby probe the proxy URL and discover the actual
+            // output. Audio-only detection still works because it uses AudioCodec, which we
+            // keep honouring.
+            bool hasVideoCodecFromStats = stats?.VideoCodec != null && useStatsCodec;
+            bool hasStats = hasVideoCodecFromStats || isAudioOnly;
 
             // Disable probing for Dispatcharr proxy URLs: the probe opens a short-lived HTTP
             // connection that Dispatcharr interprets as a client, and when it closes after
             // analysis (~0.1s) Dispatcharr tears down the channel. The real playback connection
             // then hits the teardown and fails, causing a rapid retry storm.
-            bool suppressProbing = disableProbing || hasStats;
+            //
+            // Exception (issue #66): when the user has opted out of the stats codec
+            // (DispatcharrUseStatsCodec=false), the input codec is unknown to be the output
+            // codec, so the source MUST be probed to discover the actual output. Drop the
+            // disableProbing flag in that case — probing is exactly the user-requested escape.
+            bool effectiveDisableProbing = ShouldDisableProbing(disableProbing, useStatsCodec);
+            bool suppressProbing = ShouldSuppressProbing(effectiveDisableProbing, hasStats);
 
             var audioCodecLower = hasStats && !string.IsNullOrEmpty(stats.AudioCodec)
                 ? stats.AudioCodec.ToLowerInvariant() : null;
@@ -1754,6 +1770,35 @@ namespace Emby.Xtream.Plugin.Service
             if (upper == "HEVC" || upper == "H265") return "hevc";
             if (upper == "MPEG2VIDEO") return "mpeg2video";
             return dispatcharrCodec.ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Decides whether the Live TV MediaSource should be probed by Emby.
+        /// Extracted from <see cref="CreateMediaSourceInfo"/> so a regression test can
+        /// exercise the decision without instantiating a full MediaSourceInfo. Probing
+        /// is suppressed on Dispatcharr URLs because the probe opens a short-lived HTTP
+        /// connection that Dispatcharr interprets as a client and tears down on close,
+        /// causing a retry storm. The caller decides whether to pass through the
+        /// dispatcharr-side <paramref name="disableProbing"/> flag (issue #66: it must
+        /// be cleared when the user has opted out of stats codec, so probing actually
+        /// runs and Emby discovers the real output codec).
+        /// </summary>
+        internal static bool ShouldSuppressProbing(bool disableProbing, bool hasStats)
+        {
+            return disableProbing || hasStats;
+        }
+
+        /// <summary>
+        /// Resolves the effective probing-disable flag for the Live TV MediaSource.
+        /// Issue #66: when the user has opted out of the stats codec
+        /// (<paramref name="useStatsCodec"/> = false), the input codec is unknown to
+        /// be the output codec, so probing must run. The dispatcharr-side
+        /// <paramref name="disableProbing"/> flag is dropped in that case. Extracted for
+        /// direct regression testing without instantiating a full MediaSourceInfo.
+        /// </summary>
+        internal static bool ShouldDisableProbing(bool disableProbing, bool useStatsCodec)
+        {
+            return disableProbing && useStatsCodec;
         }
     }
 }
