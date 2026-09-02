@@ -14,6 +14,7 @@ using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.LiveTv;
+using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.MediaInfo;
 using STJ = System.Text.Json;
 
@@ -910,7 +911,7 @@ namespace Emby.Xtream.Plugin.Service
 
             _streamStats.TryGetValue(streamId, out var stats);
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, config.DispatcharrUseStatsCodec);
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, config.DispatcharrUseStatsCodec, Logger);
             Logger.Info("[stream-timing] ch={0} CreateMediaSource={1}ms hasStats={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, stats != null);
 
             return new List<MediaSourceInfo> { mediaSource };
@@ -944,7 +945,7 @@ namespace Emby.Xtream.Plugin.Service
             Logger.Info("[stream-timing] ch={0} BuildUrl={1}ms isDispatcharr={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, isDispatcharr);
             sw.Restart();
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, config.DispatcharrUseStatsCodec);
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, config.DispatcharrUseStatsCodec, Logger);
             Logger.Info("[stream-timing] ch={0} CreateMediaSource={1}ms hasStats={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, stats != null);
 
             var httpClient = Plugin.CreateHttpClient();
@@ -1435,11 +1436,16 @@ namespace Emby.Xtream.Plugin.Service
                 config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), streamId, extension), false);
         }
 
-        private MediaSourceInfo CreateMediaSourceInfo(
+        // internal static so the factory can be exercised by unit tests without an
+        // XtreamTunerHost instance (the constructor requires IServerApplicationHost).
+        // The factory is otherwise pure: it touches no instance state. Three debug logs
+        // route through LogDebug so the static signature stays clean — pass null to
+        // suppress logging in tests, pass an ILogger in production callsites.
+        internal static MediaSourceInfo CreateMediaSourceInfo(
             int streamId, string streamUrl, StreamStatsInfo stats,
             bool disableProbing = false, bool forceAudioTranscode = false,
             string userAgent = null, int fallbackBitrateMbps = 0, bool declareDvbSubtitles = false,
-            bool useStatsCodec = true)
+            bool useStatsCodec = true, ILogger logger = null)
         {
             var sourceId = "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture);
 
@@ -1664,7 +1670,7 @@ namespace Emby.Xtream.Plugin.Service
 
                 if (isAudioOnly)
                 {
-                    Logger.Debug(
+                    LogDebug(logger,
                         "Stream {0}: audio-only - {1} {2}ch{3}",
                         streamId, audioCodecLower ?? "unknown",
                         audioChannels.HasValue ? audioChannels.Value.ToString(CultureInfo.InvariantCulture) : "?",
@@ -1682,7 +1688,7 @@ namespace Emby.Xtream.Plugin.Service
                             int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out height);
                         }
                     }
-                    Logger.Debug(
+                    LogDebug(logger,
                         "Stream {0}: using stats - {1} {2}x{3} @{4}fps, audio {5} {6}ch{7}",
                         streamId, stats.VideoCodec, width, height,
                         stats.SourceFps, audioCodecLower ?? "unknown",
@@ -1729,12 +1735,22 @@ namespace Emby.Xtream.Plugin.Service
 
                 mediaSource.MediaStreams = new List<MediaStream> { videoStream, audioStream };
                 mediaSource.DefaultAudioStreamIndex = 1;
-                Logger.Debug(
+                LogDebug(logger,
                     "Stream {0}: no stats available, will probe (fallback bitrate {1} Mbps)",
                     streamId, fallbackBitrateMbps);
             }
 
             return mediaSource;
+        }
+
+        // Null-tolerant debug logger. Production callsites pass an ILogger pulled from
+        // BaseTunerHost.Logger; unit tests pass null to suppress log noise. The factory
+        // is otherwise pure — wrapping the log call in a null check keeps the static
+        // signature without forcing test infrastructure to stub an IServerApplicationHost.
+        private static void LogDebug(ILogger logger, string format, params object[] args)
+        {
+            if (logger == null) return;
+            logger.Debug(format, args);
         }
 
         /// <summary>
@@ -1768,7 +1784,7 @@ namespace Emby.Xtream.Plugin.Service
                 && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
         }
 
-        private static string MapVideoCodec(string dispatcharrCodec)
+        internal static string MapVideoCodec(string dispatcharrCodec)
         {
             var upper = dispatcharrCodec.ToUpperInvariant();
             if (upper == "H264" || upper == "AVC") return "h264";

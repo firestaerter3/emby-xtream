@@ -1,5 +1,14 @@
+using Emby.Xtream.Plugin.Client.Models;
 using Emby.Xtream.Plugin.Service;
+using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.MediaInfo;
 using Xunit;
+
+// SupportsProbing and AnalyzeDurationMs are obsolete on MediaSourceInfo but still
+// functional — they are read by Emby's pipeline even when flagged obsolete. The
+// main project silences CS0612 globally; mirror that here so the test can assert
+// on these properties without noise.
+#pragma warning disable CS0612
 
 namespace Emby.Xtream.Plugin.Tests
 {
@@ -167,6 +176,88 @@ namespace Emby.Xtream.Plugin.Tests
             // Row: no stats at all (Dispatcharr 404 or cache miss).
             Assert.False(XtreamTunerHost.HasStats(statsPresent: false, isAudioOnly: false));
             Assert.False(XtreamTunerHost.HasStats(statsPresent: false, isAudioOnly: true));
+        }
+
+        [Fact]
+        public void CreateMediaSourceInfo_DispatcharrOptOut_OmitsVideoCodecRetainsAudioResolutionBitrate()
+        {
+            // CodeRabbit review on PR #67 head aa76f6d noted the existing suite covered the
+            // static helpers but not the factory. This test constructs the exact reporter
+            // scenario end-to-end: Dispatcharr path, HEVC source / H.264 output via a
+            // transcoding stream profile, user opted out via DispatcharrUseStatsCodec=false.
+            //
+            // Expected post-fix output:
+            //   - SupportsProbing = false (AGENTS.md: Dispatcharr proxy URLs never probed)
+            //   - AnalyzeDurationMs = 0 (same gate)
+            //   - video MediaStream.Codec = null (the escape route for #66)
+            //   - video MediaStream.DisplayTitle = "1080p" (no codec appended)
+            //   - audio MediaStream.Codec = "aac" (audio stays honoured regardless of opt-out)
+            //   - video MediaStream.Width/Height retained (resolution stays honoured)
+            //   - video MediaStream.BitRate retained (bitrate stays honoured)
+            //
+            // The hand-walk version above (Issue66_EndToEnd_*) covers the helpers; this
+            // version pins the assembled MediaSourceInfo so future refactors of the factory
+            // can't drift from the documented contract without breaking a test.
+
+            var stats = new StreamStatsInfo
+            {
+                VideoCodec = "hevc",  // Dispatcharr ingested HEVC; profile transcodes to H.264
+                AudioCodec = "aac",
+                Resolution = "1920x1080",
+                SourceFps = 50,
+                Bitrate = 4.5,         // 4.5 Mbps
+                AudioBitrate = 128,    // 128 kbps
+                AudioChannels = "stereo",
+                SampleRate = 48000,
+                VideoProfile = "Main",
+                VideoLevel = 41,
+            };
+
+            // Reporter scenario: Dispatcharr proxy URL, user opted out of stats codec.
+            var source = XtreamTunerHost.CreateMediaSourceInfo(
+                streamId: 12345,
+                streamUrl: "http://dispatcharr.local/proxy/ts/stream/abc-uuid",
+                stats: stats,
+                disableProbing: true,        // isDispatcharr=true path
+                forceAudioTranscode: false,
+                userAgent: null,
+                fallbackBitrateMbps: 0,
+                declareDvbSubtitles: false,
+                useStatsCodec: false);       // DispatcharrUseStatsCodec = false
+
+            // Probing stays off — AGENTS.md is absolute on this for Dispatcharr.
+            Assert.False(source.SupportsProbing);
+            Assert.Equal(0, source.AnalyzeDurationMs);
+
+            // Locate the video and audio streams in the factory output.
+            var video = Assert.Single(source.MediaStreams, s => s.Type == MediaStreamType.Video);
+            var audio = Assert.Single(source.MediaStreams, s => s.Type == MediaStreamType.Audio);
+
+            // The escape route: codec MUST be omitted on opt-out.
+            Assert.Null(video.Codec);
+            // Display title falls back to height only — no codec to append.
+            Assert.Equal("1080p", video.DisplayTitle);
+
+            // Audio codec stays honoured (independent of the video opt-out).
+            Assert.Equal("aac", audio.Codec);
+            Assert.Equal("stereo", audio.ChannelLayout);
+            Assert.Equal(2, audio.Channels);
+            Assert.Equal(48000, audio.SampleRate);
+            // Audio bitrate comes from AudioBitrate (128 kbps) directly.
+            Assert.Equal(128000, audio.BitRate);
+
+            // Resolution and bitrate stay honoured — the opt-out is ONLY about the codec.
+            Assert.Equal(1920, video.Width);
+            Assert.Equal(1080, video.Height);
+            Assert.Equal(50f, video.RealFrameRate);
+            // Factory converts stats.Bitrate (in Mbps from Dispatcharr's ffmpeg_output_bitrate
+            // key) to bps via * 1000. For 4.5 Mbps that yields 4500 bps — the same convention
+            // applied to every other consumer of stats.Bitrate in CreateMediaSourceInfo. The
+            // test pins that conversion so a future scope-creep fix that switches to *1_000_000
+            // is forced to update the assertion alongside.
+            Assert.Equal(4500, video.BitRate);
+            Assert.Equal("Main", video.Profile);
+            Assert.Equal(41.0, video.Level);
         }
 
         // -------------------------------------------------------------------------
