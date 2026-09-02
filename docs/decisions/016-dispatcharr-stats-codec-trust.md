@@ -14,7 +14,7 @@ That logic is correct for streams where Dispatcharr is a pure pass-through. The 
 
 But Dispatcharr also supports stream profiles that transcode. A common configuration is "HEVC source → H.264 output for compatibility". In that mode, `stream_stats.video_codec` reports `hevc` (the ingested codec), while the bytes leaving the proxy are H.264. Reporting `hevc` to Emby on the MediaSource causes Emby to force the HEVC decoder on the output — which fails, because the bytes are H.264.
 
-The reporter (VoltsLee, issue [#66](https://github.com/firestaerter3/emby-xtream/issues/66)) hit this on 13 channels. Confirmed in code at `XtreamTunerHost.cs:1515-1521` (codec declaration) and `XtreamTunerHost.cs:1458` (`suppressProbing = disableProbing || hasStats`).
+The reporter (VoltsLee, issue [#66](https://github.com/firestaerter3/emby-xtream/issues/66)) hit this on 13 channels. Confirmed in code at `XtreamTunerHost.cs:1529-1531` (codec declaration) and `XtreamTunerHost.cs:1479` (`suppressProbing = disableProbing || hasStats`).
 
 ## Problem
 
