@@ -90,9 +90,36 @@ Audio-only detection is preserved unchanged: `isAudioOnly` still reads `stats.Au
 
 ## Code Citations
 
-- Bug confirmed: `XtreamTunerHost.cs:1515-1521` (codec declaration from `stats.VideoCodec`).
-- Original probe-disable: `XtreamTunerHost.cs:1458` (`suppressProbing = disableProbing || hasStats`).
-- Fix (new helpers + escape route): `XtreamTunerHost.cs:1446-1457` (audio detection + hasVideoCodecFromStats gating), `XtreamTunerHost.cs:1529-1543` (codec declaration + display title).
-- Static helpers for regression testing: `XtreamTunerHost.cs:1775-1834` (`ShouldSuppressProbing`, `ShouldDeclareVideoCodec`, `BuildVideoDisplayTitle`).
+- Bug confirmed: `XtreamTunerHost.cs:1529-1531` (codec declaration from `stats.VideoCodec`).
+- Original probe-disable: `XtreamTunerHost.cs:1479` (`suppressProbing = disableProbing || hasStats`).
+- Fix (new helpers + escape route): `XtreamTunerHost.cs:1451-1469` (audio detection + hasVideoCodecFromStats + HasStats gating), `XtreamTunerHost.cs:1536-1551` (codec declaration + display title).
+- Static helpers for regression testing: `XtreamTunerHost.cs:1790-1862` (`ShouldSuppressProbing`, `HasStats`, `ShouldDeclareVideoCodec`, `BuildVideoDisplayTitle`).
 - Config: `PluginConfiguration.cs:51-68` (new `DispatcharrUseStatsCodec` field).
-- Tests: `Emby.Xtream.Plugin.Tests/XtreamTunerHostTests.cs` (regression rows for both helpers plus end-to-end hand-walk).
+- Tests: `Emby.Xtream.Plugin.Tests/XtreamTunerHostTests.cs` (regression rows for the helpers plus end-to-end hand-walk).
+
+## Follow-up: `hasStats` gate was over-coupled to codec trust
+
+**Date**: 2026-09-02
+**Trigger**: CodeRabbit review on PR [#67](https://github.com/firestaerter3/emby-xtream/pull/67) head `3c6d056` (review 5084623350 at 01:07:35Z).
+
+The original implementation wrote
+
+```csharp
+bool hasVideoCodecFromStats = stats?.VideoCodec != null && useStatsCodec;
+bool hasStats = hasVideoCodecFromStats || isAudioOnly;
+```
+
+on the assumption that `hasStats` would always be true when we have any stats to honour. The coupling was wrong: when a video channel had `DispatcharrUseStatsCodec = false`, `hasVideoCodecFromStats` collapsed to false, and a video channel is not audio-only, so `hasStats` collapsed to false. The `if (hasStats) { ... }` block then skipped every stat-derived field — resolution, FPS, bitrate, audio codec, audio channels, video profile/level/bit depth/reference frames. Emby ended up with a `MediaSource` whose video `MediaStream` had no codec, no width, no height, no frame rate, and no audio stream at all. The "Audio codec, resolution, FPS, bitrate, profile, and level keep flowing from stats regardless of the toggle" claim in the Consequences section above turned out to be wrong.
+
+The fix: replace the `hasVideoCodecFromStats || isAudioOnly` expression with `stats != null` (extracted into a new static helper `XtreamTunerHost.HasStats(statsPresent, isAudioOnly)` for symmetry with the other decision helpers and to make the bug class regression-testable). The video codec declaration stays gated separately by `ShouldDeclareVideoCodec`. Truth table for `HasStats`:
+
+| stats != null | isAudioOnly | hasStats | Notes                                        |
+|---------------|-------------|----------|----------------------------------------------|
+| true          | false       | true     | video channel, legacy or opt-out            |
+| true          | true        | true     | audio-only channel                           |
+| false         | false       | false    | no stats at all (Dispatcharr 404 / cache miss) |
+| false         | true        | false    | unreachable: isAudioOnly implies stats != null |
+
+`XtreamTunerHostTests.Issue66_HasStats_TracksStatsPresenceNotVideoCodec_Gate` pins this table. With the helper in place, the original ADR claim ("Audio codec, resolution, FPS, bitrate, profile, and level keep flowing from stats regardless of the toggle") is now actually true.
+
+The discovery was a useful reminder: the original `hasStats = hasVideoCodecFromStats || isAudioOnly` looked symmetric and tidy, but it conflated "stats are present" with "the codec field on the stats is trustworthy". Once the codec gate split off into `ShouldDeclareVideoCodec`, the only thing left to check was stats presence.

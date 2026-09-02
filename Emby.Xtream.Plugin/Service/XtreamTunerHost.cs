@@ -1459,7 +1459,14 @@ namespace Emby.Xtream.Plugin.Service
             // decoder and the channel fails to play (issue #66). Resolution, FPS, bitrate,
             // and audio codec are independent of video transcoding and stay honoured.
             bool hasVideoCodecFromStats = stats?.VideoCodec != null && useStatsCodec;
-            bool hasStats = hasVideoCodecFromStats || isAudioOnly;
+            // hasStats reflects "Dispatcharr returned stats for this channel", NOT
+            // "the video codec from stats is trusted". The opt-out only suppresses the
+            // video codec (via ShouldDeclareVideoCodec); resolution, FPS, bitrate, audio
+            // codec, audio channels, profile, and level stay honoured. Previously this
+            // was `hasVideoCodecFromStats || isAudioOnly`, which dropped ALL stats for
+            // video channels with DispatcharrUseStatsCodec=false — caught by CodeRabbit
+            // review on PR #67 head 3c6d056.
+            bool hasStats = HasStats(stats != null, isAudioOnly);
 
             // Disable probing for Dispatcharr proxy URLs: the probe opens a short-lived HTTP
             // connection that Dispatcharr interprets as a client, and when it closes after
@@ -1783,6 +1790,28 @@ namespace Emby.Xtream.Plugin.Service
         internal static bool ShouldSuppressProbing(bool disableProbing, bool hasStats)
         {
             return disableProbing || hasStats;
+        }
+
+        /// <summary>
+        /// Decides whether the Live TV <c>MediaSource</c> should populate stat-derived
+        /// fields (resolution, FPS, bitrate, audio codec, audio channels, video profile,
+        /// level, bit depth, reference frames). True iff Dispatcharr returned stats for
+        /// the channel — independent of <c>DispatcharrUseStatsCodec</c>, which only
+        /// suppresses the video <em>codec</em> declaration via <see cref="ShouldDeclareVideoCodec"/>.
+        /// Regression test for issue #66 follow-up: the original
+        /// <c>hasVideoCodecFromStats || isAudioOnly</c> expression dropped every stat
+        /// on a video channel with the opt-out on, leaving Emby with no resolution, no
+        /// FPS, and no audio info. CodeRabbit review on PR #67 head 3c6d056.
+        /// </summary>
+        internal static bool HasStats(bool statsPresent, bool isAudioOnly)
+        {
+            // statsPresent mirrors "stats != null" upstream; isAudioOnly is implied by
+            // statsPresent (it requires stats.VideoCodec == null && AudioCodec != ""),
+            // so the helper returns statsPresent alone. Kept as a two-argument signature
+            // for symmetry with ShouldSuppressProbing and to document the audio-only
+            // assumption at the call site.
+            _ = isAudioOnly;
+            return statsPresent;
         }
 
         /// <summary>

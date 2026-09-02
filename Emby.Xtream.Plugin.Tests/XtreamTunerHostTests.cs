@@ -112,16 +112,17 @@ namespace Emby.Xtream.Plugin.Tests
             // Expected (post-fix):
             //   - probing is suppressed (AGENTS.md: Dispatcharr proxy URLs never probed)
             //   - video codec on the MediaStream is left unset (the escape route for #66)
-            //   - audio codec, resolution, and bitrate still flow from stats
+            //   - audio codec, resolution, and bitrate still flow from stats (the opt-out
+            //     is ONLY about the video codec, not about all stats — see issue #66 follow-up
+            //     CodeRabbit review on PR #67 head 3c6d056)
             bool disableProbing = true;      // XtreamTunerHost passes this when isDispatcharr=true
             bool useStatsCodec = false;      // DispatcharrUseStatsCodec = false
+            bool statsPresent = true;        // Dispatcharr returned stats for this channel
 
             // hasVideoCodecFromStats = stats.VideoCodec != null && useStatsCodec = true && false = false
-            // isAudioOnly = VideoCodec == null && AudioCodec != "" → false (VideoCodec = "hevc")
-            // hasStats = false || false = false
+            // hasStats = stats != null (true) — opt-out must NOT drop resolution/audio/FPS
             bool hasVideoCodecFromStats = false;
-            bool isAudioOnly = false;
-            bool hasStats = hasVideoCodecFromStats || isAudioOnly;
+            bool hasStats = statsPresent;
 
             // Probing gate (unchanged from legacy):
             bool suppressProbing = XtreamTunerHost.ShouldSuppressProbing(disableProbing, hasStats);
@@ -133,6 +134,39 @@ namespace Emby.Xtream.Plugin.Tests
 
             // Display title falls back to height-only ("1080p") instead of claiming a codec:
             Assert.Equal("1080p", XtreamTunerHost.BuildVideoDisplayTitle(1080, null));
+        }
+
+        [Fact]
+        public void Issue66_HasStats_TracksStatsPresenceNotVideoCodec_Gate()
+        {
+            // CodeRabbit review on PR #67 head 3c6d056 caught that the original fix's
+            //   bool hasStats = hasVideoCodecFromStats || isAudioOnly;
+            // drops ALL stats (audio codec, resolution, FPS, bitrate, profile, level) when
+            // a video channel has DispatcharrUseStatsCodec=false. The opt-out is meant to
+            // suppress only the (misleading) video codec, not every other stat the
+            // Dispatcharr stats endpoint exposes.
+            //
+            // The fix: gate hasStats on stats presence, and let ShouldDeclareVideoCodec
+            // handle the codec-suppression case independently. The corrected helper is
+            // XtreamTunerHost.HasStats(stats, isAudioOnly).
+            //
+            // Truth table this test pins:
+            //   stats != null | isAudioOnly | hasStats
+            //   true          | false       | true   (video channel, legacy pass-through)
+            //   true          | true        | true   (audio-only channel)
+            //   true          | false       | true   (video channel, useStatsCodec=false)
+            //   false         | false       | false  (no stats at all)
+
+            // Row: video channel, opt-out (issue #66). Old gate returned false; new gate
+            // returns true.
+            Assert.True(XtreamTunerHost.HasStats(statsPresent: true, isAudioOnly: false));
+
+            // Row: audio-only channel. Must keep hasStats=true.
+            Assert.True(XtreamTunerHost.HasStats(statsPresent: true, isAudioOnly: true));
+
+            // Row: no stats at all (Dispatcharr 404 or cache miss).
+            Assert.False(XtreamTunerHost.HasStats(statsPresent: false, isAudioOnly: false));
+            Assert.False(XtreamTunerHost.HasStats(statsPresent: false, isAudioOnly: true));
         }
 
         // -------------------------------------------------------------------------
