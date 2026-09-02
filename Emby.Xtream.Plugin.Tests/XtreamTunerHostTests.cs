@@ -205,7 +205,7 @@ namespace Emby.Xtream.Plugin.Tests
                 AudioCodec = "aac",
                 Resolution = "1920x1080",
                 SourceFps = 50,
-                Bitrate = 4.5,         // 4.5 Mbps
+                Bitrate = 4500,        // 4.5 Mbps (Dispatcharr reports kbps; factory multiplies by 1000)
                 AudioBitrate = 128,    // 128 kbps
                 AudioChannels = "stereo",
                 SampleRate = 48000,
@@ -250,12 +250,12 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.Equal(1920, video.Width);
             Assert.Equal(1080, video.Height);
             Assert.Equal(50f, video.RealFrameRate);
-            // Factory converts stats.Bitrate (in Mbps from Dispatcharr's ffmpeg_output_bitrate
-            // key) to bps via * 1000. For 4.5 Mbps that yields 4500 bps — the same convention
-            // applied to every other consumer of stats.Bitrate in CreateMediaSourceInfo. The
-            // test pins that conversion so a future scope-creep fix that switches to *1_000_000
-            // is forced to update the assertion alongside.
-            Assert.Equal(4500, video.BitRate);
+            // Factory converts stats.Bitrate (in kbps from Dispatcharr's ffmpeg_output_bitrate
+            // field, per StreamStatsInfo.cs:19) to bps via * 1000 at XtreamTunerHost.cs:1563.
+            // For a 4500 kbps stream that yields 4_500_000 bps. The test pins that conversion
+            // so a future scope-creep fix that switches to * 1_000_000 is forced to update the
+            // assertion alongside.
+            Assert.Equal(4_500_000, video.BitRate);
             Assert.Equal("Main", video.Profile);
             Assert.Equal(41.0, video.Level);
         }

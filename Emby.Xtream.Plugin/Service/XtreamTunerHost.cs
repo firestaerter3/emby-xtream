@@ -1736,8 +1736,9 @@ namespace Emby.Xtream.Plugin.Service
                 mediaSource.MediaStreams = new List<MediaStream> { videoStream, audioStream };
                 mediaSource.DefaultAudioStreamIndex = 1;
                 LogDebug(logger,
-                    "Stream {0}: no stats available, will probe (fallback bitrate {1} Mbps)",
-                    streamId, fallbackBitrateMbps);
+                    "Stream {0}: no stats available, {1} (fallback bitrate {2} Mbps)",
+                    streamId, suppressProbing ? "probing disabled" : "will probe",
+                    fallbackBitrateMbps);
             }
 
             return mediaSource;
