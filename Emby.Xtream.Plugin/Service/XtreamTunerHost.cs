@@ -911,7 +911,13 @@ namespace Emby.Xtream.Plugin.Service
 
             _streamStats.TryGetValue(streamId, out var stats);
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, config.DispatcharrUseStatsCodec, Logger);
+            // DispatcharrUseStatsCodec only governs the Dispatcharr code path. When BuildStreamUrl
+            // falls back to a direct Xtream URL, the codec opt-out must not apply — stats already
+            // suppress probing, so dropping the codec hint leaves the direct fallback with neither
+            // codec declaration nor probe. ShouldUseStatsCodec pins this gate.
+            var useStatsCodec = ShouldUseStatsCodec(isDispatcharr, config.DispatcharrUseStatsCodec);
+
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, useStatsCodec, Logger);
             Logger.Info("[stream-timing] ch={0} CreateMediaSource={1}ms hasStats={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, stats != null);
 
             return new List<MediaSourceInfo> { mediaSource };
@@ -945,7 +951,13 @@ namespace Emby.Xtream.Plugin.Service
             Logger.Info("[stream-timing] ch={0} BuildUrl={1}ms isDispatcharr={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, isDispatcharr);
             sw.Restart();
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, config.DispatcharrUseStatsCodec, Logger);
+            // DispatcharrUseStatsCodec only governs the Dispatcharr code path. When BuildStreamUrl
+            // falls back to a direct Xtream URL, the codec opt-out must not apply — stats already
+            // suppress probing, so dropping the codec hint leaves the direct fallback with neither
+            // codec declaration nor probe. ShouldUseStatsCodec pins this gate.
+            var useStatsCodec = ShouldUseStatsCodec(isDispatcharr, config.DispatcharrUseStatsCodec);
+
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, useStatsCodec, Logger);
             Logger.Info("[stream-timing] ch={0} CreateMediaSource={1}ms hasStats={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, stats != null);
 
             var httpClient = Plugin.CreateHttpClient();
@@ -1852,6 +1864,25 @@ namespace Emby.Xtream.Plugin.Service
             // hasVideoCodecFromStats, but re-checking useStatsCodec here means a caller
             // that forgets to mask upstream still gets the right answer.
             return hasVideoCodecFromStats && useStatsCodec;
+        }
+
+        /// <summary>
+        /// Gates the <see cref="PluginConfiguration.DispatcharrUseStatsCodec"/> opt-out to
+        /// Dispatcharr sources. When <paramref name="isDispatcharr"/> is false (direct Xtream
+        /// fallback from <see cref="BuildStreamUrl"/>), stats already suppress probing, so
+        /// dropping the codec hint would leave the direct fallback with neither codec
+        /// declaration nor probe. Treat direct Xtream sources as codec-trusted by default.
+        /// Regression for CodeRabbit finding on PR #67 head 8c2e46e.
+        /// </summary>
+        internal static bool ShouldUseStatsCodec(bool isDispatcharr, bool dispatcharrUseStatsCodec)
+        {
+            // Truth table:
+            //   isDispatcharr | dispatcharrUseStatsCodec | useStatsCodec?
+            //   true          | true                     | true  (Dispatcharr + default)
+            //   true          | false                    | false (Dispatcharr + opt-out, issue #66)
+            //   false         | true                     | true  (direct Xtream + default)
+            //   false         | false                    | true  (direct Xtream: opt-out N/A)
+            return !isDispatcharr || dispatcharrUseStatsCodec;
         }
 
         /// <summary>

@@ -271,5 +271,75 @@ namespace Emby.Xtream.Plugin.Tests
         {
             Assert.True(true, "Placeholder: defer full XtreamTunerHost scenarios until _streamStats is instance-level.");
         }
+
+        [Theory]
+        // CodeRabbit finding on PR #67 head 8c2e46e: when BuildStreamUrl falls back to a
+        // direct Xtream URL, isDispatcharr=false but _streamStats may still hold Dispatcharr
+        // stats for the channel. Passing config.DispatcharrUseStatsCodec raw then strips
+        // the codec hint from the direct fallback. Stats also suppress probing, so the
+        // fallback loses BOTH codec and probe. ShouldUseStatsCodec gates the opt-out to
+        // Dispatcharr sources only.
+        [InlineData(true, true, true)]    // Dispatcharr + default: opt-out not active
+        [InlineData(true, false, false)]  // Dispatcharr + opt-out: skip codec (issue #66)
+        [InlineData(false, true, true)]   // Direct Xtream + default: trust codec
+        [InlineData(false, false, true)]  // Direct Xtream + opt-out: opt-out N/A, trust codec
+        public void ShouldUseStatsCodec_GatesOptOutToDispatcharrOnly(bool isDispatcharr, bool dispatcharrUseStatsCodec, bool expected)
+        {
+            Assert.Equal(expected, XtreamTunerHost.ShouldUseStatsCodec(isDispatcharr, dispatcharrUseStatsCodec));
+        }
+
+        [Fact]
+        public void CreateMediaSourceInfo_DirectXtreamFallback_RetainsCodecDespiteOptOut()
+        {
+            // CodeRabbit finding on PR #67 head 8c2e46e regression: when BuildStreamUrl
+            // returns a direct Xtream URL but Dispatcharr stats are still cached for the
+            // channel, the opt-out must NOT apply — stats already suppress probing, so
+            // stripping the codec hint leaves the direct fallback with neither codec nor
+            // probe. ShouldUseStatsCodec(now isDispatcharr=false, configOptOut=false) = true,
+            // so the caller hands useStatsCodec=true to the factory. This test pins the
+            // factory output for the post-gate direct-fallback case.
+            //
+            // Expected output for direct Xtream fallback:
+            //   - disableProbing = false (isDispatcharr=false path)
+            //   - useStatsCodec  = true (gating: opt-out does not apply to direct Xtream)
+            //   - Probing is suppressed via hasStats path (ShouldSuppressProbing), so
+            //     SupportsProbing=false / AnalyzeDurationMs=0 still hold here.
+            //   - video MediaStream.Codec declared from stats (codec hint preserved).
+            //   - audio MediaStream.Codec = "aac" honoured.
+
+            var stats = new StreamStatsInfo
+            {
+                VideoCodec = "hevc",
+                AudioCodec = "aac",
+                Resolution = "1920x1080",
+                Bitrate = 4500,
+            };
+
+            var source = XtreamTunerHost.CreateMediaSourceInfo(
+                streamId: 12345,
+                streamUrl: "http://xtream.example.com/live/user/pass/12345.ts", // direct Xtream fallback URL
+                stats: stats,
+                disableProbing: false,       // isDispatcharr=false path
+                forceAudioTranscode: false,
+                userAgent: null,
+                fallbackBitrateMbps: 0,
+                declareDvbSubtitles: false,
+                useStatsCodec: true);        // post-gate: opt-out does NOT apply to direct Xtream
+
+            // Stats are present, so probing is still suppressed — but via the hasStats
+            // branch of ShouldSuppressProbing, not via the Dispatcharr flag.
+            Assert.False(source.SupportsProbing);
+            Assert.Equal(0, source.AnalyzeDurationMs);
+
+            var video = Assert.Single(source.MediaStreams, s => s.Type == MediaStreamType.Video);
+            var audio = Assert.Single(source.MediaStreams, s => s.Type == MediaStreamType.Audio);
+
+            // Direct Xtream fallback: codec hint preserved, NOT stripped by the opt-out.
+            Assert.Equal("hevc", video.Codec);
+            Assert.Equal("1080p HEVC", video.DisplayTitle);
+
+            // Audio codec honoured.
+            Assert.Equal("aac", audio.Codec);
+        }
     }
 }
