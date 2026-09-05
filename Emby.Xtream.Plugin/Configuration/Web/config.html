@@ -711,6 +711,21 @@
                                 Dolby Digital passthrough for Apple TV and other clients that support it.
                             </div>
                         </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0.5em;">
+                            <label>
+                                <input class="chkDispatcharrUseStatsCodec" type="checkbox" is="emby-checkbox" />
+                                <span>Declare Dispatcharr's reported video codec</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">
+                                Dispatcharr reports the codec it receives from the provider, not the codec
+                                it sends to Emby. Leave this on when your Dispatcharr stream profile passes
+                                video through unchanged. Turn it off if your profile re-encodes video (for
+                                example an HEVC source sent out as H.264) and channels fail with
+                                "No compatible streams are currently available" - Emby then works out the
+                                codec from the stream itself. The player shows resolution only
+                                (e.g. "1080p") instead of resolution plus codec while this is off.
+                            </div>
+                        </div>
                     </div>
                 </div>
 
