@@ -97,9 +97,11 @@ The plugin resolves the declared video codec in this order, for Dispatcharr URLs
 
 1. **The channel's stream profile**, parsed by `StreamProfileCodec.Parse` from the profile's
    command and parameters. `-c:v`, `-c:v:0`, `-codec:v`, `-vcodec` and bare `-c`/`-codec` are all
-   read, last occurrence wins (that is how ffmpeg resolves them), and the encoder name is mapped
-   onto a codec: `libx264`/`h264_*` → `h264`, `libx265`/`hevc_*`/`h265_*` → `hevc`, `mpeg2*` →
-   `mpeg2video`.
+   read in their spaced (`-c:v h264_nvenc`), joined (`-c:v=h264_nvenc`) and quoted
+   (`-c:v "h264_nvenc"`) forms, last occurrence wins (that is how ffmpeg resolves them), and the
+   encoder name is mapped onto a codec: `libx264`/`h264_*` → `h264`, `libx265`/`hevc_*`/`h265_*`
+   → `hevc`, `mpeg2*` → `mpeg2video`. The parameters string is typed by hand in Dispatcharr's UI,
+   so all three forms turn up in real profiles.
 2. **`stream_stats.video_codec`**, when the profile has no answer. `copy`, a non-ffmpeg profile
    (the built-in redirect and proxy profiles, streamlink, custom scripts), an unrecognised
    encoder, an unreadable profile endpoint and an unresolvable profile ID all count as "no
@@ -110,9 +112,12 @@ The plugin resolves the declared video codec in this order, for Dispatcharr URLs
 
 Channel → profile comes from `effective_stream_profile_id` (override-aware, newer serializers)
 falling back to `stream_profile_id`, and a channel with neither uses the server's
-`default_stream_profile` setting. All of it is fetched during the cached channel refresh, never
-at playback: doing Dispatcharr lookups per play is what BUG-007 was about, and it put ~3s on the
-first tune.
+`default_stream_profile` setting. All of it is fetched during the cached channel refresh: doing Dispatcharr
+lookups per play is what BUG-007 was about, and it put ~3s on the first tune. The on-demand path
+that runs when a tune arrives before the cache exists is the one exception, and there the two
+profile requests are started before the channel-data request and awaited after it, so they
+overlap with a call that was already happening instead of queueing two round trips in front of
+playback.
 
 Probing stays off. Nothing in this ADR touches that.
 
@@ -141,8 +146,12 @@ does not apply.
 - **Recording**: no path declares a null codec any more, so the `RecordingRequiresEncoding`
   question is closed by construction rather than by testing.
 - **Extra API calls**: two per cached refresh (`/api/core/streamprofiles/` and
-  `/api/core/settings/`), none per playback. Both failing is a supported state and degrades to
-  the reported codec.
+  `/api/core/settings/`), issued concurrently with the channel-data call rather than after it.
+  Both failing is a supported state and degrades to the reported codec.
+- **Settings shapes**: older servers return a flat row per setting, newer ones group them and put
+  the profile inside `stream_settings`, as a JSON object or as a JSON-encoded string. A live
+  Dispatcharr 0.29 install returns the grouped shape and no `effective_stream_profile_id` at all,
+  so both fallbacks are load-bearing rather than defensive.
 - **Older Dispatcharr / restricted accounts**: an empty profile list or a missing setting logs at
   info level and falls back to the reported codec, which is the pre-#66 behaviour rather than an
   error.

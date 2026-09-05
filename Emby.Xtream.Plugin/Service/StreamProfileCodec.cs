@@ -47,11 +47,21 @@ namespace Emby.Xtream.Plugin.Service
             // ffmpeg applies the last matching option, so hand-tuned profiles that set a codec
             // twice ("-c:v copy" early, a real encoder later) must resolve to the later one.
             string encoder = null;
-            for (int i = 0; i + 1 < tokens.Length; i++)
+            for (int i = 0; i < tokens.Length; i++)
             {
-                if (IsVideoCodecFlag(tokens[i]))
+                var token = Unquote(tokens[i]);
+
+                // "-c:v=h264_nvenc": flag and value in one token.
+                var equals = token.IndexOf('=');
+                if (equals > 0 && IsVideoCodecFlag(token.Substring(0, equals)))
                 {
-                    encoder = tokens[i + 1];
+                    encoder = Unquote(token.Substring(equals + 1));
+                    continue;
+                }
+
+                if (i + 1 < tokens.Length && IsVideoCodecFlag(token))
+                {
+                    encoder = Unquote(tokens[i + 1]);
                 }
             }
 
@@ -106,6 +116,17 @@ namespace Emby.Xtream.Plugin.Service
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Strips the quotes profiles sometimes carry around a value ("-c:v \"h264_nvenc\"").
+        /// The parameters string is written by hand in Dispatcharr's UI, so both quote styles
+        /// turn up, and an encoder left with its quotes on would read as unrecognised.
+        /// </summary>
+        private static string Unquote(string token)
+        {
+            if (string.IsNullOrEmpty(token)) return token;
+            return token.Trim('"', '\'');
         }
 
         private static bool IsVideoCodecFlag(string token)

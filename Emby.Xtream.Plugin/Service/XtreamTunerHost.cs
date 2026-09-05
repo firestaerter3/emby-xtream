@@ -391,12 +391,16 @@ namespace Emby.Xtream.Plugin.Service
                             config.SelectedDispatcharrProfileIds.Length, enabledChannelIds.Count);
                     }
 
+                    // Started first so the two small profile requests ride along with the big
+                    // channel-data request instead of queueing behind it.
+                    var profileFetch = StartStreamProfileFetch(config.DispatcharrUrl, cancellationToken);
+
                     var (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap, streamProfileIdMap) =
                         await _dispatcharrClient.GetChannelDataAsync(
                             config.DispatcharrUrl, cancellationToken, enabledChannelIds).ConfigureAwait(false);
                     newStats = statsMap;
-                    newProfileCodecs = await BuildProfileCodecMapAsync(
-                        config.DispatcharrUrl, streamProfileIdMap, cancellationToken).ConfigureAwait(false);
+                    newProfileCodecs = await BuildProfileCodecMapAsync(profileFetch, streamProfileIdMap)
+                        .ConfigureAwait(false);
                     _channelUuidMap = uuidMap;
                     _tvgIdMap = tvgIdMap;
                     _stationIdMap = stationIdMap;
@@ -1402,12 +1406,17 @@ namespace Emby.Xtream.Plugin.Service
                     }
                 }
 
+                // This runs inside a tune, so the profile requests are started up front and
+                // awaited alongside the channel data rather than after it: two extra serial
+                // round trips in front of playback is the BUG-007 shape.
+                var profileFetch = StartStreamProfileFetch(config.DispatcharrUrl, cancellationToken);
+
                 var (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap, streamProfileIdMap) =
                     await _dispatcharrClient.GetChannelDataAsync(
                         config.DispatcharrUrl, cancellationToken, enabledChannelIds).ConfigureAwait(false);
                 if (statsMap.Count > 0) _streamStats = statsMap;
-                var profileCodecs = await BuildProfileCodecMapAsync(
-                    config.DispatcharrUrl, streamProfileIdMap, cancellationToken).ConfigureAwait(false);
+                var profileCodecs = await BuildProfileCodecMapAsync(profileFetch, streamProfileIdMap)
+                    .ConfigureAwait(false);
                 if (profileCodecs.Count > 0) _streamProfileCodecs = profileCodecs;
                 if (uuidMap.Count > 0) _channelUuidMap = uuidMap;
                 if (tvgIdMap.Count > 0) _tvgIdMap = tvgIdMap;
@@ -1471,29 +1480,41 @@ namespace Emby.Xtream.Plugin.Service
         }
 
         /// <summary>
-        /// Reads the Dispatcharr stream profiles and the server default, and turns them into a
-        /// stream-id → emitted-codec map. Runs on the cached refresh path only: doing this per
-        /// playback is what BUG-007 was about. Every failure mode degrades to an empty map,
-        /// which means the codec from stream_stats is used exactly as before.
+        /// Starts the two stream-profile requests without awaiting them, so they overlap with
+        /// the channel-data request that follows. On the on-demand path this matters: that runs
+        /// during a tune, and serialising extra Dispatcharr round trips in front of playback is
+        /// what BUG-007 was about.
+        /// </summary>
+        private (Task<List<DispatcharrStreamProfile>> Profiles, Task<int?> DefaultId) StartStreamProfileFetch(
+            string dispatcharrUrl, CancellationToken cancellationToken)
+        {
+            return (
+                _dispatcharrClient.GetStreamProfilesAsync(dispatcharrUrl, cancellationToken),
+                _dispatcharrClient.GetDefaultStreamProfileIdAsync(dispatcharrUrl, cancellationToken));
+        }
+
+        /// <summary>
+        /// Turns the in-flight profile requests plus the per-stream profile assignments into a
+        /// stream-id → emitted-codec map. Every failure mode degrades to an empty map, which
+        /// means the codec from stream_stats is used exactly as before.
         /// </summary>
         private async Task<Dictionary<int, string>> BuildProfileCodecMapAsync(
-            string dispatcharrUrl, Dictionary<int, int> streamProfileIds, CancellationToken cancellationToken)
+            (Task<List<DispatcharrStreamProfile>> Profiles, Task<int?> DefaultId) fetch,
+            Dictionary<int, int> streamProfileIds)
         {
-            if (streamProfileIds == null || streamProfileIds.Count == 0)
-                return new Dictionary<int, string>();
-
             try
             {
-                var profiles = await _dispatcharrClient
-                    .GetStreamProfilesAsync(dispatcharrUrl, cancellationToken).ConfigureAwait(false);
+                var profiles = await fetch.Profiles.ConfigureAwait(false);
+                var defaultProfileId = await fetch.DefaultId.ConfigureAwait(false);
+
+                if (streamProfileIds == null || streamProfileIds.Count == 0)
+                    return new Dictionary<int, string>();
+
                 if (profiles == null || profiles.Count == 0)
                 {
                     Logger.Info("Dispatcharr stream profiles unavailable — falling back to the reported codec");
                     return new Dictionary<int, string>();
                 }
-
-                var defaultProfileId = await _dispatcharrClient
-                    .GetDefaultStreamProfileIdAsync(dispatcharrUrl, cancellationToken).ConfigureAwait(false);
 
                 var map = StreamProfileCodec.BuildCodecMap(streamProfileIds, profiles, defaultProfileId);
                 Logger.Info("Resolved output codec from Dispatcharr stream profiles for {0} of {1} streams",

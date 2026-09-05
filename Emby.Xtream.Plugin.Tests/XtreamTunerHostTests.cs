@@ -92,6 +92,21 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.Equal(expected, StreamProfileCodec.Parse(command, parameters));
         }
 
+        [Theory]
+        // Codex review on PR #67: profiles are written by hand in Dispatcharr's UI, so the
+        // encoder turns up quoted, and the flag turns up joined to its value with "=".
+        // Both used to read as "no answer", which left the transcoding channel broken.
+        [InlineData("-i {streamUrl} -c:v \"h264_nvenc\" -f mpegts pipe:1", "h264")]
+        [InlineData("-i {streamUrl} -c:v 'hevc_nvenc' -f mpegts pipe:1", "hevc")]
+        [InlineData("-i {streamUrl} -c:v=h264_nvenc -f mpegts pipe:1", "h264")]
+        [InlineData("-i {streamUrl} -vcodec=libx265 -f mpegts pipe:1", "hevc")]
+        [InlineData("-i {streamUrl} -c:v=\"h264_qsv\" -f mpegts pipe:1", "h264")]
+        [InlineData("-i {streamUrl} -c:v=copy -f mpegts pipe:1", null)]
+        public void StreamProfileCodec_ParsesQuotedAndEqualsForms(string parameters, string expected)
+        {
+            Assert.Equal(expected, StreamProfileCodec.Parse("ffmpeg", parameters));
+        }
+
         [Fact]
         public void StreamProfileCodec_LastCodecFlagWins()
         {
