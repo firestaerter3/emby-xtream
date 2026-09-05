@@ -961,6 +961,60 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public async Task GetDefaultStreamProfileId_ReadsTheGroupedStreamSettingsShape()
+        {
+            // Live shape on Dispatcharr 0.29: settings are grouped into blobs and the profile
+            // sits inside the stream_settings row rather than in a row of its own.
+            var settingsJson = "[" +
+                "{\"id\":1,\"key\":\"proxy_settings\",\"value\":{\"channel_shutdown_delay\":1}}," +
+                "{\"id\":2,\"key\":\"stream_settings\",\"value\":{\"default_stream_profile\":3," +
+                "\"default_user_agent\":1,\"m3u_hash_key\":\"url\"}}]";
+
+            Assert.Equal(3, await RunGetDefaultStreamProfileId(settingsJson));
+        }
+
+        [Fact]
+        public async Task GetDefaultStreamProfileId_ReadsAGroupedBlobSentAsAString()
+        {
+            // Same grouping, but the blob arrives JSON-encoded inside a string.
+            var settingsJson = "[{\"id\":2,\"key\":\"stream_settings\"," +
+                "\"value\":\"{\\\"default_stream_profile\\\": 4}\"}]";
+
+            Assert.Equal(4, await RunGetDefaultStreamProfileId(settingsJson));
+        }
+
+        [Fact]
+        public async Task GetDefaultStreamProfileId_ReturnsNullWhenTheSettingIsAbsent()
+        {
+            var settingsJson = "[{\"id\":1,\"key\":\"system_settings\",\"value\":{\"time_zone\":\"Europe/Amsterdam\"}}]";
+
+            Assert.Null(await RunGetDefaultStreamProfileId(settingsJson));
+        }
+
+        private static async Task<int?> RunGetDefaultStreamProfileId(string settingsJson)
+        {
+            var handler = new MockHandler(request =>
+            {
+                if (request.RequestUri.AbsolutePath.Contains("/api/accounts/token/"))
+                {
+                    var json = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(json, Encoding.UTF8, "application/json")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(settingsJson, Encoding.UTF8, "application/json")
+                };
+            });
+
+            var client = CreateClient(handler);
+            client.Configure("admin", "pass");
+            return await client.GetDefaultStreamProfileIdAsync("http://localhost:8080", CancellationToken.None);
+        }
+
+        [Fact]
         public async Task GetChannelData_MapsStreamProfileIdUnderBothKeys()
         {
             // Same dual-key discipline as every other map here: the Xtream stream_id covers
@@ -973,7 +1027,9 @@ namespace Emby.Xtream.Plugin.Tests
                 "{\"id\":12,\"uuid\":\"u-2\",\"name\":\"B\",\"stream_profile_id\":5," +
                 "\"streams\":[{\"id\":2,\"stream_id\":69308}]}," +
                 "{\"id\":13,\"uuid\":\"u-3\",\"name\":\"C\"," +
-                "\"streams\":[{\"id\":3,\"stream_id\":69309}]}]";
+                "\"streams\":[{\"id\":3,\"stream_id\":69309}]}," +
+                "{\"id\":14,\"uuid\":\"u-4\",\"name\":\"D\",\"stream_profile_id\":5," +
+                "\"streams\":[{\"id\":4,\"stream_id\":69310,\"stream_profile_id\":9}]}]";
 
             var (_, _, _, _, _, _, profileIds) = await RunGetChannelData(channelsJson);
 
@@ -986,6 +1042,10 @@ namespace Emby.Xtream.Plugin.Tests
             // No profile of its own: sentinel 0, resolved against the server default later.
             Assert.Equal(0, profileIds[69309]);
             Assert.Equal(0, profileIds[13]);
+            // A stream's own profile wins over the channel's, which is the order Dispatcharr
+            // resolves them in. The channel key keeps the channel's own value.
+            Assert.Equal(9, profileIds[69310]);
+            Assert.Equal(5, profileIds[14]);
         }
 
         private static async Task<(

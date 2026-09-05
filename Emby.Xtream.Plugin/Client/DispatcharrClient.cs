@@ -96,8 +96,15 @@ namespace Emby.Xtream.Plugin.Client
         }
 
         /// <summary>
-        /// Reads the <c>default_stream_profile</c> setting: the profile used by channels that
-        /// have none assigned. Returns null when the setting or the endpoint is unavailable.
+        /// Reads the <c>default_stream_profile</c> setting: the profile used by streams and
+        /// channels that have none assigned.
+        /// <para>
+        /// Two shapes are in the wild. Older servers return one flat row per setting
+        /// (<c>{"key": "default_stream_profile", "value": 3}</c>); newer ones group settings
+        /// into blobs and the profile lives inside the <c>stream_settings</c> row's value
+        /// object, which itself arrives either as JSON or as a JSON-encoded string. All three
+        /// are read. Returns null when the setting or the endpoint is unavailable.
+        /// </para>
         /// </summary>
         public async Task<int?> GetDefaultStreamProfileIdAsync(string baseUrl, CancellationToken cancellationToken)
         {
@@ -105,18 +112,40 @@ namespace Emby.Xtream.Plugin.Client
                 baseUrl + "/api/core/settings/",
                 baseUrl, cancellationToken).ConfigureAwait(false);
             if (json == null) return null;
+
             try
             {
-                var settings = JsonSerializer.Deserialize<List<DispatcharrSetting>>(json, JsonOptions);
-                if (settings == null) return null;
-                foreach (var setting in settings)
+                using (var doc = JsonDocument.Parse(json))
                 {
-                    if (!string.Equals(setting.Key, "default_stream_profile", StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    int id;
-                    if (int.TryParse(setting.Value, NumberStyles.None, CultureInfo.InvariantCulture, out id) && id > 0)
-                        return id;
-                    return null;
+                    var root = doc.RootElement;
+                    if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("results", out var results))
+                        root = results;
+                    if (root.ValueKind != JsonValueKind.Array) return null;
+
+                    foreach (var row in root.EnumerateArray())
+                    {
+                        if (row.ValueKind != JsonValueKind.Object) continue;
+
+                        JsonElement keyElement;
+                        var key = row.TryGetProperty("key", out keyElement) && keyElement.ValueKind == JsonValueKind.String
+                            ? keyElement.GetString()
+                            : null;
+
+                        JsonElement value;
+                        if (!row.TryGetProperty("value", out value)) continue;
+
+                        // Flat row: the setting is the row itself.
+                        if (string.Equals(key, DefaultStreamProfileKey, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var flat = ReadProfileId(value);
+                            if (flat.HasValue) return flat;
+                            continue;
+                        }
+
+                        // Grouped row: the setting is a field inside the blob.
+                        var nested = ReadNestedProfileId(value);
+                        if (nested.HasValue) return nested;
+                    }
                 }
                 return null;
             }
@@ -125,6 +154,64 @@ namespace Emby.Xtream.Plugin.Client
                 _logger.Warn("Could not read Dispatcharr settings: {0}", ex.Message);
                 return null;
             }
+        }
+
+        private const string DefaultStreamProfileKey = "default_stream_profile";
+
+        /// <summary>Reads a profile ID that may be typed as a number or as a string.</summary>
+        private static int? ReadProfileId(JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Number)
+            {
+                int number;
+                return element.TryGetInt32(out number) && number > 0 ? number : (int?)null;
+            }
+            if (element.ValueKind == JsonValueKind.String)
+            {
+                int parsed;
+                return int.TryParse(element.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out parsed)
+                       && parsed > 0
+                    ? parsed
+                    : (int?)null;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Looks for <c>default_stream_profile</c> inside a settings blob, which arrives either
+        /// as a JSON object or as a string holding one.
+        /// </summary>
+        private static int? ReadNestedProfileId(JsonElement value)
+        {
+            if (value.ValueKind == JsonValueKind.Object)
+            {
+                JsonElement nested;
+                return value.TryGetProperty(DefaultStreamProfileKey, out nested) ? ReadProfileId(nested) : null;
+            }
+
+            if (value.ValueKind == JsonValueKind.String)
+            {
+                var raw = value.GetString();
+                if (string.IsNullOrEmpty(raw) || raw.IndexOf(DefaultStreamProfileKey, StringComparison.Ordinal) < 0)
+                    return null;
+                try
+                {
+                    using (var inner = JsonDocument.Parse(raw))
+                    {
+                        JsonElement nested;
+                        return inner.RootElement.ValueKind == JsonValueKind.Object
+                               && inner.RootElement.TryGetProperty(DefaultStreamProfileKey, out nested)
+                            ? ReadProfileId(nested)
+                            : null;
+                    }
+                }
+                catch (JsonException)
+                {
+                    return null;
+                }
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -205,8 +292,10 @@ namespace Emby.Xtream.Plugin.Client
                     if (ch.ChannelNumber.HasValue && !channelNumberMap.ContainsKey(sid))
                         channelNumberMap[sid] = ch.ChannelNumber.Value;
 
+                    // A stream may carry its own profile, which Dispatcharr resolves before the
+                    // channel's. Falling back to 0 means "use the server default profile".
                     if (!streamProfileIdMap.ContainsKey(sid))
-                        streamProfileIdMap[sid] = ch.ResolvedStreamProfileId ?? 0;
+                        streamProfileIdMap[sid] = stream.StreamProfileId ?? ch.ResolvedStreamProfileId ?? 0;
 
                     allowedStreamIds?.Add(sid);
                 }

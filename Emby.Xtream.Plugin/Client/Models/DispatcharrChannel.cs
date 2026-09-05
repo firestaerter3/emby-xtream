@@ -19,6 +19,12 @@ namespace Emby.Xtream.Plugin.Client.Models
 
         [JsonPropertyName("stream_stats")]
         public StreamStatsInfo StreamStats { get; set; }
+
+        // A stream can override the channel's profile; Dispatcharr resolves the stream's own
+        // value first. Null means "fall back to the channel, then to the server default".
+        [JsonPropertyName("stream_profile_id")]
+        [JsonConverter(typeof(TolerantNullableIntConverter))]
+        public int? StreamProfileId { get; set; }
     }
 
     /// <summary>

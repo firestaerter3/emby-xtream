@@ -32,20 +32,4 @@ namespace Emby.Xtream.Plugin.Client.Models
         [JsonPropertyName("locked")]
         public bool? Locked { get; set; }
     }
-
-    /// <summary>
-    /// One key/value row from <c>/api/core/settings/</c>. Only <c>default_stream_profile</c>
-    /// is read: it names the profile used by channels that have none of their own.
-    /// </summary>
-    public class DispatcharrSetting
-    {
-        [JsonPropertyName("key")]
-        public string Key { get; set; }
-
-        // The endpoint types this loosely — a profile ID arrives as a number on some
-        // versions and as a string on others, and unrelated rows hold JSON blobs.
-        [JsonPropertyName("value")]
-        [JsonConverter(typeof(TolerantStringConverter))]
-        public string Value { get; set; }
-    }
 }
