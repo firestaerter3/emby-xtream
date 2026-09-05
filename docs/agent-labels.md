@@ -15,6 +15,7 @@ These labels support automated issue triage, implementation routing, and maintai
 | `provider-issue` | Root cause is likely upstream provider data or behavior. |
 | `configuration` | Root cause is likely setup, local Emby behavior, or documented configuration. |
 | `regression` | Behavior previously worked and appears broken by a recent change. |
+| `awaiting-verification` | Fix is released and the issue stays open until the reporter confirms it. |
 
 ## Recommended setup
 
@@ -32,4 +33,5 @@ gh label create low-value --color C5DEF5 --description "Low value, narrow, or hi
 gh label create provider-issue --color FBCA04 --description "Likely caused by provider data or behavior"
 gh label create configuration --color BFDADC --description "Likely setup or configuration issue"
 gh label create regression --color E99695 --description "Previously worked and now broken"
+gh label create awaiting-verification --color C2E0C6 --description "Fix is released, waiting for the reporter to confirm"
 ```

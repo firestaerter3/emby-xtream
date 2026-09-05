@@ -59,6 +59,14 @@ Use `configuration` or `provider-issue` when the evidence points outside plugin 
 
 Use `needs-info` when key details are missing. Ask precise questions and do not open an implementation PR.
 
+### Awaiting verification
+
+Use `awaiting-verification` on an issue whose fix has shipped but has not been confirmed by the
+reporter, and reopen the issue if merging closed it. It means the work is done, so do not treat
+it as open work: no implementation PR, and never `agent-ready`. The label comes off when the
+reporter confirms (close the issue) or reports it is still broken (back to `needs-info` or
+`dev-ready`, whichever fits).
+
 ## Agent-ready gate
 
 Apply `agent-ready` only when all are true:
