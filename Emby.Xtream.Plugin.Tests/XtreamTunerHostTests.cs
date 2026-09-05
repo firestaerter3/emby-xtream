@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Emby.Xtream.Plugin.Client.Models;
 using Emby.Xtream.Plugin.Service;
 using MediaBrowser.Model.Entities;
@@ -20,305 +21,262 @@ namespace Emby.Xtream.Plugin.Tests
     /// declaring the source codec on the MediaStream and forcing the wrong decoder, so the
     /// channel failed to play.
     ///
-    /// The fix: <see cref="PluginConfiguration.DispatcharrUseStatsCodec"/> (default true).
-    /// When false, the plugin ignores <c>VideoCodec</c> from stream_stats and leaves the
-    /// codec field unset on the video MediaStream — no probe, no codec hint. AGENTS.md
-    /// forbids re-enabling probing on Dispatcharr proxy URLs regardless of stats, so the
-    /// escape lives in the declaration path, not in relaxing the no-probe rule.
-    ///
-    /// Audio-only detection, resolution, FPS, bitrate, profile, level, and audio codec
-    /// stay honoured regardless of <c>DispatcharrUseStatsCodec</c> — only the video
-    /// codec field and its display title are gated.
+    /// The fix reads the channel's Dispatcharr stream profile, which states what the proxy
+    /// actually emits, and declares that. Probing stays off for Dispatcharr proxy URLs
+    /// (AGENTS.md is absolute on this), and the declared codec is never null: the no-stats
+    /// branch documents that Emby's RecordingRequiresEncoding dereferences the field.
+    /// <see cref="PluginConfiguration.DispatcharrVideoCodecSource"/> can override the
+    /// automatic answer for installs where the profile cannot be read.
     /// </summary>
     public class XtreamTunerHostTests
     {
+        // ---------------------------------------------------------------------
+        // Probing gate — unchanged by the #66 fix, pinned so it stays that way.
+        // ---------------------------------------------------------------------
+
         [Theory]
         // (disableProbing, hasStats, expected) — pins the helper's truth table.
         // AGENTS.md makes the no-probe rule absolute for Dispatcharr proxy URLs:
         // probing is always suppressed when either the dispatcharr-side flag is set
         // OR stats are present. The fix for issue #66 does NOT relax this gate.
-        [InlineData(true, true, true)]    // Dispatcharr + stats: suppress (unchanged)
-        [InlineData(true, false, true)]   // Dispatcharr + no stats: suppress (unchanged)
-        [InlineData(false, true, true)]   // Direct Xtream + stats: suppress (unchanged)
-        [InlineData(false, false, false)] // Direct Xtream + no stats: probe (unchanged)
+        [InlineData(true, true, true)]    // Dispatcharr + stats: suppress
+        [InlineData(true, false, true)]   // Dispatcharr + no stats: suppress
+        [InlineData(false, true, true)]   // Direct Xtream + stats: suppress
+        [InlineData(false, false, false)] // Direct Xtream + no stats: probe
         public void ShouldSuppressProbing_MatchesLegacyTruthTable(bool disableProbing, bool hasStats, bool expected)
         {
             Assert.Equal(expected, XtreamTunerHost.ShouldSuppressProbing(disableProbing, hasStats));
         }
 
         [Fact]
-        public void ShouldSuppressProbing_DisableProbingFlagAloneSuppresses()
+        public void HasStats_TracksStatsPresenceNotVideoCodec()
         {
-            // Dispatcharr path always calls CreateMediaSourceInfo with disableProbing=true.
-            // Probing stays off regardless of stats — AGENTS.md forbids relaxing this.
-            Assert.True(XtreamTunerHost.ShouldSuppressProbing(
-                disableProbing: true,
-                hasStats: false));
+            // CodeRabbit review on PR #67 head 3c6d056 caught that gating hasStats on codec
+            // trust drops every other stat (resolution, FPS, bitrate, audio) for a video
+            // channel whose codec is not being taken from stats. Stats presence and codec
+            // trust are separate questions.
+            Assert.True(XtreamTunerHost.HasStats(statsPresent: true, isAudioOnly: false));
+            Assert.True(XtreamTunerHost.HasStats(statsPresent: true, isAudioOnly: true));
+            Assert.False(XtreamTunerHost.HasStats(statsPresent: false, isAudioOnly: false));
+            Assert.False(XtreamTunerHost.HasStats(statsPresent: false, isAudioOnly: true));
+        }
+
+        // ---------------------------------------------------------------------
+        // Reading the output codec out of a Dispatcharr stream profile.
+        // ---------------------------------------------------------------------
+
+        [Theory]
+        // The reporter's own profile shape: NVENC H.264 output from whatever comes in.
+        [InlineData("ffmpeg", "-i {streamUrl} -c:v h264_nvenc -c:a aac -f mpegts pipe:1", "h264")]
+        [InlineData("ffmpeg", "-i {streamUrl} -c:v libx264 -f mpegts pipe:1", "h264")]
+        [InlineData("ffmpeg", "-i {streamUrl} -c:v libx265 -f mpegts pipe:1", "hevc")]
+        [InlineData("ffmpeg", "-i {streamUrl} -c:v hevc_qsv -f mpegts pipe:1", "hevc")]
+        [InlineData("ffmpeg", "-i {streamUrl} -c:v:0 h264_vaapi -f mpegts pipe:1", "h264")]
+        [InlineData("ffmpeg", "-i {streamUrl} -vcodec libx264 -f mpegts pipe:1", "h264")]
+        [InlineData("ffmpeg", "-i {streamUrl} -codec:v mpeg2video -f mpegts pipe:1", "mpeg2video")]
+        // Pass-through: the ingested codec is also the emitted one, so the profile has no
+        // answer to add and the caller falls back to stream_stats.
+        [InlineData("ffmpeg", "-i {streamUrl} -c:v copy -c:a aac -f mpegts pipe:1", null)]
+        [InlineData("ffmpeg", "-i {streamUrl} -c copy -f mpegts pipe:1", null)]
+        // An encoder we don't recognise must read as "no answer". Handing Emby "av1_nvenc"
+        // as a codec name is worse than handing it nothing, because Emby will try to use it.
+        [InlineData("ffmpeg", "-i {streamUrl} -c:v av1_nvenc -f mpegts pipe:1", null)]
+        // Non-ffmpeg profiles (the built-in redirect/proxy profiles, streamlink, scripts)
+        // never re-encode.
+        [InlineData("streamlink", "{streamUrl} best -O", null)]
+        [InlineData("redirect", "{streamUrl}", null)]
+        [InlineData("ffmpeg", "", null)]
+        [InlineData("ffmpeg", null, null)]
+        public void StreamProfileCodec_ParsesOutputCodec(string command, string parameters, string expected)
+        {
+            Assert.Equal(expected, StreamProfileCodec.Parse(command, parameters));
         }
 
         [Fact]
-        public void ShouldSuppressProbing_HasStatsAloneSuppresses()
+        public void StreamProfileCodec_LastCodecFlagWins()
         {
-            // Audio-only path: stats have AudioCodec but no VideoCodec. hasStats is true
-            // (via the audio-only branch). Even with disableProbing false, probing is
-            // suppressed — there's no video to probe for and the helper shouldn't second-
-            // guess the caller's intent.
-            Assert.True(XtreamTunerHost.ShouldSuppressProbing(
-                disableProbing: false,
-                hasStats: true));
-        }
-
-        [Theory]
-        // Issue #66: when the user has opted out of stats codec, the video codec on the
-        // MediaStream MUST be left unset. Declaring the input codec on a transcoded
-        // Dispatcharr stream profile (HEVC source → H.264 output) forces Emby to apply the
-        // wrong decoder. The codec declaration is gated by hasVideoCodecFromStats (which is
-        // itself gated by useStatsCodec upstream), so passing false here mirrors the opt-out.
-        [InlineData(true, false, false)]  // Stats have codec but user opted out → do not declare (issue #66)
-        [InlineData(true, true, true)]    // Stats have codec + default → declare (legacy pass-through)
-        [InlineData(false, true, false)]  // Stats missing codec → do not declare
-        [InlineData(false, false, false)] // Stats missing codec + opt-out → do not declare
-        public void ShouldDeclareVideoCodec_Issue66OmitsCodecOnOptOut(
-            bool hasVideoCodecFromStats, bool useStatsCodec, bool expected)
-        {
-            Assert.Equal(expected, XtreamTunerHost.ShouldDeclareVideoCodec(hasVideoCodecFromStats, useStatsCodec));
+            // ffmpeg applies the last option for a given stream, so a hand-tuned profile that
+            // sets the codec twice must resolve to the later one, in both orders.
+            Assert.Equal("h264", StreamProfileCodec.Parse(
+                "ffmpeg", "-i {streamUrl} -c:v copy -c:v h264_nvenc -f mpegts pipe:1"));
+            Assert.Null(StreamProfileCodec.Parse(
+                "ffmpeg", "-i {streamUrl} -c:v h264_nvenc -c:v copy -f mpegts pipe:1"));
         }
 
         [Fact]
-        public void ShouldDeclareVideoCodec_OptOutDoesNotAffectAudioOnlyChannels()
+        public void StreamProfileCodec_BuildCodecMap_ResolvesOwnProfileAndServerDefault()
         {
-            // Audio-only channels have stats.AudioCodec but no VideoCodec. hasVideoCodecFromStats
-            // is false regardless of useStatsCodec, so the helper returns false in both cases —
-            // which is correct: an audio-only channel has no video codec to declare or omit.
-            Assert.False(XtreamTunerHost.ShouldDeclareVideoCodec(false, true));
-            Assert.False(XtreamTunerHost.ShouldDeclareVideoCodec(false, false));
+            var profiles = new List<DispatcharrStreamProfile>
+            {
+                new DispatcharrStreamProfile { Id = 1, Name = "Proxy", Command = "ffmpeg", Parameters = "-i {streamUrl} -c copy -f mpegts pipe:1" },
+                new DispatcharrStreamProfile { Id = 2, Name = "NVENC H.264", Command = "ffmpeg", Parameters = "-i {streamUrl} -c:v h264_nvenc -c:a aac -f mpegts pipe:1" },
+                new DispatcharrStreamProfile { Id = 3, Name = "NVENC HEVC", Command = "ffmpeg", Parameters = "-i {streamUrl} -c:v hevc_nvenc -f mpegts pipe:1" },
+            };
+
+            var assignments = new Dictionary<int, int>
+            {
+                { 100, 2 },   // channel with its own transcoding profile
+                { 200, 1 },   // channel on the pass-through profile
+                { 300, 0 },   // no profile of its own -> server default (3)
+                { 400, 99 },  // profile that no longer exists
+            };
+
+            var map = StreamProfileCodec.BuildCodecMap(assignments, profiles, defaultProfileId: 3);
+
+            Assert.Equal("h264", map[100]);
+            // Pass-through profiles contribute nothing: the reported codec is already right.
+            Assert.False(map.ContainsKey(200));
+            Assert.Equal("hevc", map[300]);
+            // An unresolvable profile must leave the stream absent rather than guess.
+            Assert.False(map.ContainsKey(400));
+        }
+
+        [Fact]
+        public void StreamProfileCodec_BuildCodecMap_WithoutServerDefault_LeavesUnassignedStreamsOut()
+        {
+            var profiles = new List<DispatcharrStreamProfile>
+            {
+                new DispatcharrStreamProfile { Id = 2, Command = "ffmpeg", Parameters = "-c:v h264_nvenc" },
+            };
+            var assignments = new Dictionary<int, int> { { 100, 0 } };
+
+            var map = StreamProfileCodec.BuildCodecMap(assignments, profiles, defaultProfileId: null);
+
+            Assert.Empty(map);
+        }
+
+        // ---------------------------------------------------------------------
+        // Which codec gets declared.
+        // ---------------------------------------------------------------------
+
+        [Theory]
+        // (isDispatcharr, codecSource, profileCodec, statsCodec, expected)
+        // Automatic: the profile wins when it has an answer. This is issue #66 — the
+        // reporter's channel ingests HEVC and the profile emits H.264.
+        [InlineData(true, "auto", "h264", "hevc", "h264")]
+        // Automatic with a pass-through profile: nothing from the profile, so the reported
+        // codec stands, which is exactly the behaviour before the fix.
+        [InlineData(true, "auto", null, "hevc", "hevc")]
+        // An empty source string is what a config XML written before this setting existed
+        // deserializes to, and must behave as automatic.
+        [InlineData(true, "", "h264", "hevc", "h264")]
+        [InlineData(true, null, "h264", "hevc", "h264")]
+        // Escape hatch: trust what Dispatcharr reports even when a profile was read.
+        [InlineData(true, "stats", "h264", "hevc", "hevc")]
+        // Manual overrides for installs where the profile endpoint is unreachable.
+        [InlineData(true, "h264", null, "hevc", "h264")]
+        [InlineData(true, "hevc", "h264", "h264", "hevc")]
+        // Direct Xtream URLs carry the provider's own bytes, so the reported codec is right
+        // and the Dispatcharr setting does not apply to them.
+        [InlineData(false, "auto", "h264", "hevc", "hevc")]
+        [InlineData(false, "h264", "h264", "hevc", "hevc")]
+        // Nothing known at all: null, which the factory turns into its H.264 fallback.
+        [InlineData(true, "auto", null, null, null)]
+        public void ResolveVideoCodec_MatchesTruthTable(
+            bool isDispatcharr, string codecSource, string profileCodec, string statsCodec, string expected)
+        {
+            Assert.Equal(expected, XtreamTunerHost.ResolveVideoCodec(
+                isDispatcharr, codecSource, profileCodec, statsCodec));
         }
 
         [Theory]
-        // BuildVideoDisplayTitle covers the four shapes the codec gate produces:
-        //   - codec trusted: "1080p H264"
-        //   - codec omitted (issue #66 opt-out): "1080p"
-        //   - codec trusted but no resolution: "H264"
-        //   - codec omitted and no resolution: null (caller handles null DisplayTitle)
-        [InlineData(1080, "h264", "1080p H264")]   // trusted codec + resolution
-        [InlineData(1080, null, "1080p")]          // issue #66 opt-out + resolution (no codec)
-        [InlineData(0, "h264", "H264")]            // trusted codec, no resolution
-        [InlineData(0, null, null)]                // opt-out, no resolution
-        [InlineData(720, "hevc", "720p HEVC")]     // pass-through HEVC
+        // Profile, level, bit depth and reference frames describe the ingested codec, so they
+        // only survive when that is also the codec being declared.
+        [InlineData("h264", "h264", true)]
+        [InlineData("H264", "h264", true)]   // comparison is case-insensitive
+        [InlineData("h264", "hevc", false)]  // transcoded: source attributes do not apply
+        [InlineData("h264", null, false)]
+        [InlineData(null, "h264", false)]
+        [InlineData("", "h264", false)]
+        public void ShouldDeclareCodecAttributes_OnlyWhenDeclaredCodecIsTheStatsCodec(
+            string declaredCodec, string statsCodec, bool expected)
+        {
+            Assert.Equal(expected, XtreamTunerHost.ShouldDeclareCodecAttributes(declaredCodec, statsCodec));
+        }
+
+        [Theory]
+        [InlineData(1080, "h264", "1080p H264")]
+        [InlineData(720, "hevc", "720p HEVC")]
+        [InlineData(0, "h264", "H264")]      // stats with no parsable resolution
+        [InlineData(1080, null, "1080p")]    // defensive: the stats path never passes null now
+        [InlineData(0, null, null)]
         public void BuildVideoDisplayTitle_CoversAllShapes(int height, string codec, string expected)
         {
             Assert.Equal(expected, XtreamTunerHost.BuildVideoDisplayTitle(height, codec));
         }
 
-        [Fact]
-        public void Issue66_EndToEnd_DispatcharrUserOptsOutOfCodec_ProbingStaysOffAndCodecOmitted()
-        {
-            // Hand-walk through the call-site logic with the reporter's exact bug inputs:
-            //   - dispatcharr path (disableProbing = true)
-            //   - stats present: VideoCodec = "hevc", AudioCodec = "aac" (Dispatcharr ingested HEVC,
-            //     transcode profile outputs H.264)
-            //   - user has set DispatcharrUseStatsCodec = false (opt out)
-            // Expected (post-fix):
-            //   - probing is suppressed (AGENTS.md: Dispatcharr proxy URLs never probed)
-            //   - video codec on the MediaStream is left unset (the escape route for #66)
-            //   - audio codec, resolution, and bitrate still flow from stats (the opt-out
-            //     is ONLY about the video codec, not about all stats — see issue #66 follow-up
-            //     CodeRabbit review on PR #67 head 3c6d056)
-            bool disableProbing = true;      // XtreamTunerHost passes this when isDispatcharr=true
-            bool useStatsCodec = false;      // DispatcharrUseStatsCodec = false
-            bool statsPresent = true;        // Dispatcharr returned stats for this channel
-
-            // hasVideoCodecFromStats = stats.VideoCodec != null && useStatsCodec = true && false = false
-            // hasStats = stats != null (true) — opt-out must NOT drop resolution/audio/FPS
-            bool hasVideoCodecFromStats = false;
-            bool hasStats = statsPresent;
-
-            // Probing gate (unchanged from legacy):
-            bool suppressProbing = XtreamTunerHost.ShouldSuppressProbing(disableProbing, hasStats);
-            Assert.True(suppressProbing); // AGENTS.md: Dispatcharr proxy URLs never probed
-
-            // Codec declaration gate (new helper for issue #66):
-            bool declareVideoCodec = XtreamTunerHost.ShouldDeclareVideoCodec(hasVideoCodecFromStats, useStatsCodec);
-            Assert.False(declareVideoCodec); // issue #66: input codec must not be declared on opt-out
-
-            // Display title falls back to height-only ("1080p") instead of claiming a codec:
-            Assert.Equal("1080p", XtreamTunerHost.BuildVideoDisplayTitle(1080, null));
-        }
+        // ---------------------------------------------------------------------
+        // The assembled MediaSourceInfo.
+        // ---------------------------------------------------------------------
 
         [Fact]
-        public void Issue66_HasStats_TracksStatsPresenceNotVideoCodec_Gate()
+        public void CreateMediaSourceInfo_TranscodingProfile_DeclaresOutputCodecAndDropsSourceAttributes()
         {
-            // CodeRabbit review on PR #67 head 3c6d056 caught that the original fix's
-            //   bool hasStats = hasVideoCodecFromStats || isAudioOnly;
-            // drops ALL stats (audio codec, resolution, FPS, bitrate, profile, level) when
-            // a video channel has DispatcharrUseStatsCodec=false. The opt-out is meant to
-            // suppress only the (misleading) video codec, not every other stat the
-            // Dispatcharr stats endpoint exposes.
-            //
-            // The fix: gate hasStats on stats presence, and let ShouldDeclareVideoCodec
-            // handle the codec-suppression case independently. The corrected helper is
-            // XtreamTunerHost.HasStats(stats, isAudioOnly).
-            //
-            // Truth table this test pins:
-            //   stats != null | isAudioOnly | hasStats
-            //   true          | false       | true   (video channel, legacy pass-through)
-            //   true          | true        | true   (audio-only channel)
-            //   true          | false       | true   (video channel, useStatsCodec=false)
-            //   false         | false       | false  (no stats at all)
-
-            // Row: video channel, opt-out (issue #66). Old gate returned false; new gate
-            // returns true.
-            Assert.True(XtreamTunerHost.HasStats(statsPresent: true, isAudioOnly: false));
-
-            // Row: audio-only channel. Must keep hasStats=true.
-            Assert.True(XtreamTunerHost.HasStats(statsPresent: true, isAudioOnly: true));
-
-            // Row: no stats at all (Dispatcharr 404 or cache miss).
-            Assert.False(XtreamTunerHost.HasStats(statsPresent: false, isAudioOnly: false));
-            Assert.False(XtreamTunerHost.HasStats(statsPresent: false, isAudioOnly: true));
-        }
-
-        [Fact]
-        public void CreateMediaSourceInfo_DispatcharrOptOut_OmitsVideoCodecRetainsAudioResolutionBitrate()
-        {
-            // CodeRabbit review on PR #67 head aa76f6d noted the existing suite covered the
-            // static helpers but not the factory. This test constructs the exact reporter
-            // scenario end-to-end: Dispatcharr path, HEVC source / H.264 output via a
-            // transcoding stream profile, user opted out via DispatcharrUseStatsCodec=false.
-            //
-            // Expected post-fix output:
-            //   - SupportsProbing = false (AGENTS.md: Dispatcharr proxy URLs never probed)
-            //   - AnalyzeDurationMs = 0 (same gate)
-            //   - video MediaStream.Codec = null (the escape route for #66)
-            //   - video MediaStream.DisplayTitle = "1080p" (no codec appended)
-            //   - audio MediaStream.Codec = "aac" (audio stays honoured regardless of opt-out)
-            //   - video MediaStream.Width/Height retained (resolution stays honoured)
-            //   - video MediaStream.BitRate retained (bitrate stays honoured)
-            //   - video MediaStream.Profile/Level/BitDepth/RefFrames omitted: these describe
-            //     the ingested codec, so they are no more trustworthy than the codec itself
-            //     once the stream profile transcodes (a level number means something
-            //     different in HEVC than in H.264)
-            //
-            // The hand-walk version above (Issue66_EndToEnd_*) covers the helpers; this
-            // version pins the assembled MediaSourceInfo so future refactors of the factory
-            // can't drift from the documented contract without breaking a test.
-
+            // The reporter's scenario end to end: Dispatcharr ingested HEVC, the stream profile
+            // emits H.264, and the plugin now declares H.264 because the profile said so.
             var stats = new StreamStatsInfo
             {
-                VideoCodec = "hevc",  // Dispatcharr ingested HEVC; profile transcodes to H.264
+                VideoCodec = "hevc",   // what Dispatcharr ingested
                 AudioCodec = "aac",
                 Resolution = "1920x1080",
                 SourceFps = 50,
-                Bitrate = 4500,        // 4.5 Mbps (Dispatcharr reports kbps; factory multiplies by 1000)
-                AudioBitrate = 128,    // 128 kbps
+                Bitrate = 4500,        // kbps from ffmpeg_output_bitrate
+                AudioBitrate = 128,
                 AudioChannels = "stereo",
                 SampleRate = 48000,
-                VideoProfile = "Main",
+                VideoProfile = "Main", // HEVC Main — meaningless for the H.264 output
                 VideoLevel = 41,
                 VideoBitDepth = 10,
                 VideoRefFrames = 4,
             };
 
-            // Reporter scenario: Dispatcharr proxy URL, user opted out of stats codec.
             var source = XtreamTunerHost.CreateMediaSourceInfo(
                 streamId: 12345,
                 streamUrl: "http://dispatcharr.local/proxy/ts/stream/abc-uuid",
                 stats: stats,
-                disableProbing: true,        // isDispatcharr=true path
+                disableProbing: true,          // isDispatcharr = true
                 forceAudioTranscode: false,
                 userAgent: null,
                 fallbackBitrateMbps: 0,
                 declareDvbSubtitles: false,
-                useStatsCodec: false);       // DispatcharrUseStatsCodec = false
+                declaredVideoCodec: "h264");   // resolved from the stream profile
 
             // Probing stays off — AGENTS.md is absolute on this for Dispatcharr.
             Assert.False(source.SupportsProbing);
             Assert.Equal(0, source.AnalyzeDurationMs);
 
-            // Locate the video and audio streams in the factory output.
             var video = Assert.Single(source.MediaStreams, s => s.Type == MediaStreamType.Video);
             var audio = Assert.Single(source.MediaStreams, s => s.Type == MediaStreamType.Audio);
 
-            // The escape route: codec MUST be omitted on opt-out.
-            Assert.Null(video.Codec);
-            // Display title falls back to height only — no codec to append.
-            Assert.Equal("1080p", video.DisplayTitle);
+            // The fix for #66: what the proxy emits, not what it ingested.
+            Assert.Equal("h264", video.Codec);
+            Assert.Equal("1080p H264", video.DisplayTitle);
 
-            // Audio codec stays honoured (independent of the video opt-out).
+            // Output-side stats stay honoured.
+            Assert.Equal(1920, video.Width);
+            Assert.Equal(1080, video.Height);
+            Assert.Equal(50f, video.RealFrameRate);
+            Assert.Equal(4_500_000, video.BitRate);
             Assert.Equal("aac", audio.Codec);
             Assert.Equal("stereo", audio.ChannelLayout);
             Assert.Equal(2, audio.Channels);
             Assert.Equal(48000, audio.SampleRate);
-            // Audio bitrate comes from AudioBitrate (128 kbps) directly.
             Assert.Equal(128000, audio.BitRate);
 
-            // Resolution and bitrate stay honoured — the opt-out is ONLY about the codec.
-            Assert.Equal(1920, video.Width);
-            Assert.Equal(1080, video.Height);
-            Assert.Equal(50f, video.RealFrameRate);
-            // Factory converts stats.Bitrate (in kbps from Dispatcharr's ffmpeg_output_bitrate
-            // field, per StreamStatsInfo.cs:19) to bps via * 1000 at XtreamTunerHost.cs:1563.
-            // For a 4500 kbps stream that yields 4_500_000 bps. The test pins that conversion
-            // so a future scope-creep fix that switches to * 1_000_000 is forced to update the
-            // assertion alongside.
-            Assert.Equal(4_500_000, video.BitRate);
-
-            // Codec-derived attributes are gated with the codec. Declaring "Main / level 41 /
-            // 10-bit / 4 ref frames" from an HEVC source on an H.264 output is the same bug
-            // class as #66, one field over.
+            // Source-codec attributes are dropped: "Main / level 41 / 10-bit / 4 ref frames"
+            // describes the HEVC input, and declaring it on an H.264 output is the same bug
+            // as #66 one field over.
             Assert.Null(video.Profile);
             Assert.Null(video.Level);
             Assert.Null(video.BitDepth);
             Assert.Null(video.RefFrames);
         }
 
-        // -------------------------------------------------------------------------
-        // Placeholder for deferred full integration tests. See class-level XML doc for
-        // the planned scenarios — they require refactoring the static _streamStats
-        // cache to instance-level before they can run with isolation. This Fact runs
-        // (not skipped) so the suite still tracks the work item.
-        // -------------------------------------------------------------------------
         [Fact]
-        public void Placeholder_StaticStreamStatsCachePreventsIsolation()
+        public void CreateMediaSourceInfo_PassThroughProfile_KeepsReportedCodecAndAttributes()
         {
-            Assert.True(true, "Placeholder: defer full XtreamTunerHost scenarios until _streamStats is instance-level.");
-        }
-
-        [Theory]
-        // CodeRabbit finding on PR #67 head 8c2e46e: when BuildStreamUrl falls back to a
-        // direct Xtream URL, isDispatcharr=false but _streamStats may still hold Dispatcharr
-        // stats for the channel. Passing config.DispatcharrUseStatsCodec raw then strips
-        // the codec hint from the direct fallback. Stats also suppress probing, so the
-        // fallback loses BOTH codec and probe. ShouldUseStatsCodec gates the opt-out to
-        // Dispatcharr sources only.
-        [InlineData(true, true, true)]    // Dispatcharr + default: opt-out not active
-        [InlineData(true, false, false)]  // Dispatcharr + opt-out: skip codec (issue #66)
-        [InlineData(false, true, true)]   // Direct Xtream + default: trust codec
-        [InlineData(false, false, true)]  // Direct Xtream + opt-out: opt-out N/A, trust codec
-        public void ShouldUseStatsCodec_GatesOptOutToDispatcharrOnly(bool isDispatcharr, bool dispatcharrUseStatsCodec, bool expected)
-        {
-            Assert.Equal(expected, XtreamTunerHost.ShouldUseStatsCodec(isDispatcharr, dispatcharrUseStatsCodec));
-        }
-
-        [Fact]
-        public void CreateMediaSourceInfo_DirectXtreamFallback_RetainsCodecDespiteOptOut()
-        {
-            // CodeRabbit finding on PR #67 head 8c2e46e regression: when BuildStreamUrl
-            // returns a direct Xtream URL but Dispatcharr stats are still cached for the
-            // channel, the opt-out must NOT apply — stats already suppress probing, so
-            // stripping the codec hint leaves the direct fallback with neither codec nor
-            // probe. ShouldUseStatsCodec(now isDispatcharr=false, configOptOut=false) = true,
-            // so the caller hands useStatsCodec=true to the factory. This test pins the
-            // factory output for the post-gate direct-fallback case.
-            //
-            // Expected output for direct Xtream fallback:
-            //   - disableProbing = false (isDispatcharr=false path)
-            //   - useStatsCodec  = true (gating: opt-out does not apply to direct Xtream)
-            //   - Probing is suppressed via hasStats path (ShouldSuppressProbing), so
-            //     SupportsProbing=false / AnalyzeDurationMs=0 still hold here.
-            //   - video MediaStream.Codec declared from stats (codec hint preserved).
-            //   - audio MediaStream.Codec = "aac" honoured.
-
+            // Pass-through profile: the profile has no answer, so the caller passes the codec
+            // from stats and every codec-derived attribute is valid.
             var stats = new StreamStatsInfo
             {
                 VideoCodec = "hevc",
@@ -333,36 +291,115 @@ namespace Emby.Xtream.Plugin.Tests
 
             var source = XtreamTunerHost.CreateMediaSourceInfo(
                 streamId: 12345,
-                streamUrl: "http://xtream.example.com/live/user/pass/12345.ts", // direct Xtream fallback URL
+                streamUrl: "http://dispatcharr.local/proxy/ts/stream/abc-uuid",
                 stats: stats,
-                disableProbing: false,       // isDispatcharr=false path
-                forceAudioTranscode: false,
-                userAgent: null,
-                fallbackBitrateMbps: 0,
-                declareDvbSubtitles: false,
-                useStatsCodec: true);        // post-gate: opt-out does NOT apply to direct Xtream
-
-            // Stats are present, so probing is still suppressed — but via the hasStats
-            // branch of ShouldSuppressProbing, not via the Dispatcharr flag.
-            Assert.False(source.SupportsProbing);
-            Assert.Equal(0, source.AnalyzeDurationMs);
+                disableProbing: true,
+                declaredVideoCodec: "hevc");
 
             var video = Assert.Single(source.MediaStreams, s => s.Type == MediaStreamType.Video);
-            var audio = Assert.Single(source.MediaStreams, s => s.Type == MediaStreamType.Audio);
-
-            // Direct Xtream fallback: codec hint preserved, NOT stripped by the opt-out.
             Assert.Equal("hevc", video.Codec);
             Assert.Equal("1080p HEVC", video.DisplayTitle);
-
-            // Audio codec honoured.
-            Assert.Equal("aac", audio.Codec);
-
-            // The other side of the codec-derived gate: with the codec trusted, profile,
-            // level, bit depth and reference frames are declared alongside it.
             Assert.Equal("Main", video.Profile);
             Assert.Equal(41.0, video.Level);
             Assert.Equal(10, video.BitDepth);
             Assert.Equal(4, video.RefFrames);
+        }
+
+        [Fact]
+        public void CreateMediaSourceInfo_NeverDeclaresNullVideoCodec()
+        {
+            // Codex review on PR #67 flagged this as critical: the no-stats branch documents
+            // that Emby's RecordingRequiresEncoding dereferences MediaStream.Codec, so a null
+            // codec turns a recording into a NullReferenceException. No configuration may
+            // produce one — not a caller with no answer, not stats that carry no codec.
+            var statsWithoutCodec = new StreamStatsInfo
+            {
+                Resolution = "1920x1080",
+                Bitrate = 4500,
+            };
+
+            var source = XtreamTunerHost.CreateMediaSourceInfo(
+                streamId: 12345,
+                streamUrl: "http://dispatcharr.local/proxy/ts/stream/abc-uuid",
+                stats: statsWithoutCodec,
+                disableProbing: true,
+                declaredVideoCodec: null);
+
+            var video = Assert.Single(source.MediaStreams, s => s.Type == MediaStreamType.Video);
+            Assert.False(string.IsNullOrEmpty(video.Codec));
+            Assert.Equal("h264", video.Codec);
+
+            // Same guarantee on the no-stats path, which has always used the H.264 fallback.
+            var noStats = XtreamTunerHost.CreateMediaSourceInfo(
+                streamId: 12345,
+                streamUrl: "http://dispatcharr.local/proxy/ts/stream/abc-uuid",
+                stats: null,
+                disableProbing: true,
+                declaredVideoCodec: null);
+            var noStatsVideo = Assert.Single(noStats.MediaStreams, s => s.Type == MediaStreamType.Video);
+            Assert.Equal("h264", noStatsVideo.Codec);
+        }
+
+        [Fact]
+        public void CreateMediaSourceInfo_AudioOnlyChannel_IsUnaffectedByTheCodecDecision()
+        {
+            // Audio-only channels build no video stream at all, whatever the caller declares.
+            var stats = new StreamStatsInfo
+            {
+                AudioCodec = "aac",
+                AudioBitrate = 128,
+                AudioChannels = "stereo",
+            };
+
+            var source = XtreamTunerHost.CreateMediaSourceInfo(
+                streamId: 12345,
+                streamUrl: "http://dispatcharr.local/proxy/ts/stream/abc-uuid",
+                stats: stats,
+                disableProbing: true,
+                declaredVideoCodec: "h264");
+
+            Assert.DoesNotContain(source.MediaStreams, s => s.Type == MediaStreamType.Video);
+            var audio = Assert.Single(source.MediaStreams, s => s.Type == MediaStreamType.Audio);
+            Assert.Equal("aac", audio.Codec);
+            Assert.Equal(0, source.DefaultAudioStreamIndex);
+        }
+
+        [Fact]
+        public void CreateMediaSourceInfo_DirectXtreamFallback_UsesReportedCodec()
+        {
+            // When BuildStreamUrl falls back to a direct Xtream URL the bytes are the
+            // provider's own, so ResolveVideoCodec hands the factory the reported codec even
+            // when a Dispatcharr profile is cached for the channel.
+            var statsCodec = XtreamTunerHost.MapVideoCodec("hevc");
+            var declared = XtreamTunerHost.ResolveVideoCodec(
+                isDispatcharr: false, codecSource: "auto", profileCodec: "h264", statsCodec: statsCodec);
+
+            var source = XtreamTunerHost.CreateMediaSourceInfo(
+                streamId: 12345,
+                streamUrl: "http://xtream.example.com/live/user/pass/12345.ts",
+                stats: new StreamStatsInfo { VideoCodec = "hevc", AudioCodec = "aac", Resolution = "1920x1080" },
+                disableProbing: false,
+                declaredVideoCodec: declared);
+
+            // Stats are present, so probing is still suppressed — via the hasStats branch of
+            // ShouldSuppressProbing, not via the Dispatcharr flag.
+            Assert.False(source.SupportsProbing);
+
+            var video = Assert.Single(source.MediaStreams, s => s.Type == MediaStreamType.Video);
+            Assert.Equal("hevc", video.Codec);
+            Assert.Equal("1080p HEVC", video.DisplayTitle);
+        }
+
+        // -------------------------------------------------------------------------
+        // Placeholder for deferred full integration tests. See class-level XML doc for
+        // the planned scenarios — they require refactoring the static _streamStats
+        // cache to instance-level before they can run with isolation. This Fact runs
+        // (not skipped) so the suite still tracks the work item.
+        // -------------------------------------------------------------------------
+        [Fact]
+        public void Placeholder_StaticStreamStatsCachePreventsIsolation()
+        {
+            Assert.True(true, "Placeholder: defer full XtreamTunerHost scenarios until _streamStats is instance-level.");
         }
     }
 }

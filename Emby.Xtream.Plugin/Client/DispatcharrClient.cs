@@ -71,6 +71,63 @@ namespace Emby.Xtream.Plugin.Client
         }
 
         /// <summary>
+        /// Fetches the stream profiles. Each one carries the command and arguments Dispatcharr
+        /// runs for a channel, which is what decides the codec leaving the proxy.
+        /// Returns an empty list when the endpoint is unavailable — older Dispatcharr builds
+        /// and restricted accounts both land there, and the caller treats an empty list as
+        /// "cannot tell", falling back to the codec from stream_stats.
+        /// </summary>
+        public async Task<List<DispatcharrStreamProfile>> GetStreamProfilesAsync(string baseUrl, CancellationToken cancellationToken)
+        {
+            var json = await GetAuthenticatedAsync(
+                baseUrl + "/api/core/streamprofiles/",
+                baseUrl, cancellationToken).ConfigureAwait(false);
+            if (json == null) return new List<DispatcharrStreamProfile>();
+            try
+            {
+                return JsonSerializer.Deserialize<List<DispatcharrStreamProfile>>(json, JsonOptions)
+                       ?? new List<DispatcharrStreamProfile>();
+            }
+            catch (JsonException ex)
+            {
+                _logger.Warn("Could not read Dispatcharr stream profiles: {0}", ex.Message);
+                return new List<DispatcharrStreamProfile>();
+            }
+        }
+
+        /// <summary>
+        /// Reads the <c>default_stream_profile</c> setting: the profile used by channels that
+        /// have none assigned. Returns null when the setting or the endpoint is unavailable.
+        /// </summary>
+        public async Task<int?> GetDefaultStreamProfileIdAsync(string baseUrl, CancellationToken cancellationToken)
+        {
+            var json = await GetAuthenticatedAsync(
+                baseUrl + "/api/core/settings/",
+                baseUrl, cancellationToken).ConfigureAwait(false);
+            if (json == null) return null;
+            try
+            {
+                var settings = JsonSerializer.Deserialize<List<DispatcharrSetting>>(json, JsonOptions);
+                if (settings == null) return null;
+                foreach (var setting in settings)
+                {
+                    if (!string.Equals(setting.Key, "default_stream_profile", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    int id;
+                    if (int.TryParse(setting.Value, NumberStyles.None, CultureInfo.InvariantCulture, out id) && id > 0)
+                        return id;
+                    return null;
+                }
+                return null;
+            }
+            catch (JsonException ex)
+            {
+                _logger.Warn("Could not read Dispatcharr settings: {0}", ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Fetches channels with embedded stream sources in a single API call and returns the
         /// UUID map, stream stats map, TVG-ID map, Gracenote station ID map, and the set of
         /// allowed Xtream stream IDs (when profile filtering is active).
@@ -82,7 +139,7 @@ namespace Emby.Xtream.Plugin.Client
         /// Optional set of Dispatcharr channel IDs (ch.Id) to include.
         /// When null, all channels are included (no profile filtering).
         /// </param>
-        public async Task<(Dictionary<int, string> UuidMap, Dictionary<int, StreamStatsInfo> StatsMap, Dictionary<int, string> TvgIdMap, Dictionary<int, string> StationIdMap, HashSet<int> AllowedStreamIds, Dictionary<int, double> ChannelNumberMap)>
+        public async Task<(Dictionary<int, string> UuidMap, Dictionary<int, StreamStatsInfo> StatsMap, Dictionary<int, string> TvgIdMap, Dictionary<int, string> StationIdMap, HashSet<int> AllowedStreamIds, Dictionary<int, double> ChannelNumberMap, Dictionary<int, int> StreamProfileIdMap)>
             GetChannelDataAsync(string baseUrl, CancellationToken cancellationToken, HashSet<int> enabledChannelIds = null)
         {
             var uuidMap = new Dictionary<int, string>();
@@ -90,15 +147,18 @@ namespace Emby.Xtream.Plugin.Client
             var tvgIdMap = new Dictionary<int, string>();
             var stationIdMap = new Dictionary<int, string>();
             var channelNumberMap = new Dictionary<int, double>();
+            // Value 0 is the sentinel for "this channel has no profile of its own", which
+            // StreamProfileCodec.BuildCodecMap resolves against the server default profile.
+            var streamProfileIdMap = new Dictionary<int, int>();
             HashSet<int> allowedStreamIds = enabledChannelIds != null ? new HashSet<int>() : null;
 
             var json = await GetAuthenticatedAsync(
                 baseUrl + "/api/channels/channels/?include_streams=true&limit=2000",
                 baseUrl, cancellationToken).ConfigureAwait(false);
-            if (json == null) return (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap);
+            if (json == null) return (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap, streamProfileIdMap);
 
             var channels = JsonSerializer.Deserialize<List<DispatcharrChannelWithStreams>>(json, JsonOptions);
-            if (channels == null) return (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap);
+            if (channels == null) return (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap, streamProfileIdMap);
 
             foreach (var ch in channels)
             {
@@ -145,6 +205,9 @@ namespace Emby.Xtream.Plugin.Client
                     if (ch.ChannelNumber.HasValue && !channelNumberMap.ContainsKey(sid))
                         channelNumberMap[sid] = ch.ChannelNumber.Value;
 
+                    if (!streamProfileIdMap.ContainsKey(sid))
+                        streamProfileIdMap[sid] = ch.ResolvedStreamProfileId ?? 0;
+
                     allowedStreamIds?.Add(sid);
                 }
 
@@ -163,6 +226,8 @@ namespace Emby.Xtream.Plugin.Client
 
                 if (ch.ChannelNumber.HasValue)
                     channelNumberMap[ch.Id] = ch.ChannelNumber.Value;
+
+                streamProfileIdMap[ch.Id] = ch.ResolvedStreamProfileId ?? 0;
 
                 foreach (var stream in ch.Streams)
                 {
@@ -188,7 +253,7 @@ namespace Emby.Xtream.Plugin.Client
                     uuidMap.Count, statsMap.Count, tvgIdMap.Count, stationIdMap.Count);
             }
 
-            return (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap);
+            return (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap, streamProfileIdMap);
         }
 
         /// <summary>Returns the Dispatcharr VOD movie detail (UUID) for a given Xtream stream ID.</summary>
