@@ -14,6 +14,7 @@ using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.LiveTv;
+using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.MediaInfo;
 using STJ = System.Text.Json;
 
@@ -38,6 +39,10 @@ namespace Emby.Xtream.Plugin.Service
         private readonly IServerApplicationHost _applicationHost;
 
         private volatile Dictionary<int, StreamStatsInfo> _streamStats = new Dictionary<int, StreamStatsInfo>();
+        // Stream ID -> codec the channel's Dispatcharr stream profile emits. Built during the
+        // cached channel refresh, never at playback time: reading it per play is how BUG-007
+        // put ~3s on the first tune. Absent key means "profile says nothing", not "passthrough".
+        private volatile Dictionary<int, string> _streamProfileCodecs = new Dictionary<int, string>();
         private volatile Dictionary<int, string> _channelUuidMap = new Dictionary<int, string>();
         private volatile Dictionary<int, string> _tvgIdMap = new Dictionary<int, string>();
         private volatile Dictionary<int, string> _stationIdMap = new Dictionary<int, string>();
@@ -328,6 +333,7 @@ namespace Emby.Xtream.Plugin.Service
 
             var liveTvService = Plugin.Instance.LiveTvService;
             var newStats = new Dictionary<int, StreamStatsInfo>();
+            var newProfileCodecs = new Dictionary<int, string>();
 
             // All three fetches run concurrently; each handles its own errors internally.
             async Task<List<Client.Models.LiveStreamInfo>> channelsFetch()
@@ -385,10 +391,16 @@ namespace Emby.Xtream.Plugin.Service
                             config.SelectedDispatcharrProfileIds.Length, enabledChannelIds.Count);
                     }
 
-                    var (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap) =
+                    // Started first so the two small profile requests ride along with the big
+                    // channel-data request instead of queueing behind it.
+                    var profileFetch = StartStreamProfileFetch(config.DispatcharrUrl, cancellationToken);
+
+                    var (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap, streamProfileIdMap) =
                         await _dispatcharrClient.GetChannelDataAsync(
                             config.DispatcharrUrl, cancellationToken, enabledChannelIds).ConfigureAwait(false);
                     newStats = statsMap;
+                    newProfileCodecs = await BuildProfileCodecMapAsync(profileFetch, streamProfileIdMap)
+                        .ConfigureAwait(false);
                     _channelUuidMap = uuidMap;
                     _tvgIdMap = tvgIdMap;
                     _stationIdMap = stationIdMap;
@@ -507,6 +519,7 @@ namespace Emby.Xtream.Plugin.Service
             }).ToList();
 
             _streamStats = newStats;
+            _streamProfileCodecs = newProfileCodecs;
             _tunerChannelIdToStreamId = newTunerChannelIdToStreamId;
             _cachedChannels = result;
             _cacheTime = DateTime.UtcNow;
@@ -910,7 +923,18 @@ namespace Emby.Xtream.Plugin.Service
 
             _streamStats.TryGetValue(streamId, out var stats);
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles);
+            // What Emby is told the video codec is. On the Dispatcharr path the answer comes from
+            // the channel's stream profile, which states what the proxy emits; stream_stats only
+            // says what it ingested, and those differ whenever the profile transcodes (issue #66).
+            // A direct Xtream fallback URL carries the ingested codec by definition, so the
+            // profile does not apply there.
+            string profileCodec;
+            _streamProfileCodecs.TryGetValue(streamId, out profileCodec);
+            var declaredVideoCodec = ResolveVideoCodec(
+                isDispatcharr, config.DispatcharrVideoCodecSource, profileCodec,
+                stats?.VideoCodec != null ? MapVideoCodec(stats.VideoCodec) : null);
+
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, declaredVideoCodec, Logger);
             Logger.Info("[stream-timing] ch={0} CreateMediaSource={1}ms hasStats={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, stats != null);
 
             return new List<MediaSourceInfo> { mediaSource };
@@ -944,7 +968,18 @@ namespace Emby.Xtream.Plugin.Service
             Logger.Info("[stream-timing] ch={0} BuildUrl={1}ms isDispatcharr={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, isDispatcharr);
             sw.Restart();
 
-            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles);
+            // What Emby is told the video codec is. On the Dispatcharr path the answer comes from
+            // the channel's stream profile, which states what the proxy emits; stream_stats only
+            // says what it ingested, and those differ whenever the profile transcodes (issue #66).
+            // A direct Xtream fallback URL carries the ingested codec by definition, so the
+            // profile does not apply there.
+            string profileCodec;
+            _streamProfileCodecs.TryGetValue(streamId, out profileCodec);
+            var declaredVideoCodec = ResolveVideoCodec(
+                isDispatcharr, config.DispatcharrVideoCodecSource, profileCodec,
+                stats?.VideoCodec != null ? MapVideoCodec(stats.VideoCodec) : null);
+
+            var mediaSource = CreateMediaSourceInfo(streamId, streamUrl, stats, isDispatcharr, config.ForceAudioTranscode, config.HttpUserAgent, config.FallbackTranscodeBitrateMbps, config.DeclareDvbSubtitles, declaredVideoCodec, Logger);
             Logger.Info("[stream-timing] ch={0} CreateMediaSource={1}ms hasStats={2}", tunerChannel?.Name, sw.ElapsedMilliseconds, stats != null);
 
             var httpClient = Plugin.CreateHttpClient();
@@ -975,6 +1010,7 @@ namespace Emby.Xtream.Plugin.Service
             _cachedChannels = null;
             _cacheTime = DateTime.MinValue;
             _streamStats = new Dictionary<int, StreamStatsInfo>();
+            _streamProfileCodecs = new Dictionary<int, string>();
             _channelUuidMap = new Dictionary<int, string>();
             _tvgIdMap = new Dictionary<int, string>();
             _stationIdMap = new Dictionary<int, string>();
@@ -1370,10 +1406,18 @@ namespace Emby.Xtream.Plugin.Service
                     }
                 }
 
-                var (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap) =
+                // This runs inside a tune, so the profile requests are started up front and
+                // awaited alongside the channel data rather than after it: two extra serial
+                // round trips in front of playback is the BUG-007 shape.
+                var profileFetch = StartStreamProfileFetch(config.DispatcharrUrl, cancellationToken);
+
+                var (uuidMap, statsMap, tvgIdMap, stationIdMap, allowedStreamIds, channelNumberMap, streamProfileIdMap) =
                     await _dispatcharrClient.GetChannelDataAsync(
                         config.DispatcharrUrl, cancellationToken, enabledChannelIds).ConfigureAwait(false);
                 if (statsMap.Count > 0) _streamStats = statsMap;
+                var profileCodecs = await BuildProfileCodecMapAsync(profileFetch, streamProfileIdMap)
+                    .ConfigureAwait(false);
+                if (profileCodecs.Count > 0) _streamProfileCodecs = profileCodecs;
                 if (uuidMap.Count > 0) _channelUuidMap = uuidMap;
                 if (tvgIdMap.Count > 0) _tvgIdMap = tvgIdMap;
                 if (stationIdMap.Count > 0) _stationIdMap = stationIdMap;
@@ -1435,27 +1479,99 @@ namespace Emby.Xtream.Plugin.Service
                 config.BaseUrl, Uri.EscapeDataString(config.Username ?? string.Empty), Uri.EscapeDataString(config.Password ?? string.Empty), streamId, extension), false);
         }
 
-        private MediaSourceInfo CreateMediaSourceInfo(
+        /// <summary>
+        /// Starts the two stream-profile requests without awaiting them, so they overlap with
+        /// the channel-data request that follows. On the on-demand path this matters: that runs
+        /// during a tune, and serialising extra Dispatcharr round trips in front of playback is
+        /// what BUG-007 was about.
+        /// </summary>
+        private (Task<List<DispatcharrStreamProfile>> Profiles, Task<int?> DefaultId) StartStreamProfileFetch(
+            string dispatcharrUrl, CancellationToken cancellationToken)
+        {
+            return (
+                _dispatcharrClient.GetStreamProfilesAsync(dispatcharrUrl, cancellationToken),
+                _dispatcharrClient.GetDefaultStreamProfileIdAsync(dispatcharrUrl, cancellationToken));
+        }
+
+        /// <summary>
+        /// Turns the in-flight profile requests plus the per-stream profile assignments into a
+        /// stream-id → emitted-codec map. Every failure mode degrades to an empty map, which
+        /// means the codec from stream_stats is used exactly as before.
+        /// </summary>
+        private async Task<Dictionary<int, string>> BuildProfileCodecMapAsync(
+            (Task<List<DispatcharrStreamProfile>> Profiles, Task<int?> DefaultId) fetch,
+            Dictionary<int, int> streamProfileIds)
+        {
+            try
+            {
+                var profiles = await fetch.Profiles.ConfigureAwait(false);
+                var defaultProfileId = await fetch.DefaultId.ConfigureAwait(false);
+
+                if (streamProfileIds == null || streamProfileIds.Count == 0)
+                    return new Dictionary<int, string>();
+
+                if (profiles == null || profiles.Count == 0)
+                {
+                    Logger.Info("Dispatcharr stream profiles unavailable — falling back to the reported codec");
+                    return new Dictionary<int, string>();
+                }
+
+                var map = StreamProfileCodec.BuildCodecMap(streamProfileIds, profiles, defaultProfileId);
+                Logger.Info("Resolved output codec from Dispatcharr stream profiles for {0} of {1} streams",
+                    map.Count, streamProfileIds.Count);
+                return map;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Could not resolve Dispatcharr stream profile codecs: {0}", ex.Message);
+                return new Dictionary<int, string>();
+            }
+        }
+
+        // internal static so the factory can be exercised by unit tests without an
+        // XtreamTunerHost instance (the constructor requires IServerApplicationHost).
+        // The factory is otherwise pure: it touches no instance state. Three debug logs
+        // route through LogDebug so the static signature stays clean — pass null to
+        // suppress logging in tests, pass an ILogger in production callsites.
+        internal static MediaSourceInfo CreateMediaSourceInfo(
             int streamId, string streamUrl, StreamStatsInfo stats,
             bool disableProbing = false, bool forceAudioTranscode = false,
-            string userAgent = null, int fallbackBitrateMbps = 0, bool declareDvbSubtitles = false)
+            string userAgent = null, int fallbackBitrateMbps = 0, bool declareDvbSubtitles = false,
+            string declaredVideoCodec = null, ILogger logger = null)
         {
             var sourceId = "xtream_live_" + streamId.ToString(CultureInfo.InvariantCulture);
 
             // Audio-only channel: Dispatcharr stats are present but no video_codec exists.
             // The normal hasStats gate (VideoCodec != null) would fall through to the dummy
             // H.264 fallback, which causes Emby to expect a video stream that isn't there.
+            // Audio detection is independent of the video codec question — audio_codec is
+            // reliable in both pass-through and transcoded Dispatcharr stream profiles.
             bool isAudioOnly = stats != null
                 && stats.VideoCodec == null
                 && !string.IsNullOrEmpty(stats.AudioCodec);
 
-            bool hasStats = stats?.VideoCodec != null || isAudioOnly;
+            // The codec from stream_stats is what Dispatcharr ingested. The caller decides what
+            // is actually declared (see ResolveVideoCodec) and passes it in; a null means it had
+            // no better answer, so the ingested codec stands.
+            var statsVideoCodec = stats?.VideoCodec != null ? MapVideoCodec(stats.VideoCodec) : null;
+
+            // hasStats reflects "Dispatcharr returned stats for this channel", NOT
+            // "the video codec from stats is trusted": resolution, FPS, bitrate, audio
+            // codec and audio channels are honoured whatever the codec turns out to be.
+            // Previously this was `hasVideoCodecFromStats || isAudioOnly`, which dropped
+            // ALL stats for video channels with the codec opt-out on — caught by
+            // CodeRabbit review on PR #67 head 3c6d056.
+            bool hasStats = HasStats(stats != null, isAudioOnly);
 
             // Disable probing for Dispatcharr proxy URLs: the probe opens a short-lived HTTP
             // connection that Dispatcharr interprets as a client, and when it closes after
-            // analysis (~0.1s) Dispatcharr tears down the channel. The real playback connection
-            // then hits the teardown and fails, causing a rapid retry storm.
-            bool suppressProbing = disableProbing || hasStats;
+            // analysis (~0.1s) Dispatcharr tears down the channel. The real playback
+            // connection then hits the teardown and fails, causing a rapid retry storm.
+            // AGENTS.md makes this rule absolute: probing MUST stay disabled for Dispatcharr
+            // proxy URLs regardless of stats availability. The fix for issue #66 lives in
+            // the codec declaration path (see ResolveVideoCodec + the MediaStream build
+            // below), not in relaxing this flag.
+            bool suppressProbing = ShouldSuppressProbing(disableProbing, hasStats);
 
             var audioCodecLower = hasStats && !string.IsNullOrEmpty(stats.AudioCodec)
                 ? stats.AudioCodec.ToLowerInvariant() : null;
@@ -1512,7 +1628,17 @@ namespace Emby.Xtream.Plugin.Service
                         }
                     }
 
-                    var videoCodec = MapVideoCodec(stats.VideoCodec);
+                    // Never hand Emby a null codec. The no-stats branch below documents why:
+                    // RecordingRequiresEncoding dereferences the field, so a recording on a
+                    // channel with no codec throws instead of starting. H.264 is the same
+                    // fallback that branch uses and the overwhelmingly common IPTV output.
+                    var videoCodec = !string.IsNullOrEmpty(declaredVideoCodec)
+                        ? declaredVideoCodec
+                        : (statsVideoCodec ?? "h264");
+
+                    // Profile, level, bit depth and reference frames describe the ingested
+                    // codec. They only carry over when what we declare IS that codec.
+                    var declareCodecAttributes = ShouldDeclareCodecAttributes(videoCodec, statsVideoCodec);
 
                     var videoStream = new MediaStream
                     {
@@ -1525,23 +1651,29 @@ namespace Emby.Xtream.Plugin.Service
 
                     if (width > 0) videoStream.Width = width;
                     if (height > 0) videoStream.Height = height;
-                    videoStream.DisplayTitle = height > 0
-                        ? $"{height}p {videoCodec.ToUpperInvariant()}"
-                        : videoCodec.ToUpperInvariant();
+                    videoStream.DisplayTitle = BuildVideoDisplayTitle(height, videoCodec);
                     if (stats.SourceFps.HasValue)
                     {
                         videoStream.RealFrameRate = (float)stats.SourceFps.Value;
                         videoStream.AverageFrameRate = (float)stats.SourceFps.Value;
                     }
                     if (stats.Bitrate.HasValue) videoStream.BitRate = (int)(stats.Bitrate.Value * 1000);
-                    if (!string.IsNullOrEmpty(stats.VideoProfile))
-                        videoStream.Profile = stats.VideoProfile;
-                    if (stats.VideoLevel.HasValue)
-                        videoStream.Level = (double)stats.VideoLevel.Value;
-                    if (stats.VideoBitDepth.HasValue)
-                        videoStream.BitDepth = stats.VideoBitDepth.Value;
-                    if (stats.VideoRefFrames.HasValue)
-                        videoStream.RefFrames = stats.VideoRefFrames.Value;
+
+                    // When the profile transcodes, these describe the source rather than the bytes
+                    // Emby receives: a level number means something different in HEVC than in
+                    // H.264, and bit depth and reference frames need not survive a re-encode.
+                    // Resolution, FPS and ffmpeg_output_bitrate describe the output either way.
+                    if (declareCodecAttributes)
+                    {
+                        if (!string.IsNullOrEmpty(stats.VideoProfile))
+                            videoStream.Profile = stats.VideoProfile;
+                        if (stats.VideoLevel.HasValue)
+                            videoStream.Level = (double)stats.VideoLevel.Value;
+                        if (stats.VideoBitDepth.HasValue)
+                            videoStream.BitDepth = stats.VideoBitDepth.Value;
+                        if (stats.VideoRefFrames.HasValue)
+                            videoStream.RefFrames = stats.VideoRefFrames.Value;
+                    }
 
                     mediaStreams.Add(videoStream);
                 }
@@ -1643,7 +1775,7 @@ namespace Emby.Xtream.Plugin.Service
 
                 if (isAudioOnly)
                 {
-                    Logger.Debug(
+                    LogDebug(logger,
                         "Stream {0}: audio-only - {1} {2}ch{3}",
                         streamId, audioCodecLower ?? "unknown",
                         audioChannels.HasValue ? audioChannels.Value.ToString(CultureInfo.InvariantCulture) : "?",
@@ -1661,7 +1793,7 @@ namespace Emby.Xtream.Plugin.Service
                             int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out height);
                         }
                     }
-                    Logger.Debug(
+                    LogDebug(logger,
                         "Stream {0}: using stats - {1} {2}x{3} @{4}fps, audio {5} {6}ch{7}",
                         streamId, stats.VideoCodec, width, height,
                         stats.SourceFps, audioCodecLower ?? "unknown",
@@ -1708,12 +1840,23 @@ namespace Emby.Xtream.Plugin.Service
 
                 mediaSource.MediaStreams = new List<MediaStream> { videoStream, audioStream };
                 mediaSource.DefaultAudioStreamIndex = 1;
-                Logger.Debug(
-                    "Stream {0}: no stats available, will probe (fallback bitrate {1} Mbps)",
-                    streamId, fallbackBitrateMbps);
+                LogDebug(logger,
+                    "Stream {0}: no stats available, {1} (fallback bitrate {2} Mbps)",
+                    streamId, suppressProbing ? "probing disabled" : "will probe",
+                    fallbackBitrateMbps);
             }
 
             return mediaSource;
+        }
+
+        // Null-tolerant debug logger. Production callsites pass an ILogger pulled from
+        // BaseTunerHost.Logger; unit tests pass null to suppress log noise. The factory
+        // is otherwise pure — wrapping the log call in a null check keeps the static
+        // signature without forcing test infrastructure to stub an IServerApplicationHost.
+        private static void LogDebug(ILogger logger, string format, params object[] args)
+        {
+            if (logger == null) return;
+            logger.Debug(format, args);
         }
 
         /// <summary>
@@ -1747,13 +1890,133 @@ namespace Emby.Xtream.Plugin.Service
                 && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
         }
 
-        private static string MapVideoCodec(string dispatcharrCodec)
+        // Values accepted by PluginConfiguration.DispatcharrVideoCodecSource. Anything else,
+        // including the empty string an upgraded config XML starts with, means automatic.
+        internal const string CodecSourceAuto = "auto";
+        internal const string CodecSourceStats = "stats";
+        internal const string CodecSourceH264 = "h264";
+        internal const string CodecSourceHevc = "hevc";
+
+        internal static string MapVideoCodec(string dispatcharrCodec)
         {
             var upper = dispatcharrCodec.ToUpperInvariant();
             if (upper == "H264" || upper == "AVC") return "h264";
             if (upper == "HEVC" || upper == "H265") return "hevc";
             if (upper == "MPEG2VIDEO") return "mpeg2video";
             return dispatcharrCodec.ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Decides whether the Live TV MediaSource should be probed by Emby.
+        /// Extracted from <see cref="CreateMediaSourceInfo"/> so a regression test can
+        /// exercise the decision without instantiating a full MediaSourceInfo. Probing
+        /// is suppressed on Dispatcharr URLs because the probe opens a short-lived HTTP
+        /// connection that Dispatcharr interprets as a client and tears down on close,
+        /// causing a retry storm. AGENTS.md makes this rule absolute for `/proxy/ts/stream/{uuid}`
+        /// URLs: probing MUST stay off regardless of stats availability. Issue #66 lives
+        /// in the codec-declaration path, not in relaxing this flag.
+        /// </summary>
+        internal static bool ShouldSuppressProbing(bool disableProbing, bool hasStats)
+        {
+            return disableProbing || hasStats;
+        }
+
+        /// <summary>
+        /// Decides whether the Live TV <c>MediaSource</c> should populate stat-derived
+        /// fields (resolution, FPS, bitrate, audio codec, audio channels, video profile,
+        /// level, bit depth, reference frames). True iff Dispatcharr returned stats for
+        /// the channel — independent of which codec ends up declared, which
+        /// <see cref="ResolveVideoCodec"/> decides separately.
+        /// Regression test for issue #66 follow-up: the original
+        /// <c>hasVideoCodecFromStats || isAudioOnly</c> expression dropped every stat
+        /// on a video channel with the opt-out on, leaving Emby with no resolution, no
+        /// FPS, and no audio info. CodeRabbit review on PR #67 head 3c6d056.
+        /// </summary>
+        internal static bool HasStats(bool statsPresent, bool isAudioOnly)
+        {
+            // statsPresent mirrors "stats != null" upstream; isAudioOnly is implied by
+            // statsPresent (it requires stats.VideoCodec == null && AudioCodec != ""),
+            // so the helper returns statsPresent alone. Kept as a two-argument signature
+            // for symmetry with ShouldSuppressProbing and to document the audio-only
+            // assumption at the call site.
+            _ = isAudioOnly;
+            return statsPresent;
+        }
+
+        /// <summary>
+        /// Decides which video codec is declared on the Live TV <c>MediaStream</c>.
+        /// <para>
+        /// On the Dispatcharr path the profile wins: it states what the proxy emits, while
+        /// <c>stream_stats.video_codec</c> only reports what Dispatcharr ingested. Those differ
+        /// whenever the stream profile transcodes, and declaring the ingested codec is what made
+        /// every HEVC-sourced channel fail to play in issue #66.
+        /// </para>
+        /// <para>
+        /// A direct Xtream URL carries the provider's own bytes, so the ingested codec is the
+        /// right answer there and the Dispatcharr setting does not apply. Returns null when
+        /// nothing is known, which the factory turns into its H.264 fallback rather than a null
+        /// codec.
+        /// </para>
+        /// </summary>
+        internal static string ResolveVideoCodec(
+            bool isDispatcharr, string codecSource, string profileCodec, string statsCodec)
+        {
+            if (!isDispatcharr) return statsCodec;
+
+            switch ((codecSource ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                // Pre-#66 behaviour: trust what Dispatcharr reports. Correct for pass-through
+                // profiles and available as an escape when detection reads a profile wrongly.
+                case CodecSourceStats:
+                    return statsCodec;
+
+                // Manual overrides for installs where the profile cannot be read at all
+                // (restricted account, older Dispatcharr) but the user knows the output.
+                case CodecSourceH264:
+                    return "h264";
+                case CodecSourceHevc:
+                    return "hevc";
+
+                // Automatic (default): the profile when it gave an answer, otherwise the
+                // reported codec, which leaves pass-through installs exactly as they were.
+                default:
+                    return profileCodec ?? statsCodec;
+            }
+        }
+
+        /// <summary>
+        /// Decides whether the codec-specific attributes from <c>stream_stats</c> (profile,
+        /// level, bit depth, reference frames) may be declared. They describe the ingested
+        /// codec, so they only hold when that is also the codec being declared.
+        /// </summary>
+        internal static bool ShouldDeclareCodecAttributes(string declaredCodec, string statsCodec)
+        {
+            return !string.IsNullOrEmpty(declaredCodec)
+                && !string.IsNullOrEmpty(statsCodec)
+                && string.Equals(declaredCodec, statsCodec, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Builds the human-readable title for the Live TV video <c>MediaStream</c>.
+        /// The codec is resolved by <see cref="ResolveVideoCodec"/> and is never empty on the
+        /// stats path, so the usual shape is "1080p H264". The height-only and codec-only
+        /// shapes cover stats that carry no parsable resolution.
+        /// </summary>
+        internal static string BuildVideoDisplayTitle(int height, string videoCodec)
+        {
+            if (height > 0 && !string.IsNullOrEmpty(videoCodec))
+            {
+                return $"{height}p {videoCodec.ToUpperInvariant()}";
+            }
+            if (height > 0)
+            {
+                return $"{height}p";
+            }
+            if (!string.IsNullOrEmpty(videoCodec))
+            {
+                return videoCodec.ToUpperInvariant();
+            }
+            return null;
         }
     }
 }

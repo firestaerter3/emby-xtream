@@ -438,6 +438,7 @@ function (BaseView, loading) {
             view.querySelector('.txtDispatcharrPass').value = config.DispatcharrPass || '';
             view.querySelector('.chkDispatcharrFallback').checked = config.DispatcharrFallbackToXtream !== false;
             view.querySelector('.chkForceAudioTranscode').checked = !!config.ForceAudioTranscode;
+            view.querySelector('.selDispatcharrCodecSource').value = config.DispatcharrVideoCodecSource || 'auto';
             view.querySelector('.chkDeclareDvbSubtitles').checked = !!config.DeclareDvbSubtitles;
 
             instance.selectedDispatcharrProfileIds = config.SelectedDispatcharrProfileIds || [];
@@ -567,6 +568,7 @@ function (BaseView, loading) {
             if (_dPwdVal) config.DispatcharrPass = _dPwdVal;
             config.DispatcharrFallbackToXtream = view.querySelector('.chkDispatcharrFallback').checked;
             config.ForceAudioTranscode = view.querySelector('.chkForceAudioTranscode').checked;
+            config.DispatcharrVideoCodecSource = view.querySelector('.selDispatcharrCodecSource').value;
             config.DeclareDvbSubtitles = view.querySelector('.chkDeclareDvbSubtitles').checked;
             config.SelectedDispatcharrProfileIds = getSelectedDispatcharrProfileIds(instance);
 

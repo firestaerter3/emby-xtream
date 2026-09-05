@@ -48,6 +48,25 @@ When `SupportsProbing = true` and `AnalyzeDurationMs > 0`, Emby runs ffprobe aga
 
 **Rule**: Always set `SupportsProbing = false` and `AnalyzeDurationMs = 0` for Dispatcharr proxy URLs (`/proxy/ts/stream/{uuid}`), regardless of whether stream stats are available. Direct Xtream URLs (no Dispatcharr) can still use probing when stats are absent.
 
+### The declared video codec comes from the Dispatcharr stream profile
+
+`stream_stats.video_codec` is the codec Dispatcharr **ingested** from the provider, not the one
+it **emits**. On a stream profile that transcodes (HEVC source, H.264 output) declaring it makes
+Emby force the wrong decoder and the channel dies with `Invalid NAL unit` before playback starts.
+
+`XtreamTunerHost.ResolveVideoCodec` therefore asks the channel's stream profile first
+(`StreamProfileCodec` parses `-c:v` and friends out of the profile's ffmpeg parameters), falls
+back to `stream_stats.video_codec` when the profile passes video through or cannot be read, and
+falls back again to `h264`. **No path may declare a null codec**: Emby's
+`RecordingRequiresEncoding` dereferences `MediaStream.Codec`, so a null turns a recording into a
+`NullReferenceException`.
+
+Profile data is fetched on the cached refresh path only (`BuildProfileCodecMapAsync`). Dispatcharr
+lookups at playback time are what BUG-007 was about. `Profile`, `Level`, `BitDepth` and
+`RefFrames` are only declared when the declared codec is the reported one, since they describe the
+ingested codec. `DispatcharrVideoCodecSource` (`auto` / `stats` / `h264` / `hevc`) overrides the
+whole thing. See [ADR-016](docs/decisions/016-dispatcharr-stats-codec-trust.md).
+
 ### SupportsDirectStream controls whether native clients bypass server-side segmentation
 
 `SupportsDirectStream = true` in `MediaSourceInfo` tells Emby the stream can be forwarded directly to the client without transcoding. Native Emby clients (Apple TV, iOS, Android) prefer this path when available — they receive raw MPEG-TS or the proxy URL and play it directly. This skips Emby's HLS segmentation pipeline entirely.

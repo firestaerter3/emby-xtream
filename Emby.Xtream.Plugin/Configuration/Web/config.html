@@ -711,6 +711,24 @@
                                 Dolby Digital passthrough for Apple TV and other clients that support it.
                             </div>
                         </div>
+                        <div class="selectContainer" style="margin-top:0.5em;">
+                            <select class="selDispatcharrCodecSource" is="emby-select" label="Video codec for Dispatcharr channels">
+                                <option value="auto">Automatic (recommended)</option>
+                                <option value="stats">Use the codec Dispatcharr reports</option>
+                                <option value="h264">Always H.264</option>
+                                <option value="hevc">Always HEVC</option>
+                            </select>
+                            <div class="fieldDescription">
+                                Dispatcharr reports the codec it receives from the provider, which is not
+                                the same thing as the codec it sends to Emby when your stream profile
+                                re-encodes video. <b>Automatic</b> reads your stream profile and uses what
+                                it actually outputs, falling back to the reported codec for profiles that
+                                pass video through untouched. Pick one of the other options only if a
+                                channel plays with the wrong codec: <b>Use the codec Dispatcharr reports</b>
+                                is the old behaviour, and the two fixed choices are for setups where the
+                                plugin cannot read your stream profiles.
+                            </div>
+                        </div>
                     </div>
                 </div>
 

@@ -241,7 +241,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, _, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(uuidMap.ContainsKey(69307), "Config A: UUID must be reachable via Xtream stream_id");
             Assert.Equal("41f6df70-4531-4555-bb13-e4a39c2c242b", uuidMap[69307]);
@@ -264,7 +264,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, _, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(uuidMap.ContainsKey(42), "Config B: UUID must be reachable via ch.Id");
             Assert.Equal("uuid-config-b", uuidMap[42]);
@@ -289,7 +289,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, _, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(uuidMap.ContainsKey(69307), "Config A key (stream_id) must be present");
             Assert.True(uuidMap.ContainsKey(5398),  "Config B key (ch.Id) must be present");
@@ -331,7 +331,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (_, statsMap, _, _, _, _) = await RunGetChannelData(channelsJson);
+            var (_, statsMap, _, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(statsMap.ContainsKey(69307), "Stats must be reachable via Xtream stream_id");
             var stats = statsMap[69307];
@@ -362,7 +362,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, _, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(uuidMap.ContainsKey(100), "First stream_id must map to UUID");
             Assert.True(uuidMap.ContainsKey(200), "Second stream_id must map to UUID");
@@ -389,7 +389,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, _, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.True(uuidMap.ContainsKey(7), "ch.Id fallback must be written when stream_id is null");
             Assert.Equal("uuid-null-stream-id", uuidMap[7]);
@@ -432,7 +432,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, _, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             // Config B: each channel looked up by its own ch.Id
             Assert.Equal("cartoon-uuid", uuidMap[100]);
@@ -452,7 +452,7 @@ namespace Emby.Xtream.Plugin.Tests
                 new { id = 2, uuid = "valid-uuid", name = "OK", streams = new object[0] }
             });
 
-            var (uuidMap, _, _, _, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, _, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.False(uuidMap.ContainsKey(1), "Channel without UUID must be skipped");
             Assert.True(uuidMap.ContainsKey(2));
@@ -496,7 +496,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (_, statsMap, _, _, _, _) = await RunGetChannelData(channelsJson);
+            var (_, statsMap, _, _, _, _, _) = await RunGetChannelData(channelsJson);
 
             // stream_id=300 gets the first (h264) stats
             Assert.True(statsMap.ContainsKey(300));
@@ -546,7 +546,7 @@ namespace Emby.Xtream.Plugin.Tests
                 }
             });
 
-            var (uuidMap, _, tvgIdMap, stationIdMap, _, _) = await RunGetChannelData(channelsJson);
+            var (uuidMap, _, tvgIdMap, stationIdMap, _, _, _) = await RunGetChannelData(channelsJson);
 
             Assert.Equal(3, uuidMap.Count);
 
@@ -883,13 +883,179 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.Equal(0, loginPosts);
         }
 
+        // -------------------------------------------------------------------------
+        // Stream profiles (issue #66): what the proxy emits, not what it ingested.
+        // -------------------------------------------------------------------------
+
+        [Fact]
+        public async Task GetStreamProfiles_ReturnsProfilesWithCommandAndParameters()
+        {
+            var profilesJson = JsonSerializer.Serialize(new[]
+            {
+                new { id = 1, name = "Proxy", command = "", parameters = "", is_active = true, locked = true },
+                new { id = 2, name = "NVENC", command = "ffmpeg", parameters = "-i {streamUrl} -c:v h264_nvenc -f mpegts pipe:1", is_active = true, locked = false },
+            });
+
+            string requestedPath = null;
+            var handler = new MockHandler(request =>
+            {
+                if (request.RequestUri.AbsolutePath.Contains("/api/accounts/token/"))
+                {
+                    var json = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(json, Encoding.UTF8, "application/json")
+                    };
+                }
+                requestedPath = request.RequestUri.AbsolutePath;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(profilesJson, Encoding.UTF8, "application/json")
+                };
+            });
+
+            var client = CreateClient(handler);
+            client.Configure("admin", "pass");
+            var profiles = await client.GetStreamProfilesAsync("http://localhost:8080", CancellationToken.None);
+
+            Assert.Equal(2, profiles.Count);
+            Assert.Equal("ffmpeg", profiles[1].Command);
+            Assert.Equal("h264", StreamProfileCodec.Parse(profiles[1].Command, profiles[1].Parameters));
+            Assert.Equal("/api/core/streamprofiles/", requestedPath);
+        }
+
+        [Fact]
+        public async Task GetDefaultStreamProfileId_ReadsTheSettingAndIgnoresOtherRows()
+        {
+            // The settings endpoint returns rows of every kind, including JSON blobs, and
+            // types the value loosely — a profile ID arrives as a string on some versions.
+            var settingsJson = "[" +
+                "{\"id\":1,\"key\":\"proxy_settings\",\"value\":\"{\\\"channel_shutdown_delay\\\":8}\"}," +
+                "{\"id\":2,\"key\":\"default_stream_profile\",\"value\":\"2\"}," +
+                "{\"id\":3,\"key\":\"default-user-agent\",\"value\":1}]";
+
+            string requestedPath = null;
+            var handler = new MockHandler(request =>
+            {
+                if (request.RequestUri.AbsolutePath.Contains("/api/accounts/token/"))
+                {
+                    var json = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(json, Encoding.UTF8, "application/json")
+                    };
+                }
+                requestedPath = request.RequestUri.AbsolutePath;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(settingsJson, Encoding.UTF8, "application/json")
+                };
+            });
+
+            var client = CreateClient(handler);
+            client.Configure("admin", "pass");
+            var id = await client.GetDefaultStreamProfileIdAsync("http://localhost:8080", CancellationToken.None);
+
+            Assert.Equal(2, id);
+            Assert.Equal("/api/core/settings/", requestedPath);
+        }
+
+        [Fact]
+        public async Task GetDefaultStreamProfileId_ReadsTheGroupedStreamSettingsShape()
+        {
+            // Live shape on Dispatcharr 0.29: settings are grouped into blobs and the profile
+            // sits inside the stream_settings row rather than in a row of its own.
+            var settingsJson = "[" +
+                "{\"id\":1,\"key\":\"proxy_settings\",\"value\":{\"channel_shutdown_delay\":1}}," +
+                "{\"id\":2,\"key\":\"stream_settings\",\"value\":{\"default_stream_profile\":3," +
+                "\"default_user_agent\":1,\"m3u_hash_key\":\"url\"}}]";
+
+            Assert.Equal(3, await RunGetDefaultStreamProfileId(settingsJson));
+        }
+
+        [Fact]
+        public async Task GetDefaultStreamProfileId_ReadsAGroupedBlobSentAsAString()
+        {
+            // Same grouping, but the blob arrives JSON-encoded inside a string.
+            var settingsJson = "[{\"id\":2,\"key\":\"stream_settings\"," +
+                "\"value\":\"{\\\"default_stream_profile\\\": 4}\"}]";
+
+            Assert.Equal(4, await RunGetDefaultStreamProfileId(settingsJson));
+        }
+
+        [Fact]
+        public async Task GetDefaultStreamProfileId_ReturnsNullWhenTheSettingIsAbsent()
+        {
+            var settingsJson = "[{\"id\":1,\"key\":\"system_settings\",\"value\":{\"time_zone\":\"Europe/Amsterdam\"}}]";
+
+            Assert.Null(await RunGetDefaultStreamProfileId(settingsJson));
+        }
+
+        private static async Task<int?> RunGetDefaultStreamProfileId(string settingsJson)
+        {
+            var handler = new MockHandler(request =>
+            {
+                if (request.RequestUri.AbsolutePath.Contains("/api/accounts/token/"))
+                {
+                    var json = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(json, Encoding.UTF8, "application/json")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(settingsJson, Encoding.UTF8, "application/json")
+                };
+            });
+
+            var client = CreateClient(handler);
+            client.Configure("admin", "pass");
+            return await client.GetDefaultStreamProfileIdAsync("http://localhost:8080", CancellationToken.None);
+        }
+
+        [Fact]
+        public async Task GetChannelData_MapsStreamProfileIdUnderBothKeys()
+        {
+            // Same dual-key discipline as every other map here: the Xtream stream_id covers
+            // Config A and Dispatcharr's own channel ID covers Config B. effective_stream_
+            // profile_id wins over stream_profile_id, and a channel with neither is written
+            // as 0, the sentinel for "use the server default profile".
+            var channelsJson = "[" +
+                "{\"id\":11,\"uuid\":\"u-1\",\"name\":\"A\",\"stream_profile_id\":5," +
+                "\"effective_stream_profile_id\":7,\"streams\":[{\"id\":1,\"stream_id\":69307}]}," +
+                "{\"id\":12,\"uuid\":\"u-2\",\"name\":\"B\",\"stream_profile_id\":5," +
+                "\"streams\":[{\"id\":2,\"stream_id\":69308}]}," +
+                "{\"id\":13,\"uuid\":\"u-3\",\"name\":\"C\"," +
+                "\"streams\":[{\"id\":3,\"stream_id\":69309}]}," +
+                "{\"id\":14,\"uuid\":\"u-4\",\"name\":\"D\",\"stream_profile_id\":5," +
+                "\"streams\":[{\"id\":4,\"stream_id\":69310,\"stream_profile_id\":9}]}]";
+
+            var (_, _, _, _, _, _, profileIds) = await RunGetChannelData(channelsJson);
+
+            // Effective value wins where present, both keyed by Xtream stream_id and channel ID.
+            Assert.Equal(7, profileIds[69307]);
+            Assert.Equal(7, profileIds[11]);
+            // Older serializers only send stream_profile_id.
+            Assert.Equal(5, profileIds[69308]);
+            Assert.Equal(5, profileIds[12]);
+            // No profile of its own: sentinel 0, resolved against the server default later.
+            Assert.Equal(0, profileIds[69309]);
+            Assert.Equal(0, profileIds[13]);
+            // A stream's own profile wins over the channel's, which is the order Dispatcharr
+            // resolves them in. The channel key keeps the channel's own value.
+            Assert.Equal(9, profileIds[69310]);
+            Assert.Equal(5, profileIds[14]);
+        }
+
         private static async Task<(
             System.Collections.Generic.Dictionary<int, string> UuidMap,
             System.Collections.Generic.Dictionary<int, StreamStatsInfo> StatsMap,
             System.Collections.Generic.Dictionary<int, string> TvgIdMap,
             System.Collections.Generic.Dictionary<int, string> StationIdMap,
             System.Collections.Generic.HashSet<int> AllowedStreamIds,
-            System.Collections.Generic.Dictionary<int, double> ChannelNumberMap)>
+            System.Collections.Generic.Dictionary<int, double> ChannelNumberMap,
+            System.Collections.Generic.Dictionary<int, int> StreamProfileIdMap)>
             RunGetChannelData(string channelsJson)
         {
             var handler = new MockHandler(request =>

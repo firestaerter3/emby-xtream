@@ -48,6 +48,30 @@ namespace Emby.Xtream.Plugin
         public bool DispatcharrFallbackToXtream { get; set; } = true;
         public bool ForceAudioTranscode { get; set; }
         public bool DeclareDvbSubtitles { get; set; }
+
+        /// <summary>
+        /// Where the video codec declared to Emby for Dispatcharr channels comes from.
+        /// <para>
+        /// <c>auto</c> (default) reads the channel's Dispatcharr stream profile and declares
+        /// what that profile emits, falling back to <c>stream_stats.video_codec</c> when the
+        /// profile passes video through or cannot be read. This is the fix for issue #66:
+        /// <c>stream_stats.video_codec</c> is the codec Dispatcharr <em>ingested</em>, so on a
+        /// transcoding profile (HEVC source, H.264 output) declaring it makes Emby force the
+        /// wrong decoder and the channel fails to play.
+        /// </para>
+        /// <para>
+        /// <c>stats</c> always declares the reported codec, the behaviour before #66, and is
+        /// the escape hatch if profile detection ever reads a profile wrongly. <c>h264</c> and
+        /// <c>hevc</c> declare that codec on every Dispatcharr channel, for installs where the
+        /// profile endpoint is unreachable but the output is known.
+        /// </para>
+        /// <para>
+        /// Exposed as <c>Video codec for Dispatcharr channels</c> in the Dispatcharr section of
+        /// the plugin config page. An empty value (config XML written before this setting
+        /// existed) is read as <c>auto</c>.
+        /// </para>
+        /// </summary>
+        public string DispatcharrVideoCodecSource { get; set; } = "auto";
         public int[] SelectedDispatcharrProfileIds { get; set; } = new int[0];
         public string CachedDispatcharrProfiles { get; set; } = string.Empty;
 

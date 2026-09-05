@@ -19,6 +19,12 @@ namespace Emby.Xtream.Plugin.Client.Models
 
         [JsonPropertyName("stream_stats")]
         public StreamStatsInfo StreamStats { get; set; }
+
+        // A stream can override the channel's profile; Dispatcharr resolves the stream's own
+        // value first. Null means "fall back to the channel, then to the server default".
+        [JsonPropertyName("stream_profile_id")]
+        [JsonConverter(typeof(TolerantNullableIntConverter))]
+        public int? StreamProfileId { get; set; }
     }
 
     /// <summary>
@@ -50,6 +56,22 @@ namespace Emby.Xtream.Plugin.Client.Models
 
         [JsonPropertyName("streams")]
         public List<DispatcharrChannel> Streams { get; set; } = new List<DispatcharrChannel>();
+
+        // Which stream profile decides what leaves the proxy for this channel. Dispatcharr
+        // resolves an override before the channel's own value, and exposes the result as
+        // effective_stream_profile_id on newer serializers; older ones only carry
+        // stream_profile_id. Prefer the effective value where present, fall back to the
+        // plain one, and treat both being absent as "use the server default profile".
+        [JsonPropertyName("stream_profile_id")]
+        [JsonConverter(typeof(TolerantNullableIntConverter))]
+        public int? StreamProfileId { get; set; }
+
+        [JsonPropertyName("effective_stream_profile_id")]
+        [JsonConverter(typeof(TolerantNullableIntConverter))]
+        public int? EffectiveStreamProfileId { get; set; }
+
+        /// <summary>Profile that actually governs this channel, or null to use the server default.</summary>
+        public int? ResolvedStreamProfileId => EffectiveStreamProfileId ?? StreamProfileId;
     }
 
     /// <summary>
