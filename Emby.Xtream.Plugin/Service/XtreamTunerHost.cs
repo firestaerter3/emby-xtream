@@ -1551,9 +1551,8 @@ namespace Emby.Xtream.Plugin.Service
                         }
                     }
 
-                    var videoCodec = ShouldDeclareVideoCodec(hasVideoCodecFromStats, useStatsCodec)
-                        ? MapVideoCodec(stats.VideoCodec)
-                        : null;
+                    var declareVideoCodec = ShouldDeclareVideoCodec(hasVideoCodecFromStats, useStatsCodec);
+                    var videoCodec = declareVideoCodec ? MapVideoCodec(stats.VideoCodec) : null;
 
                     var videoStream = new MediaStream
                     {
@@ -1573,14 +1572,24 @@ namespace Emby.Xtream.Plugin.Service
                         videoStream.AverageFrameRate = (float)stats.SourceFps.Value;
                     }
                     if (stats.Bitrate.HasValue) videoStream.BitRate = (int)(stats.Bitrate.Value * 1000);
-                    if (!string.IsNullOrEmpty(stats.VideoProfile))
-                        videoStream.Profile = stats.VideoProfile;
-                    if (stats.VideoLevel.HasValue)
-                        videoStream.Level = (double)stats.VideoLevel.Value;
-                    if (stats.VideoBitDepth.HasValue)
-                        videoStream.BitDepth = stats.VideoBitDepth.Value;
-                    if (stats.VideoRefFrames.HasValue)
-                        videoStream.RefFrames = stats.VideoRefFrames.Value;
+
+                    // Profile, level, bit depth and reference frames describe the codec Dispatcharr
+                    // ingested, so they are only as trustworthy as the codec itself. When the stream
+                    // profile transcodes (issue #66) they describe the source, not the bytes Emby
+                    // receives: a level number means something different in HEVC than in H.264, and
+                    // bit depth and reference frames need not survive a re-encode. Resolution, FPS
+                    // and ffmpeg_output_bitrate describe the output and stay honoured either way.
+                    if (declareVideoCodec)
+                    {
+                        if (!string.IsNullOrEmpty(stats.VideoProfile))
+                            videoStream.Profile = stats.VideoProfile;
+                        if (stats.VideoLevel.HasValue)
+                            videoStream.Level = (double)stats.VideoLevel.Value;
+                        if (stats.VideoBitDepth.HasValue)
+                            videoStream.BitDepth = stats.VideoBitDepth.Value;
+                        if (stats.VideoRefFrames.HasValue)
+                            videoStream.RefFrames = stats.VideoRefFrames.Value;
+                    }
 
                     mediaStreams.Add(videoStream);
                 }

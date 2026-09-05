@@ -194,6 +194,10 @@ namespace Emby.Xtream.Plugin.Tests
             //   - audio MediaStream.Codec = "aac" (audio stays honoured regardless of opt-out)
             //   - video MediaStream.Width/Height retained (resolution stays honoured)
             //   - video MediaStream.BitRate retained (bitrate stays honoured)
+            //   - video MediaStream.Profile/Level/BitDepth/RefFrames omitted: these describe
+            //     the ingested codec, so they are no more trustworthy than the codec itself
+            //     once the stream profile transcodes (a level number means something
+            //     different in HEVC than in H.264)
             //
             // The hand-walk version above (Issue66_EndToEnd_*) covers the helpers; this
             // version pins the assembled MediaSourceInfo so future refactors of the factory
@@ -211,6 +215,8 @@ namespace Emby.Xtream.Plugin.Tests
                 SampleRate = 48000,
                 VideoProfile = "Main",
                 VideoLevel = 41,
+                VideoBitDepth = 10,
+                VideoRefFrames = 4,
             };
 
             // Reporter scenario: Dispatcharr proxy URL, user opted out of stats codec.
@@ -256,8 +262,14 @@ namespace Emby.Xtream.Plugin.Tests
             // so a future scope-creep fix that switches to * 1_000_000 is forced to update the
             // assertion alongside.
             Assert.Equal(4_500_000, video.BitRate);
-            Assert.Equal("Main", video.Profile);
-            Assert.Equal(41.0, video.Level);
+
+            // Codec-derived attributes are gated with the codec. Declaring "Main / level 41 /
+            // 10-bit / 4 ref frames" from an HEVC source on an H.264 output is the same bug
+            // class as #66, one field over.
+            Assert.Null(video.Profile);
+            Assert.Null(video.Level);
+            Assert.Null(video.BitDepth);
+            Assert.Null(video.RefFrames);
         }
 
         // -------------------------------------------------------------------------
@@ -313,6 +325,10 @@ namespace Emby.Xtream.Plugin.Tests
                 AudioCodec = "aac",
                 Resolution = "1920x1080",
                 Bitrate = 4500,
+                VideoProfile = "Main",
+                VideoLevel = 41,
+                VideoBitDepth = 10,
+                VideoRefFrames = 4,
             };
 
             var source = XtreamTunerHost.CreateMediaSourceInfo(
@@ -340,6 +356,13 @@ namespace Emby.Xtream.Plugin.Tests
 
             // Audio codec honoured.
             Assert.Equal("aac", audio.Codec);
+
+            // The other side of the codec-derived gate: with the codec trusted, profile,
+            // level, bit depth and reference frames are declared alongside it.
+            Assert.Equal("Main", video.Profile);
+            Assert.Equal(41.0, video.Level);
+            Assert.Equal(10, video.BitDepth);
+            Assert.Equal(4, video.RefFrames);
         }
     }
 }

@@ -82,7 +82,7 @@ Audio-only detection is preserved unchanged: `isAudioOnly` still reads `stats.Au
 ## Consequences
 
 - **Existing installs**: no behavior change. `DispatcharrUseStatsCodec = true` is the default and reproduces the legacy trust-stats-codec path verbatim.
-- **Affected users** (Dispatcharr stream profile transcoding): a single checkbox in Plugin Config. The codec field is left unset on the `MediaStream`; Emby picks whatever decoder the actual bytes need. Display title shows resolution only (`"1080p"`) instead of resolution + codec.
+- **Affected users** (Dispatcharr stream profile transcoding): a single checkbox, *Plugin Config → Dispatcharr → Declare Dispatcharr's reported video codec*, on by default. Unticking it leaves the codec field unset on the `MediaStream`; Emby picks whatever decoder the actual bytes need. Display title shows resolution only (`"1080p"`) instead of resolution + codec.
 - **API surface**: `PluginConfiguration.DispatcharrUseStatsCodec` (new field, defaults to `true` — existing config XML files deserialize unchanged).
 - **Tests**: `XtreamTunerHostTests.cs` pins both helpers and `BuildVideoDisplayTitle` (4-row Theory for ShouldSuppressProbing, 4-row Theory for ShouldDeclareVideoCodec, 5-row Theory for BuildVideoDisplayTitle, plus Facts covering the reporter's exact bug inputs end-to-end). All green.
 - **AGENTS.md alignment**: the fix lives entirely within the "don't probe, don't falsely declare" envelope. The absolute no-probe rule for `/proxy/ts/stream/{uuid}` URLs is unchanged.
@@ -90,12 +90,16 @@ Audio-only detection is preserved unchanged: `isAudioOnly` still reads `stats.Au
 
 ## Code Citations
 
-- Bug confirmed: `XtreamTunerHost.cs:1529-1531` (codec declaration from `stats.VideoCodec`).
-- Original probe-disable: `XtreamTunerHost.cs:1479` (`suppressProbing = disableProbing || hasStats`).
-- Fix (new helpers + escape route): `XtreamTunerHost.cs:1451-1469` (audio detection + hasVideoCodecFromStats + HasStats gating), `XtreamTunerHost.cs:1536-1551` (codec declaration + display title).
-- Static helpers for regression testing: `XtreamTunerHost.cs:1790-1862` (`ShouldSuppressProbing`, `HasStats`, `ShouldDeclareVideoCodec`, `BuildVideoDisplayTitle`).
-- Config: `PluginConfiguration.cs:51-68` (new `DispatcharrUseStatsCodec` field).
-- Tests: `Emby.Xtream.Plugin.Tests/XtreamTunerHostTests.cs` (regression rows for the helpers plus end-to-end hand-walk).
+Cited by symbol rather than line number: this ADR has already been through one
+commit whose only purpose was re-syncing line references, and they went stale
+again three commits later.
+
+- Bug and fix both live in `XtreamTunerHost.CreateMediaSourceInfo`, in the `if (hasStats)` branch that builds the video `MediaStream`.
+- Probe suppression: `XtreamTunerHost.ShouldSuppressProbing` (`disableProbing || hasStats`), unchanged by this ADR.
+- Decision helpers: `ShouldSuppressProbing`, `HasStats`, `ShouldDeclareVideoCodec`, `ShouldUseStatsCodec`, `BuildVideoDisplayTitle`.
+- Config: `PluginConfiguration.DispatcharrUseStatsCodec`.
+- UI: `Configuration/Web/config.html` (`chkDispatcharrUseStatsCodec`, in the Dispatcharr section) and the matching read/write pair in `config.js`.
+- Tests: `Emby.Xtream.Plugin.Tests/XtreamTunerHostTests.cs` (helper truth tables, factory output for the opt-out and for the direct-Xtream fallback).
 
 ## Follow-up: `hasStats` gate was over-coupled to codec trust
 
@@ -123,3 +127,51 @@ The fix: replace the `hasVideoCodecFromStats || isAudioOnly` expression with `st
 `XtreamTunerHostTests.Issue66_HasStats_TracksStatsPresenceNotVideoCodec_Gate` pins this table. With the helper in place, the original ADR claim ("Audio codec, resolution, FPS, bitrate, profile, and level keep flowing from stats regardless of the toggle") is now actually true.
 
 The discovery was a useful reminder: the original `hasStats = hasVideoCodecFromStats || isAudioOnly` looked symmetric and tidy, but it conflated "stats are present" with "the codec field on the stats is trustworthy". Once the codec gate split off into `ShouldDeclareVideoCodec`, the only thing left to check was stats presence.
+
+## Follow-up: codec-derived attributes follow the codec
+
+**Date**: 2026-09-05
+
+The first cut gated the codec but kept declaring `Profile`, `Level`, `BitDepth` and
+`RefFrames` from the same `stream_stats` object. Those four describe the codec
+Dispatcharr ingested, so they are worth exactly as much as the codec field is: a level
+number means something different in HEVC than in H.264, and neither bit depth nor
+reference-frame count needs to survive a re-encode. Declaring `Main / level 41 / 10-bit`
+from an HEVC source on an H.264 output is the same bug class as #66, one field over.
+
+They now sit behind the same `ShouldDeclareVideoCodec` gate as the codec itself. What
+stays honoured on the opt-out path is what genuinely describes the output: resolution,
+frame rate, `ffmpeg_output_bitrate` (output-side, per its own name) and everything on
+the audio stream. Both sides of the gate are pinned in
+`XtreamTunerHostTests.CreateMediaSourceInfo_DispatcharrOptOut_*` (omitted) and
+`CreateMediaSourceInfo_DirectXtreamFallback_*` (declared).
+
+## Open verification: an unset codec on the recording path
+
+**Status**: not yet verified on a real server.
+
+The chosen alternative rests on one claim: that Emby, handed a video `MediaStream` with
+no codec, works the decoder out from the bytes. That is asserted in this ADR without a
+source, and the no-stats fallback branch in the same method carries a comment claiming
+the opposite:
+
+> Codec must be non-null: Emby's `RecordingRequiresEncoding` accesses it directly and
+> throws `NullReferenceException` when it is null.
+
+That comment arrived with commit `75a616a`, whose message attributes the crash it fixed
+to a null `liveStream` rather than a null codec, and whose only codec-related change was
+on the audio side. So the comment may be a conclusion drawn too broadly from that
+debugging session, or an accurate separate observation. The test suite cannot settle it:
+every test here asserts either a boolean truth table or the shape of the returned
+`MediaSourceInfo`, and none of them has Emby consume that object.
+
+What settles it is one opted-out channel played *and* recorded on a real server.
+`RecordingRequiresEncoding` sits on the timer path, not the playback path, so playback
+succeeding proves nothing about recording. If the crash is real, alternative 4 is dead
+and the route is the one the reporter proposed in the PR thread: read the channel's
+stream profile command string through the connector the plugin already authenticates to
+and map `-c:v h264_nvenc`/`libx264` → `h264`, `hevc_nvenc`/`libx265` → `hevc`, `copy` →
+stats as today. That declares a correct non-null codec, keeps the display title, needs
+no probe, and makes this question moot. Alternative 1 above rejects a weaker version of
+that idea (a user-maintained profile-ID → codec map) for reasons that do not apply to
+parsing a string the plugin can already read.

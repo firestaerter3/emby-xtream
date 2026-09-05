@@ -63,8 +63,12 @@ namespace Emby.Xtream.Plugin
         /// channel plays. Probing stays disabled for Dispatcharr proxy URLs (see
         /// <c>docs/AGENTS.md</c>). Trade-off: the player UI shows resolution only
         /// (e.g. "1080p") instead of resolution + codec (e.g. "1080p H264") for the
-        /// affected channels. Resolution, FPS, bitrate, profile, level, and audio
-        /// codec keep flowing from <c>stream_stats</c> regardless of this flag.
+        /// affected channels, and the codec-derived attributes go with it (profile,
+        /// level, bit depth, reference frames) since they describe the ingested codec.
+        /// Resolution, FPS, bitrate, and everything on the audio stream keep flowing
+        /// from <c>stream_stats</c> regardless of this flag.
+        /// Exposed as <c>Declare Dispatcharr's reported video codec</c> in the
+        /// Dispatcharr section of the plugin config page.
         /// </summary>
         public bool DispatcharrUseStatsCodec { get; set; } = true;
         public int[] SelectedDispatcharrProfileIds { get; set; } = new int[0];
