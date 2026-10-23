@@ -114,10 +114,7 @@ namespace Emby.Xtream.Plugin.Service
 
         private static void ApplyUserAgentToSharedClient()
         {
-            var ua = Plugin.InstanceOrNull?.Configuration?.HttpUserAgent;
-            SharedHttpClient.DefaultRequestHeaders.Remove("User-Agent");
-            if (!string.IsNullOrEmpty(ua))
-                SharedHttpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", ua);
+            XtreamUserAgent.Apply(SharedHttpClient, Plugin.InstanceOrNull?.Configuration?.HttpUserAgent);
         }
 
         private readonly ILogger _logger;
