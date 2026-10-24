@@ -48,15 +48,15 @@ namespace Emby.Xtream.Plugin
         public new IApplicationPaths ApplicationPaths => _applicationPaths;
 
         /// <summary>
-        /// Creates an HttpClient configured with the plugin's User-Agent setting.
+        /// Creates an HttpClient configured with the plugin's User-Agent setting. A request with no
+        /// User-Agent at all can be answered with a 404 by a panel that serves curl fine (#104), so
+        /// the default applies when the user configured nothing.
         /// </summary>
         public static HttpClient CreateHttpClient(int timeoutSeconds = 10)
         {
             var handler = Service.XtreamRateLimitHandler.CreateDefault();
             var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
-            var ua = _instance?.Configuration?.HttpUserAgent;
-            if (!string.IsNullOrEmpty(ua))
-                client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", ua);
+            Service.XtreamUserAgent.Apply(client, _instance?.Configuration?.HttpUserAgent);
             return client;
         }
 
