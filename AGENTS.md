@@ -216,6 +216,14 @@ Unrelated fixes should live on separate short-lived branches (e.g. `fix/audio-co
 
 The git status shown at conversation start reflects the state of the working tree. A modified file there means something is already in flight — address it before starting new work.
 
+### The README changes in the same PR as the setting
+
+A PR that adds, renames or removes a user-facing setting, changes a default, or changes what a
+button does, updates `README.md` in the same PR. The README is what new users read first, and
+it drifted when this was left for later: by v1.4.112 it listed a folder mode that no longer
+existed, the wrong default for orphan cleanup and the wrong .NET SDK. Describe settings by the
+label the config page shows, and keep defaults out of the README unless a user has to know them.
+
 ### Release notes must credit bug reporters
 
 When editing or creating GitHub release notes, each bug fix entry should include the reporter in brackets:

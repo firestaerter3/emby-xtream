@@ -5,109 +5,164 @@
 <h1 align="center">Xtream Tuner</h1>
 
 <p align="center">
-  An Emby Server plugin that turns any Xtream-compatible IPTV service into a full Live TV, Movies, and Series library — with EPG, metadata matching, and a built-in dashboard.
+  An Emby Server plugin that turns an Xtream-compatible IPTV service into Live TV with a guide, plus Movies and Series libraries.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Emby-4.8%2B-52B54B?style=flat-square&logo=emby" alt="Emby 4.8+" />
-  <img src="https://img.shields.io/badge/.NET-Standard%202.0-512BD4?style=flat-square" alt=".NET Standard 2.0" />
+  <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/firestaerter3/emby-xtream?style=flat-square&label=release" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/Emby-4.9%20%7C%204.10-52B54B?style=flat-square&logo=emby" alt="Emby 4.9 and 4.10" />
   <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License" />
 </p>
 
 ---
 
-## Features
+## What it does
 
-### Live TV & EPG
+- **Live TV**: your provider's channels in Emby's TV guide, with recordings.
+- **Movies and Series**: the provider's catalogue as `.strm` files, so Emby builds normal Movie and TV Show libraries with its own metadata and artwork.
+- **Dispatcharr** (optional): play through [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) to manage streams and connections.
+- **Dashboard**: sync status, history and library counts inside the plugin settings.
 
-Full Live TV integration with Emby's native TV guide.
+## Requirements
 
-- **M3U playlist generation** with channel metadata, logos, and EPG channel IDs
-- **XMLTV electronic program guide** with configurable fetch window (1-14 days)
-- **Category-based filtering** — select which channel groups to include
-- **Stream format selection** — MPEG-TS or HLS (M3U8)
-- **Adult content filtering** — opt-in toggle for adult-flagged channels
-- **DVB subtitle declaration** — optional toggle that surfaces DVB subtitle tracks for live TV without re-enabling stream probing (see [ADR-009](docs/decisions/009-dvb-subtitle-static-declaration.md))
-- **Automatic caching** — M3U (15 min) and EPG (30 min) with thread-safe invalidation
-
-### VOD Movie Library
-
-Sync on-demand movies as STRM files that Emby treats as a native movie library.
-
-- **STRM file generation** — one file per movie, Emby handles metadata and artwork
-- **Folder organization modes:**
-  - **Single folder** — all movies in one `Movies/` directory
-  - **Multiple folders** — auto-organized by provider category name
-  - **Custom mapping** — define your own folders and assign categories to each
-- **TMDB metadata matching** — appends `[tmdbid=123]` to folder names for instant Emby identification
-- **TMDB fallback lookup** — queries Emby's metadata providers when the Xtream source lacks a TMDB ID
-- **Category selection** — pick specific VOD categories to sync, or sync all
-- **Per-title selection** — expand any category (Single Folder mode) to tick individual movies. Unticked titles stop syncing and their folder is removed on the next sync, whether or not orphan cleanup is on
-- **Danger zone** — one-click delete of all synced movie content
-
-### TV Series Library
-
-Full series support with proper season/episode structure.
-
-- **Season/Episode STRM files** — `Show Name/Season 01/Show Name - S01E01 - Episode Title.strm`
-- **Series detail fetching** — pulls episode lists per series from the Xtream API
-- **TVDb / TMDB ID folder naming** — `Show Name [tvdbid=81189]` for reliable metadata matching
-- **Manual ID overrides** — force a specific TVDb ID for shows that don't auto-match
-- **Metadata fallback lookup** — searches Emby's providers when no ID is available
-- **Same folder modes as movies** — single, multiple, or custom category mapping
-- **Per-title selection** — same as movies, at whole-series granularity rather than per-episode
-
-### Smart Sync Engine
-
-Efficient sync that doesn't re-download what you already have.
-
-- **Smart skip** — skips writing STRM files that already exist on disk
-- **Configurable parallelism** — 1-10 concurrent operations (default 3)
-- **Orphan cleanup** — automatically removes STRM files for content no longer in the source
-- **Cross-listing deduplication** — movies/series appearing in multiple categories are synced once
-- **Content name cleaning** — strips provider prefix tags (e.g. `|UK|`, `|FR|`) and custom terms from titles
-- **Real-time progress** — Phase, Total, Completed, Skipped, Failed counters polled every 500ms
-
-### Dispatcharr Integration
-
-Optional integration with [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) for IPTV stream management.
-
-- **Stream proxy routing** — routes Live TV through Dispatcharr's proxy for connection management
-- **Pre-populated media info** — fetches codec, resolution, and bitrate from Dispatcharr's stream stats (requires [Streamflow](https://github.com/krinkuto11/streamflow) configured in Dispatcharr to generate per-channel metadata)
-- **FFprobe bypass** — skips Emby's stream analysis when stats are available (faster channel switching)
-- **JWT authentication** — automatic token refresh with retry and exponential backoff
-- **Graceful fallback** — reverts to direct Xtream URLs if Dispatcharr is unavailable
-
-### Built-in Dashboard
-
-A configuration UI embedded in Emby's plugin settings with six tabs. Settings most people never
-need to change sit in a collapsed **Advanced** block at the bottom of each tab.
-
-- **Dashboard** — last sync status, sync history (last 10), library stats, live progress bar, the auto-sync schedule
-- **Connection** — Xtream server, Dispatcharr, beta updates
-- **Library** — library folder, auto-sync schedule, folder names, what happens after a sync
-- **Movies** — enable/disable, folder mode, category selection with search, sync button
-- **Series** — same layout as movies with series-specific options
-- **Live TV** — channels, guide, playback, Dispatcharr playback options
+- Emby Server **4.9 or 4.10**. One DLL works on both.
+- An Xtream Codes compatible IPTV account (server URL, username, password).
+- Optional: Emby Premiere, if you want Emby's own guide data instead of the provider's.
 
 ---
 
 ## Installation
 
-### Step 1: Download the Plugin
+### 1. Install the plugin
 
-Download `Emby.Xtream.Plugin.dll` from the [latest release](../../releases/latest). From
-v1.4.98 the same file works on Emby Server 4.9 and 4.10.
+Download `Emby.Xtream.Plugin.dll` from the [latest release](../../releases/latest), copy it to Emby's `plugins` folder and restart Emby.
 
-> Only the single DLL file is needed — no other dependencies.
+```bash
+# Docker
+docker cp Emby.Xtream.Plugin.dll emby:/config/plugins/
+docker restart emby
 
-> Releases also carry `Emby.Xtream.Plugin-4.10.dll`. It is the same file under the name older
-> 4.10 installs expect, so either one is fine.
+# Linux
+cp Emby.Xtream.Plugin.dll /var/lib/emby/plugins/
+systemctl restart emby-server
+```
 
-<details>
-<summary><strong>Build from source (alternative)</strong></summary>
+On macOS and Windows, copy the DLL to `plugins/` in your Emby data folder and restart Emby Server.
 
-Requires .NET SDK 6.0+:
+> Releases also contain `Emby.Xtream.Plugin-4.10.dll`. It is the same file under the name older 4.10 installs look for, so either one works.
+
+### 2. Connect to your provider
+
+1. Open **Settings → Plugins → Xtream Tuner**.
+2. On the **Connection** tab, enter the server URL (for example `http://your-provider:port`), username and password.
+3. Click **Test Connection**, then **Save**.
+4. On the **Library** tab, check the **Library Folder** (default `/config/xtream`) and turn on **Auto-Sync** if you want syncs on a schedule.
+
+### 3. Live TV
+
+1. On the **Live TV** tab, click **Refresh Categories** and pick the channel groups you want.
+2. Choose a **Guide Source**: the Xtream server (default), a custom XMLTV URL, or none. With Emby Premiere you can tick **Use Emby Guide Data (Emby Premiere only)** instead.
+3. Click **Save**.
+4. In **Emby Settings → Live TV**, add a tuner of type **Xtream Tuner**. Its channels come straight from the plugin.
+
+### 4. Movies and Series (optional)
+
+1. On the **Movies** tab, tick **Enable Movies** and click **Refresh Categories**.
+2. Pick a folder layout:
+   - **Single Folder**: every movie in `Movies/`. You can also untick individual titles.
+   - **Multiple Folders**: make your own folders and assign categories to each.
+3. Click **Sync Movies Now**.
+4. In Emby, add a **Movies** library on `/config/xtream/Movies`.
+
+Series work the same way on the **Series** tab. The library path is `/config/xtream/Shows`.
+
+### 5. Dispatcharr (optional)
+
+1. On the **Connection** tab, tick **Enable Dispatcharr** and enter its URL, username and password.
+2. Click **Test Dispatcharr Connection**, then **Save**.
+3. Playback options for Dispatcharr channels are on the **Live TV** tab under **Dispatcharr Playback**.
+
+### Updating
+
+When a new version is out, the plugin settings show an update banner. Click **Update Now**, then **Restart Emby**. Your settings are kept. To get test versions early, turn on **Beta Channel** under **Connection → Updates**.
+
+---
+
+## Features
+
+### Live TV
+
+- Channel groups to include, with an opt-in for adult channels.
+- MPEG-TS or HLS streams.
+- Guide from the Xtream server, a custom XMLTV URL, or Emby's guide data (Premiere), 1 to 14 days ahead.
+- Recordings keep retrying until the stream is live, and reconnect if it drops mid-recording. An event recording that starts before the broadcast does not end up empty.
+- Optional DVB subtitles, and an option that converts AC3/EAC3 audio to AAC for iPhone and iPad (which otherwise play those channels without sound).
+
+### Movies and Series
+
+- `.strm` files Emby treats as normal libraries. Series follow `Show/Season 01/Show - S01E01 - Title.strm`.
+- Optional metadata IDs in folder names (`[tmdbid=…]`, `[tvdbid=…]`), so Emby matches titles right away. Missing IDs can be looked up through Emby's metadata providers. TVDb IDs can be set by hand for shows that do not match.
+- Optional `.nfo` files.
+- Name clean-up removes provider tags such as `|UK|`, plus your own terms.
+- Untick single movies or series to stop syncing them. Their files are removed on the next sync.
+
+### Sync
+
+- Only new or changed titles are written, so later syncs are quick.
+- Titles the provider no longer has are removed (on by default). Once there are more than 10 files, a **Removal Safety Limit** (default 20%) stops a sync from deleting more than that share at once, for example when the provider returns half a catalogue. If a category fails to load, or the provider returns nothing at all, nothing is removed.
+- Only files the plugin wrote itself are deleted. Your own files in the same folder stay.
+- Runs on a schedule (every N hours or daily at a set time) or by hand.
+- **Retry Failed Items** on the Dashboard retries the titles that failed in the last sync.
+
+### Dispatcharr
+
+- Live TV plays through Dispatcharr's proxy. If Dispatcharr does not know a channel, it can fall back to the Xtream server.
+- **Stream URL → Xtream server** plays channels through Dispatcharr's Xtream URL instead, so Dispatcharr shows which user is watching.
+- Codec, resolution and bitrate come from Dispatcharr's stream stats (for example filled by [Streamflow](https://github.com/krinkuto11/streamflow)), so channels start without a probe. The video codec follows the channel's stream profile, and can be overridden.
+- Movies that Dispatcharr has from more than one provider get one version per provider.
+
+### Dashboard and settings
+
+- Last sync, history of the last 10 syncs, library counts and live progress.
+- **Download Sanitized Log**: the plugin log with passwords, tokens, IP addresses, email addresses and the provider's hostname removed, ready to attach to a bug report.
+- Only Emby administrators can open or change the plugin settings.
+
+---
+
+## Troubleshooting
+
+**"Cannot connect to Xtream server", while the same account works in a player app**
+Some providers refuse requests without a familiar User-Agent. Set one under **Connection → Advanced → User-Agent**, for example `VLC/3.0.21 LibVLC/3.0.21`, and click **Test Connection** again.
+
+**Timeshift (pause, rewind) does not work on Apple TV, iOS or Android**
+Those apps play the stream directly, which skips the buffer Emby needs for timeshift. Turn on **Playback correction** in the app's settings. This is an Emby limitation that applies to every tuner type.
+
+**The guide grid is empty even though channels are there**
+The browser has an old guide filter stored. Click the filter icon in the guide and clear it, or run `localStorage.removeItem('guide-tagids')` in the browser console.
+
+**After upgrading Emby to 4.10 the plugin does not load (`Method 'AddConsumer' ... does not have an implementation`)**
+Plugin v1.4.97 and older do not load on 4.10, so the update banner is not shown. Download `Emby.Xtream.Plugin.dll` from the [latest release](../../releases/latest) by hand once. Updates work normally after that.
+
+**Reporting a bug**
+Open an [issue](../../issues/new/choose), say which plugin and Emby versions you run, and attach the log from **Dashboard → Download Sanitized Log**.
+
+---
+
+## Security note: credentials in `.strm` files
+
+The Xtream protocol puts your username and password in every stream URL; there is no token form. So your credentials are stored in plain text in the `.strm` files under the Library Folder, and in the M3U playlist the plugin serves. Anything that can read those files (other containers on the same volume, backup tools, users with shell access) can read the credentials.
+
+To limit this:
+
+- **Use Dispatcharr.** Live TV and movies that Dispatcharr has from more than one provider then use Dispatcharr's proxy URLs, which contain no credentials. Other movies and series episodes still use the Xtream URL, and so does Live TV when **Stream URL** is set to the Xtream server.
+- **Restrict access** to the Library Folder, and do not mount it into unrelated containers.
+- **Use a separate provider account** for Emby, if your provider allows it, so you can change it on its own.
+
+---
+
+## Building from source
+
+Requires the .NET 10 SDK (the plugin targets .NET Standard 2.0; the build also runs the tests).
 
 ```bash
 git clone https://github.com/firestaerter3/emby-xtream.git
@@ -115,133 +170,7 @@ cd emby-xtream/Emby.Xtream.Plugin
 bash build.sh
 ```
 
-The compiled DLL will be at `Emby.Xtream.Plugin/out/Emby.Xtream.Plugin.dll`.
-
-</details>
-
-### Step 2: Install the Plugin
-
-Copy the DLL to your Emby Server's plugins directory and restart.
-
-**Docker (most common):**
-```bash
-docker cp Emby.Xtream.Plugin.dll emby:/config/plugins/
-docker restart emby
-```
-
-**Bare metal (Linux):**
-```bash
-cp Emby.Xtream.Plugin.dll /var/lib/emby/plugins/
-systemctl restart emby-server
-```
-
-**Bare metal (macOS/Windows):**
-Copy `Emby.Xtream.Plugin.dll` to your Emby data directory under `plugins/`, then restart Emby Server.
-
-### Step 3: Configure the Plugin
-
-1. Open Emby's web UI
-2. Go to **Settings > Plugins > Xtream Tuner**
-3. Enter your Xtream server details:
-   - **Server URL** — e.g. `http://your-provider:port`
-   - **Username** and **Password**
-4. Click **Test Connection** to verify
-5. Click **Save**
-6. On the **Library** tab, check the **Library Folder** (default `/config/xtream`) and set an **Auto-Sync Schedule** if you want one
-
-### Step 4: Set Up Live TV
-
-1. Switch to the **Live TV** tab
-2. Choose your **Stream Format** (MPEG-TS recommended)
-3. Click **Refresh Categories** to load channel groups
-4. Select the categories you want
-5. Pick a **Guide Source** (guide days and cache times are under **Advanced**)
-6. Click **Save**
-7. Go to **Emby Settings > Live TV** and add a new tuner:
-   - Type: **Xtream Tuner**
-   - It will auto-discover the plugin's M3U and EPG endpoints
-
-### Step 5: Set Up Movies (Optional)
-
-1. Switch to the **Movies** tab
-2. Check **Enable Movies**
-3. Click **Refresh Categories** to load movie categories
-4. Choose a **Folder Organization** mode:
-   - **Single Folder** — select categories, all movies go to `Movies/`
-   - **Multiple Folders** — one folder per category, auto-named
-   - **Custom** — click "Add Folder", name it, assign categories
-5. Click **Sync Movies Now**
-6. In Emby, add a new **Movies** library pointing to the STRM output path (default: `/config/xtream/Movies`)
-
-### Step 6: Set Up Series (Optional)
-
-1. Switch to the **Series** tab
-2. Check **Enable Series / TV Shows**
-3. Same workflow as Movies — refresh categories, select, choose folder mode
-4. Click **Sync Series Now**
-5. In Emby, add a new **TV Shows** library pointing to `/config/xtream/Shows`
-
-### Step 7: Dispatcharr Integration (Optional)
-
-If you use [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) for stream management:
-
-1. Go to the **Connection** tab > **Dispatcharr** section
-2. Check **Enable Dispatcharr**
-3. Enter Dispatcharr URL, username, and password
-4. Click **Test Dispatcharr Connection** to verify
-5. Save — Live TV streams will now route through Dispatcharr's proxy
-6. Playback options for Dispatcharr channels (stream URL, video codec) are on the **Live TV** tab under **Dispatcharr Playback**
-
-> **Note:** The plugin uses Dispatcharr's per-channel stream stats (codec, resolution) when they exist, for example when [Streamflow](https://github.com/krinkuto11/streamflow) fills them in. Channels without stats play with standard stream handling.
-
-### Updating the Plugin
-
-Download the latest DLL from [Releases](../../releases/latest), replace the file in your plugins directory, and restart Emby. Your configuration is preserved across updates.
-
-If Emby Server moved to 4.10 while you were on plugin v1.4.97 or older, the plugin stops loading
-with `Method 'AddConsumer' ... does not have an implementation`, so its own update button is not
-available. Download `Emby.Xtream.Plugin.dll` from the latest release by hand once. After that,
-updates work on both versions.
-
----
-
-## Configuration Reference
-
-| Setting | Default | Description |
-|---|---|---|
-| **Stream Format** | MPEG-TS | Live TV container format (`ts` or `m3u8`) |
-| **Enable DVB Subtitles** | Off | Declare DVB subtitle tracks on every live channel so they appear without stream probing (non-DVB sources will show empty subtitle options) |
-| **EPG Cache** | 30 min | How long to cache EPG data (5-1440 min) |
-| **EPG Days** | 2 | Days of guide data to fetch (1-14) |
-| **M3U Cache** | 15 min | How long to cache channel playlists (1-1440 min) |
-| **STRM Library Path** | `/config/xtream` | Where STRM files are written |
-| **Smart Skip** | On | Skip existing STRM files during sync |
-| **Sync Parallelism** | 3 | Concurrent operations during sync (1-10) |
-| **Cleanup Orphans** | Off | Remove STRM files not in source |
-| **TMDB Folder Naming** | Off | Append `[tmdbid=X]` to movie/series folders |
-| **Fallback Lookup** | Off | Query Emby's metadata providers for missing IDs |
-| **Name Cleaning** | Off | Strip prefix tags and custom terms from titles |
-
----
-
-## Security Note: Credentials in STRM Files and M3U Output
-
-The Xtream Codes protocol requires the username and password to appear directly in every stream URL — there is no token or session form. As a result, your Xtream credentials end up embedded in plaintext in two places:
-
-- The `.strm` files written under your **STRM Library Path** (default `/config/xtream`)
-- The M3U playlist served by the plugin's tuner endpoint
-
-This is a property of the protocol, not a plugin defect — the same is true of any Xtream-based tooling. Anything that can read those files (other containers sharing the volume, backup tools, indexers, users with shell access on the host) can harvest the credentials.
-
-**How to keep credentials off disk:**
-
-- **Use Dispatcharr.** When [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) is enabled, Live TV and multi-provider VOD URLs route through Dispatcharr's credential-free proxy URLs (`/proxy/ts/stream/<uuid>`, `/proxy/vod/movie/<uuid>`) instead of the raw Xtream form. Single-provider VOD movies and series episodes still fall back to the Xtream URL today.
-- **Restrict filesystem permissions.** Make sure the STRM library path is not readable by other users or containers on the host. For Docker, avoid mounting `/config/xtream` into unrelated services.
-- **Use a dedicated provider account.** If your Xtream provider supports multiple credential sets per subscription, use a separate one for Emby so it can be rotated independently.
-
-If credential exposure on disk is unacceptable for your environment, Dispatcharr in front of the plugin is currently the only complete answer. Improving credential-free routing for single-provider VOD and series episodes is tracked as a future enhancement.
-
----
+The DLL ends up in `Emby.Xtream.Plugin/out/`. Design decisions are in [`docs/decisions`](docs/decisions).
 
 ## License
 
