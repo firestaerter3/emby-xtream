@@ -61,7 +61,7 @@ On macOS and Windows, copy the DLL to `plugins/` in your Emby data folder and re
 ### 3. Live TV
 
 1. On the **Live TV** tab, click **Refresh Categories** and pick the channel groups you want.
-2. Choose a **Guide Source**: the Xtream server (default), a custom XMLTV URL, or none. With Emby Premiere you can tick **Use Emby Guide Data** instead.
+2. Choose a **Guide Source**: the Xtream server (default), a custom XMLTV URL, or none. With Emby Premiere you can tick **Use Emby Guide Data (Emby Premiere only)** instead.
 3. Click **Save**.
 4. In **Emby Settings → Live TV**, add a tuner of type **Xtream Tuner**. Its channels come straight from the plugin.
 
@@ -109,7 +109,7 @@ When a new version is out, the plugin settings show an update banner. Click **Up
 ### Sync
 
 - Only new or changed titles are written, so later syncs are quick.
-- Titles the provider no longer has are removed (on by default). A **Removal Safety Limit** (default 20%) stops a sync from deleting more than that share at once, for example when the provider returns half a catalogue. If a category fails to load, nothing is removed.
+- Titles the provider no longer has are removed (on by default). Once there are more than 10 files, a **Removal Safety Limit** (default 20%) stops a sync from deleting more than that share at once, for example when the provider returns half a catalogue. If a category fails to load, or the provider returns nothing at all, nothing is removed.
 - Only files the plugin wrote itself are deleted. Your own files in the same folder stay.
 - Runs on a schedule (every N hours or daily at a set time) or by hand.
 - **Retry Failed Items** on the Dashboard retries the titles that failed in the last sync.
@@ -154,7 +154,7 @@ The Xtream protocol puts your username and password in every stream URL; there i
 
 To limit this:
 
-- **Use Dispatcharr.** Live TV, and movies Dispatcharr has from more than one provider, then use Dispatcharr's proxy URLs, which contain no credentials. Other movies and series episodes still use the Xtream URL.
+- **Use Dispatcharr.** Live TV and movies that Dispatcharr has from more than one provider then use Dispatcharr's proxy URLs, which contain no credentials. Other movies and series episodes still use the Xtream URL, and so does Live TV when **Stream URL** is set to the Xtream server.
 - **Restrict access** to the Library Folder, and do not mount it into unrelated containers.
 - **Use a separate provider account** for Emby, if your provider allows it, so you can change it on its own.
 
