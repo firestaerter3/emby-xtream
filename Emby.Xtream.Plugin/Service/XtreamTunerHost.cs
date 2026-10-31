@@ -1386,8 +1386,11 @@ namespace Emby.Xtream.Plugin.Service
                         result.XtreamEndpointIgnored = true;
                     }
 
+                    // output_format=mpegts: Dispatcharr 0.33+ can default a client to HLS, which
+                    // answers with a playlist redirect instead of a stream. The plugin reads the
+                    // response as MPEG-TS, so ask for that explicitly. Older versions ignore it.
                     result.Url = string.Format(CultureInfo.InvariantCulture,
-                        "{0}/proxy/ts/stream/{1}",
+                        "{0}/proxy/ts/stream/{1}?output_format=mpegts",
                         config.DispatcharrUrl.TrimEnd('/'), uuid);
                     result.Route = StreamRoute.DispatcharrProxy;
                     return result;

@@ -21,7 +21,7 @@ namespace Emby.Xtream.Plugin.Tests
             var r = XtreamTunerHost.ResolveStreamUrl(Config(Dispatcharr), 42, Uuids);
 
             Assert.Equal(XtreamTunerHost.StreamRoute.DispatcharrProxy, r.Route);
-            Assert.Equal(Dispatcharr + "/proxy/ts/stream/uuid-42", r.Url);
+            Assert.Equal(Dispatcharr + "/proxy/ts/stream/uuid-42?output_format=mpegts", r.Url);
         }
 
         [Fact]
@@ -43,7 +43,7 @@ namespace Emby.Xtream.Plugin.Tests
             var r = XtreamTunerHost.ResolveStreamUrl(Config("http://provider.example", "xtream"), 42, Uuids);
 
             Assert.Equal(XtreamTunerHost.StreamRoute.DispatcharrProxy, r.Route);
-            Assert.Equal(Dispatcharr + "/proxy/ts/stream/uuid-42", r.Url);
+            Assert.Equal(Dispatcharr + "/proxy/ts/stream/uuid-42?output_format=mpegts", r.Url);
             Assert.True(r.XtreamEndpointIgnored);
         }
 

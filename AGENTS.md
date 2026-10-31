@@ -78,7 +78,9 @@ whole thing. See [ADR-016](docs/decisions/016-dispatcharr-stats-codec-trust.md).
 `{BaseUrl}/live/{user}/{pass}/{id}.ts` so Dispatcharr shows the right user. It is only used when
 `BaseUrl` is the Dispatcharr server (same scheme, host, port and path); otherwise the proxy URL is kept, so
 the setting never routes around Dispatcharr. It still counts as a Dispatcharr stream: probing off,
-profile codec wins. See [ADR-022](docs/decisions/022-dispatcharr-xtream-stream-url-opt-in.md).
+profile codec wins. The proxy URL carries `?output_format=mpegts`: Dispatcharr 0.33 can default clients to HLS,
+which answers with a playlist redirect that `XtreamLiveStream` would read as TS bytes. The Xtream
+URL gets the same guarantee from its `.ts` extension. See [ADR-022](docs/decisions/022-dispatcharr-xtream-stream-url-opt-in.md).
 
 ### SupportsDirectStream controls whether native clients bypass server-side segmentation
 
