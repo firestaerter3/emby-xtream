@@ -93,7 +93,7 @@ When a new version is out, the plugin settings show an update banner. Click **Up
 ### Live TV
 
 - Channel groups to include, with an opt-in for adult channels.
-- MPEG-TS or HLS streams.
+- MPEG-TS or HLS streams from the Xtream server. Channels through Dispatcharr always play as MPEG-TS, whatever output format Dispatcharr is set to.
 - Guide from the Xtream server, a custom XMLTV URL, or Emby's guide data (Premiere), 1 to 14 days ahead.
 - Recordings keep retrying until the stream is live, and reconnect if it drops mid-recording. An event recording that starts before the broadcast does not end up empty.
 - Optional DVB subtitles, and an option that converts AC3/EAC3 audio to AAC for iPhone and iPad (which otherwise play those channels without sound).
