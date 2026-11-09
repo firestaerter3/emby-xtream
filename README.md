@@ -120,6 +120,7 @@ When a new version is out, the plugin settings show an update banner. Click **Up
 - **Stream URL → Xtream server** plays channels through Dispatcharr's Xtream URL instead, so Dispatcharr shows which user is watching.
 - Codec, resolution and bitrate come from Dispatcharr's stream stats (for example filled by [Streamflow](https://github.com/krinkuto11/streamflow)), so channels start without a probe. The video codec follows the channel's stream profile, and can be overridden.
 - Movies that Dispatcharr has from more than one provider get one version per provider.
+- **Send video as the first track** makes Dispatcharr put video before audio on every channel, so Emby can transcode channels whose source carries audio first. See Troubleshooting.
 
 ### Dashboard and settings
 
@@ -136,6 +137,9 @@ Some providers refuse requests without a familiar User-Agent. Set one under **Co
 
 **Timeshift (pause, rewind) does not work on Apple TV, iOS or Android**
 Those apps play the stream directly, which skips the buffer Emby needs for timeshift. Turn on **Playback correction** in the app's settings. This is an Emby limitation that applies to every tuner type.
+
+**A Dispatcharr channel plays, but fails as soon as Emby has to transcode it (`Stream specifier ':0' ... matches no streams`)**
+The channel's source carries its audio before its video. Channels start without a probe, so Emby assumes video comes first and the transcode fails. Turn on **Live TV → Dispatcharr Playback → Send video as the first track**, then click **Refresh Channel & Guide Cache**. The plugin adds an output profile named `Emby Xtream: video first` to Dispatcharr (0.28 or newer), which copies each channel unchanged with video first. Creating it needs a Dispatcharr admin account. With a different account, the plugin log shows the command and parameters, so an admin can create the profile under that exact name, and the plugin uses it.
 
 **The guide grid is empty even though channels are there**
 The browser has an old guide filter stored. Click the filter icon in the guide and clear it, or run `localStorage.removeItem('guide-tagids')` in the browser console.

@@ -80,6 +80,16 @@ namespace Emby.Xtream.Plugin
         /// skip Dispatcharr. See ADR-022.
         /// </summary>
         public string DispatcharrStreamEndpoint { get; set; } = "proxy";
+        /// <summary>
+        /// Asks Dispatcharr to send every channel with video as the first track (issue #108). The
+        /// plugin finds or creates the output profile <see cref="Service.VideoFirstOutputProfile"/>
+        /// on each channel refresh and adds <c>output_profile={id}</c> to the stream URL. Without it,
+        /// a channel whose source carries audio first cannot be transcoded by Emby, because probing
+        /// is off and the plugin declares video as track 0. Off by default: it starts one extra
+        /// ffmpeg copy per playing channel inside Dispatcharr. Needs Dispatcharr 0.28 or newer, and
+        /// an admin account the first time unless someone creates the profile by hand. See ADR-024.
+        /// </summary>
+        public bool DispatcharrVideoFirst { get; set; }
         public int[] SelectedDispatcharrProfileIds { get; set; } = new int[0];
         public string CachedDispatcharrProfiles { get; set; } = string.Empty;
 

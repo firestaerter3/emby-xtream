@@ -470,91 +470,204 @@ namespace Emby.Xtream.Plugin.Client
             return (true, string.Join(" > ", steps));
         }
 
+        /// <summary>
+        /// Looks for an output profile with exactly <paramref name="name"/> and creates it when
+        /// there is none. A profile with that name is used whoever made it, so an admin can create
+        /// it by hand for an account that may not. One that is switched off is left alone.
+        /// <para>
+        /// Never retries and never throws: this runs on the channel refresh, and a server without
+        /// output profiles (404) or an account without the right (403) must not cost the 7 seconds
+        /// of backoff <see cref="GetAuthenticatedAsync"/> spends on a failing request.
+        /// </para>
+        /// </summary>
+        public async Task<OutputProfileResult> EnsureOutputProfileAsync(
+            string baseUrl, string name, string command, string parameters, CancellationToken cancellationToken)
+        {
+            var url = baseUrl + "/api/core/outputprofiles/";
+            try
+            {
+                var found = await FindOutputProfileAsync(url, baseUrl, name, cancellationToken).ConfigureAwait(false);
+                if (found != null)
+                    return found;
+
+                var body = JsonSerializer.Serialize(new Dictionary<string, object>
+                {
+                    ["name"] = name,
+                    ["command"] = command,
+                    ["parameters"] = parameters,
+                    ["is_active"] = true,
+                });
+                var created = await SendAuthenticatedAsync(HttpMethod.Post, url, baseUrl, body, cancellationToken)
+                    .ConfigureAwait(false);
+                if (created == null)
+                    return new OutputProfileResult(OutputProfileOutcome.Failed, detail: "not logged in");
+
+                if (created.Value.Status == HttpStatusCode.Forbidden)
+                    return new OutputProfileResult(OutputProfileOutcome.Forbidden, detail: "403");
+
+                if ((int)created.Value.Status >= 200 && (int)created.Value.Status < 300)
+                {
+                    var profile = JsonSerializer.Deserialize<DispatcharrOutputProfile>(created.Value.Body, JsonOptions);
+                    if (profile != null && profile.Id > 0)
+                        return new OutputProfileResult(OutputProfileOutcome.Created, profile.Id);
+                }
+
+                // A 400 here is almost always the name already being taken: another refresh created
+                // it between our read and our write. Read the list once more instead of guessing.
+                var again = await FindOutputProfileAsync(url, baseUrl, name, cancellationToken).ConfigureAwait(false);
+                return again ?? new OutputProfileResult(OutputProfileOutcome.Failed,
+                        detail: ((int)created.Value.Status).ToString(CultureInfo.InvariantCulture));
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException) || !cancellationToken.IsCancellationRequested)
+            {
+                return new OutputProfileResult(OutputProfileOutcome.Failed, detail: ex.Message);
+            }
+        }
+
+        /// <summary>Returns null when the server answered but has no profile with the name.</summary>
+        private async Task<OutputProfileResult> FindOutputProfileAsync(
+            string url, string baseUrl, string name, CancellationToken cancellationToken)
+        {
+            var response = await SendAuthenticatedAsync(HttpMethod.Get, url, baseUrl, null, cancellationToken)
+                .ConfigureAwait(false);
+            if (response == null)
+                return new OutputProfileResult(OutputProfileOutcome.Failed, detail: "not logged in");
+
+            var status = (int)response.Value.Status;
+            if (response.Value.Status == HttpStatusCode.NotFound)
+                return new OutputProfileResult(OutputProfileOutcome.Unsupported, detail: "404");
+            if (response.Value.Status == HttpStatusCode.Forbidden)
+                return new OutputProfileResult(OutputProfileOutcome.Forbidden, detail: "403");
+            if (status < 200 || status >= 300)
+                return new OutputProfileResult(OutputProfileOutcome.Failed,
+                    detail: status.ToString(CultureInfo.InvariantCulture));
+
+            using (var doc = JsonDocument.Parse(response.Value.Body))
+            {
+                var root = doc.RootElement;
+                if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("results", out var results))
+                    root = results;
+                if (root.ValueKind != JsonValueKind.Array)
+                    return new OutputProfileResult(OutputProfileOutcome.Failed, detail: "unexpected answer");
+
+                foreach (var row in root.EnumerateArray())
+                {
+                    var profile = JsonSerializer.Deserialize<DispatcharrOutputProfile>(row.GetRawText(), JsonOptions);
+                    if (profile == null || !string.Equals(profile.Name, name, StringComparison.Ordinal))
+                        continue;
+
+                    return profile.IsActive == false
+                        ? new OutputProfileResult(OutputProfileOutcome.Inactive)
+                        : new OutputProfileResult(OutputProfileOutcome.Found, profile.Id);
+                }
+            }
+
+            return null;
+        }
+
         private async Task<string> GetAuthenticatedAsync(
             string url, string baseUrl, CancellationToken cancellationToken)
         {
-            await EnsureTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
-
-            if (_accessToken == null) return null;
-
             int retryCount = 0;
             int maxRetries = 3;
             int currentDelay = 1000;
 
             while (true)
             {
-                using (var httpClient = CreateHttpClient())
+                try
                 {
-                    try
+                    var response = await SendAuthenticatedAsync(HttpMethod.Get, url, baseUrl, null, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (response == null) return null;
+
+                    var status = (int)response.Value.Status;
+                    if (status < 200 || status >= 300)
                     {
-                        using (var request = new HttpRequestMessage(HttpMethod.Get, url))
-                        {
-                            // Capture the token at request-build time so the "already replaced?"
-                            // check after the gate is acquired compares against what we actually
-                            // sent, not whatever `_accessToken` happens to hold when the 401
-                            // response arrives (which may have been rotated by another caller
-                            // that already handled its own rejection).
-                            var sentAccessToken = _accessToken;
-                            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", sentAccessToken);
-
-                            using (var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
-                            {
-                                if (response.StatusCode == HttpStatusCode.Unauthorized)
-                                {
-                                    _logger.Debug("Dispatcharr token expired, refreshing");
-
-                                    // Route HTTP 401 recovery through the same gate as EnsureTokenAsync
-                                    // so a burst of concurrent 401s collapses to a single refresh/login.
-                                    // Compare against the token we actually sent on the rejected request:
-                                    // if the cache has moved on past it, another caller already handled
-                                    // the rejection and we should skip the refresh.
-                                    var rejectedToken = sentAccessToken;
-                                    await _tokenGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-                                    try
-                                    {
-                                        if (_accessToken == rejectedToken)
-                                        {
-                                            var refreshed = _refreshToken != null
-                                                && await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
-                                            if (!refreshed)
-                                            {
-                                                await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
-                                                if (_accessToken == null) return null;
-                                            }
-                                        }
-                                    }
-                                    finally
-                                    {
-                                        _tokenGate.Release();
-                                    }
-
-                                    using (var retryRequest = new HttpRequestMessage(HttpMethod.Get, url))
-                                    {
-                                        retryRequest.Headers.Authorization =
-                                            new AuthenticationHeaderValue("Bearer", _accessToken);
-                                        using (var retryResponse = await httpClient.SendAsync(retryRequest, cancellationToken).ConfigureAwait(false))
-                                        {
-                                            retryResponse.EnsureSuccessStatusCode();
-                                            return await retryResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-                                        }
-                                    }
-                                }
-
-                                response.EnsureSuccessStatusCode();
-                                return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                            }
-                        }
+                        // Same message EnsureSuccessStatusCode gives, and retried the same way.
+                        throw new HttpRequestException(string.Format(CultureInfo.InvariantCulture,
+                            "Response status code does not indicate success: {0} ({1}).",
+                            status, response.Value.Status));
                     }
-                    catch (HttpRequestException ex) when (retryCount < maxRetries)
-                    {
-                        _logger.Warn("HTTP error for {0}, retry {1}/{2} after {3}ms: {4}",
-                            url, retryCount + 1, maxRetries, currentDelay, ex.Message);
-                        await Task.Delay(currentDelay, cancellationToken).ConfigureAwait(false);
-                        retryCount++;
-                        currentDelay *= 2;
-                    }
+
+                    return response.Value.Body;
+                }
+                catch (HttpRequestException ex) when (retryCount < maxRetries)
+                {
+                    _logger.Warn("HTTP error for {0}, retry {1}/{2} after {3}ms: {4}",
+                        url, retryCount + 1, maxRetries, currentDelay, ex.Message);
+                    await Task.Delay(currentDelay, cancellationToken).ConfigureAwait(false);
+                    retryCount++;
+                    currentDelay *= 2;
                 }
             }
+        }
+
+        /// <summary>
+        /// Sends one request with the bearer token, renewing the token once on a 401. Returns the
+        /// status and body whatever the status; transport errors throw. Returns null when no token
+        /// can be had (bad credentials).
+        /// </summary>
+        private async Task<(HttpStatusCode Status, string Body)?> SendAuthenticatedAsync(
+            HttpMethod method, string url, string baseUrl, string jsonBody, CancellationToken cancellationToken)
+        {
+            await EnsureTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+
+            if (_accessToken == null) return null;
+
+            using (var httpClient = CreateHttpClient())
+            {
+                // Capture the token at request-build time so the "already replaced?" check after
+                // the gate is acquired compares against what we actually sent, not whatever
+                // `_accessToken` happens to hold when the 401 response arrives (which may have
+                // been rotated by another caller that already handled its own rejection).
+                var sentAccessToken = _accessToken;
+                using (var request = BuildRequest(method, url, jsonBody, sentAccessToken))
+                using (var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
+                {
+                    if (response.StatusCode != HttpStatusCode.Unauthorized)
+                        return (response.StatusCode, await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+                }
+
+                _logger.Debug("Dispatcharr token expired, refreshing");
+
+                // Route HTTP 401 recovery through the same gate as EnsureTokenAsync so a burst of
+                // concurrent 401s collapses to a single refresh/login. Compare against the token
+                // we actually sent on the rejected request: if the cache has moved on past it,
+                // another caller already handled the rejection and we should skip the refresh.
+                await _tokenGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    if (_accessToken == sentAccessToken)
+                    {
+                        var refreshed = _refreshToken != null
+                            && await RefreshTokenAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+                        if (!refreshed)
+                        {
+                            await LoginAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+                            if (_accessToken == null) return null;
+                        }
+                    }
+                }
+                finally
+                {
+                    _tokenGate.Release();
+                }
+
+                using (var retryRequest = BuildRequest(method, url, jsonBody, _accessToken))
+                using (var retryResponse = await httpClient.SendAsync(retryRequest, cancellationToken).ConfigureAwait(false))
+                {
+                    return (retryResponse.StatusCode, await retryResponse.Content.ReadAsStringAsync().ConfigureAwait(false));
+                }
+            }
+        }
+
+        private static HttpRequestMessage BuildRequest(HttpMethod method, string url, string jsonBody, string token)
+        {
+            var request = new HttpRequestMessage(method, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            if (jsonBody != null)
+                request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+            return request;
         }
 
         private async Task EnsureTokenAsync(string baseUrl, CancellationToken cancellationToken)

@@ -71,6 +71,38 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.Null(r.Url);
         }
 
+        // Issue #108: with an output profile id, Dispatcharr runs the stream through that profile,
+        // which puts video first. Both Dispatcharr URLs reach the same proxy code, so both carry it.
+
+        [Fact]
+        public void OutputProfile_IsAddedToTheProxyUrl()
+        {
+            var r = XtreamTunerHost.ResolveStreamUrl(Config(Dispatcharr), 42, Uuids, outputProfileId: 7);
+
+            Assert.Equal(Dispatcharr + "/proxy/ts/stream/uuid-42?output_format=mpegts&output_profile=7", r.Url);
+        }
+
+        [Fact]
+        public void OutputProfile_IsAddedToTheDispatcharrXtreamUrl()
+        {
+            var r = XtreamTunerHost.ResolveStreamUrl(Config(Dispatcharr, "xtream"), 42, Uuids, outputProfileId: 7);
+
+            Assert.Equal(XtreamTunerHost.StreamRoute.DispatcharrXtream, r.Route);
+            Assert.Equal(Dispatcharr + "/live/emby/secret/42.ts?output_profile=7", r.Url);
+        }
+
+        [Fact]
+        public void OutputProfile_IsNotAddedToADirectProviderUrl()
+        {
+            var config = Config("http://provider.example");
+            config.LiveTvOutputFormat = "ts";
+
+            var r = XtreamTunerHost.ResolveStreamUrl(config, 7, Uuids, outputProfileId: 7);
+
+            Assert.Equal(XtreamTunerHost.StreamRoute.DirectXtream, r.Route);
+            Assert.Equal("http://provider.example/live/emby/secret/7.ts", r.Url);
+        }
+
         [Theory]
         [InlineData("http://dispatcharr.local:9191", "http://dispatcharr.local:9191/", true)]
         [InlineData("http://Dispatcharr.Local:9191", "http://dispatcharr.local:9191", true)]

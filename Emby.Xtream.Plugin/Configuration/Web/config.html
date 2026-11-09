@@ -1126,6 +1126,20 @@
                             Change this only if a Dispatcharr channel plays with the wrong codec.
                         </div>
                     </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:0.5em;">
+                        <label>
+                            <input class="chkDispatcharrVideoFirst" type="checkbox" is="emby-checkbox" />
+                            <span>Send video as the first track</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Turn on if some channels fail when Emby transcodes them, with "matches no streams" in
+                            the transcode log. Those channels carry their audio before their video. The plugin
+                            then adds an output profile named "Emby Xtream: video first" to Dispatcharr, which
+                            puts video first and copies everything else unchanged. Needs Dispatcharr 0.28 or newer.
+                            Dispatcharr runs one extra copy step for each channel that is playing. Takes effect
+                            after the next channel refresh, or straight away with <b>Refresh Channel &amp; Guide Cache</b>.
+                        </div>
+                    </div>
                 </div>
 
                 <details class="verticalSection advancedSection">
