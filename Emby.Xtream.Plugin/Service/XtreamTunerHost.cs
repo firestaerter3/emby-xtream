@@ -84,6 +84,8 @@ namespace Emby.Xtream.Plugin.Service
         public override string Type => TunerType;
         public override bool IsSupported => true;
         public override string SetupUrl => null;
+        // Channel Ids are "xtream-tuner_<streamId>". ResolveStreamId reads the stream ID back
+        // out of them, so changing this changes how every channel is played.
         protected override bool UseTunerHostIdAsPrefix => false;
 
         public override TunerHostInfo GetDefaultConfiguration()
@@ -480,6 +482,7 @@ namespace Emby.Xtream.Plugin.Service
 
                 return new ChannelInfo
                 {
+                    // Always the stream ID, never the station ID: ResolveStreamId depends on it.
                     Id = CreateEmbyChannelId(tuner, streamIdStr),
                     TunerChannelId = tunerChannelId,
                     Name = cleanName,
@@ -791,7 +794,7 @@ namespace Emby.Xtream.Plugin.Service
             TunerHostInfo tuner, MediaBrowser.Controller.Entities.BaseItem dbChannel,
             ChannelInfo tunerChannel, CancellationToken cancellationToken)
         {
-            if (!TryResolveStreamId(tunerChannel, out int streamId))
+            if (!TryResolveStreamId(tuner, tunerChannel, out int streamId))
             {
                 return new List<MediaSourceInfo>();
             }
@@ -836,7 +839,7 @@ namespace Emby.Xtream.Plugin.Service
             ChannelInfo tunerChannel, string mediaSourceId,
             CancellationToken cancellationToken)
         {
-            if (!TryResolveStreamId(tunerChannel, out int streamId))
+            if (!TryResolveStreamId(tuner, tunerChannel, out int streamId))
             {
                 throw new System.IO.FileNotFoundException(
                     string.Format("Channel {0} not found in Xtream tuner", tunerChannel?.Id));
@@ -1298,18 +1301,50 @@ namespace Emby.Xtream.Plugin.Service
             }
         }
 
-        private bool TryResolveStreamId(ChannelInfo tunerChannel, out int streamId)
+        private bool TryResolveStreamId(TunerHostInfo tuner, ChannelInfo tunerChannel, out int streamId)
         {
             streamId = 0;
             if (tunerChannel == null) return false;
 
-            var id = tunerChannel.TunerChannelId ?? tunerChannel.Id;
+            return ResolveStreamId(tunerChannel.Id, tunerChannel.TunerChannelId,
+                GetChannelIdPrefix(tuner), _tunerChannelIdToStreamId, out streamId);
+        }
 
-            // Check authoritative mapping first (handles station ID → stream ID translation)
-            if (_tunerChannelIdToStreamId.TryGetValue(id, out streamId))
+        /// <summary>
+        /// Works out which stream a channel plays, in this order:
+        /// 1. The Emby channel Id. <see cref="GetChannelsInternal"/> builds it as
+        ///    <c>CreateEmbyChannelId(tuner, streamId)</c>, and Emby keeps it in its own channel
+        ///    cache, so it is right even when <c>_tunerChannelIdToStreamId</c> is empty after
+        ///    <see cref="ClearCaches"/> or a restart.
+        /// 2. The TunerChannelId → stream ID map, for an Id this plugin did not build.
+        /// 3. The TunerChannelId read as a number. Only right for a channel without a Gracenote
+        ///    station ID: with one, TunerChannelId is the station ID, which is how a station ID
+        ///    used to be played as a stream ID after a cache clear.
+        /// None of these make a network call, which keeps BUG-007 fixed.
+        /// </summary>
+        internal static bool ResolveStreamId(
+            string embyChannelId, string tunerChannelId, string channelIdPrefix,
+            IReadOnlyDictionary<string, int> tunerChannelIdToStreamId, out int streamId)
+        {
+            if (!string.IsNullOrEmpty(embyChannelId)
+                && !string.IsNullOrEmpty(channelIdPrefix)
+                && embyChannelId.StartsWith(channelIdPrefix, StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(embyChannelId.Substring(channelIdPrefix.Length),
+                    NumberStyles.None, CultureInfo.InvariantCulture, out streamId))
+            {
+                return true;
+            }
+
+            var id = tunerChannelId ?? embyChannelId;
+            if (id == null)
+            {
+                streamId = 0;
+                return false;
+            }
+
+            if (tunerChannelIdToStreamId != null && tunerChannelIdToStreamId.TryGetValue(id, out streamId))
                 return true;
 
-            // Fallback: parse directly (before channel list is loaded)
             return int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out streamId);
         }
 

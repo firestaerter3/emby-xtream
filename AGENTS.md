@@ -47,6 +47,14 @@ release. See [ADR-017](docs/decisions/017-single-dll-for-emby-4-9-and-4-10.md).
 
 When `SupportsGuideData()` returns `true`, Emby calls `GetProgramsInternal` on the tuner host for each channel. The `tunerChannelId` parameter is whatever was set in `ChannelInfo.TunerChannelId` — the Gracenote station ID (e.g. `"51529"`) when Dispatcharr is enabled and a station ID exists for the channel, or the raw stream ID (e.g. `"12345"`) otherwise. Use `_tunerChannelIdToStreamId` to translate either form back to a stream ID.
 
+**At playback, read the stream ID from the Emby channel Id, not from `TunerChannelId`.** The map
+is empty after **Refresh Channel & Guide Cache** (`ClearCaches()`) and after a restart, until
+Emby asks for the channel list again, and a station ID read as a number is a different stream:
+NPO 1 (stream 66336, station 107185) asked for stream 107185 and failed with "Dispatcharr proxy
+unavailable and fallback disabled". The channel Id is `xtream-tuner_<streamId>`, built in
+`GetChannelsInternal` and kept in Emby's own channel cache, so `ResolveStreamId` reads it first
+and only then tries the map and the plain number. This needs no network call (BUG-007).
+
 ### Emby probes MediaSource.Path directly — disable for Dispatcharr
 
 When `SupportsProbing = true` and `AnalyzeDurationMs > 0`, Emby runs ffprobe against `MediaSource.Path` **independently** of `GetChannelStream` / `ILiveStream`. For Dispatcharr proxy URLs this is destructive: the probe opens a short-lived HTTP connection (~0.1s, ~120KB), then closes it. Dispatcharr interprets the close as the last client leaving and tears down the channel. The real playback connection that follows immediately hits the teardown "channel stop signal" and fails — triggering a rapid retry storm visible in Dispatcharr logs as repeated `Fetchin channel with ID: <n>` → broken pipe cycles.
