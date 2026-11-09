@@ -884,6 +884,159 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         // -------------------------------------------------------------------------
+        // Output profiles (issue #108): find or create the profile that puts video first.
+        // -------------------------------------------------------------------------
+
+        private const string ProfileName = "Emby Xtream: video first";
+        private const string ProfileParams = "-i pipe:0 -map 0:v:0? -map 0:a? -c copy -f mpegts pipe:1";
+
+        /// <summary>
+        /// Answers the token endpoint, sends GET and POST on /api/core/outputprofiles/ to the two
+        /// callbacks, and records every request as "METHOD path".
+        /// </summary>
+        private static (DispatcharrClient Client, System.Collections.Generic.List<string> Calls, System.Collections.Generic.List<string> PostBodies)
+            OutputProfileClient(Func<HttpResponseMessage> onGet, Func<HttpResponseMessage> onPost = null)
+        {
+            var calls = new System.Collections.Generic.List<string>();
+            var bodies = new System.Collections.Generic.List<string>();
+            var handler = new MockHandler(request =>
+            {
+                var path = request.RequestUri.AbsolutePath;
+                if (path.Contains("/api/accounts/token/"))
+                {
+                    var json = JsonSerializer.Serialize(new { access = "tok", refresh = "ref" });
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(json, Encoding.UTF8, "application/json")
+                    };
+                }
+
+                calls.Add(request.Method.Method + " " + path);
+                if (request.Method == HttpMethod.Post)
+                {
+                    bodies.Add(request.Content.ReadAsStringAsync().Result);
+                    return onPost != null ? onPost() : throw new InvalidOperationException("unexpected POST");
+                }
+                return onGet();
+            });
+
+            var client = new DispatcharrClient(new NullLogger(), handler);
+            client.Configure("admin", "pass");
+            return (client, calls, bodies);
+        }
+
+        private static HttpResponseMessage Json(string body, HttpStatusCode status = HttpStatusCode.OK) =>
+            new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+
+        private static Task<OutputProfileResult> EnsureProfile(DispatcharrClient client) =>
+            client.EnsureOutputProfileAsync("http://localhost:8080", ProfileName, "ffmpeg", ProfileParams, CancellationToken.None);
+
+        [Fact]
+        public async Task EnsureOutputProfile_ExistingProfile_IsUsedWithoutCreatingOne()
+        {
+            var (client, calls, _) = OutputProfileClient(() => Json(
+                "[{\"id\":1,\"name\":\"Media Server (AC3 Audio)\",\"is_active\":true}," +
+                "{\"id\":9,\"name\":\"" + ProfileName + "\",\"is_active\":true}]"));
+
+            var result = await EnsureProfile(client);
+
+            Assert.Equal(OutputProfileOutcome.Found, result.Outcome);
+            Assert.Equal(9, result.Id);
+            Assert.Equal(new[] { "GET /api/core/outputprofiles/" }, calls);
+        }
+
+        [Fact]
+        public async Task EnsureOutputProfile_ReadsAPagedResponse()
+        {
+            var (client, _, _) = OutputProfileClient(() => Json(
+                "{\"count\":1,\"results\":[{\"id\":9,\"name\":\"" + ProfileName + "\",\"is_active\":true}]}"));
+
+            var result = await EnsureProfile(client);
+
+            Assert.Equal(9, result.Id);
+        }
+
+        [Fact]
+        public async Task EnsureOutputProfile_MissingProfile_IsCreated()
+        {
+            var (client, calls, bodies) = OutputProfileClient(
+                () => Json("[]"),
+                () => Json("{\"id\":12,\"name\":\"" + ProfileName + "\",\"is_active\":true}", HttpStatusCode.Created));
+
+            var result = await EnsureProfile(client);
+
+            Assert.Equal(OutputProfileOutcome.Created, result.Outcome);
+            Assert.Equal(12, result.Id);
+            Assert.Equal(new[] { "GET /api/core/outputprofiles/", "POST /api/core/outputprofiles/" }, calls);
+            using (var doc = JsonDocument.Parse(bodies.Single()))
+            {
+                Assert.Equal(ProfileName, doc.RootElement.GetProperty("name").GetString());
+                Assert.Equal("ffmpeg", doc.RootElement.GetProperty("command").GetString());
+                Assert.Equal(ProfileParams, doc.RootElement.GetProperty("parameters").GetString());
+                Assert.True(doc.RootElement.GetProperty("is_active").GetBoolean());
+            }
+        }
+
+        [Fact]
+        public async Task EnsureOutputProfile_InactiveProfile_IsNotUsedOrReplaced()
+        {
+            var (client, calls, _) = OutputProfileClient(() => Json(
+                "[{\"id\":9,\"name\":\"" + ProfileName + "\",\"is_active\":false}]"));
+
+            var result = await EnsureProfile(client);
+
+            Assert.Equal(OutputProfileOutcome.Inactive, result.Outcome);
+            Assert.Null(result.Id);
+            Assert.Single(calls);
+        }
+
+        [Fact]
+        public async Task EnsureOutputProfile_ServerWithoutOutputProfiles_IsUnsupportedAndNotRetried()
+        {
+            var (client, calls, _) = OutputProfileClient(() => Json("{\"detail\":\"Not found.\"}", HttpStatusCode.NotFound));
+
+            var result = await EnsureProfile(client);
+
+            Assert.Equal(OutputProfileOutcome.Unsupported, result.Outcome);
+            Assert.Null(result.Id);
+            Assert.Single(calls);
+        }
+
+        [Fact]
+        public async Task EnsureOutputProfile_AccountThatMayNotCreate_IsForbidden()
+        {
+            var (client, calls, _) = OutputProfileClient(
+                () => Json("[]"),
+                () => Json("{\"detail\":\"You do not have permission.\"}", HttpStatusCode.Forbidden));
+
+            var result = await EnsureProfile(client);
+
+            Assert.Equal(OutputProfileOutcome.Forbidden, result.Outcome);
+            Assert.Null(result.Id);
+            Assert.Equal(2, calls.Count);
+        }
+
+        [Fact]
+        public async Task EnsureOutputProfile_NameTakenByAConcurrentCreate_ReadsTheListAgain()
+        {
+            var gets = 0;
+            var (client, calls, _) = OutputProfileClient(
+                () => gets++ == 0
+                    ? Json("[]")
+                    : Json("[{\"id\":15,\"name\":\"" + ProfileName + "\",\"is_active\":true}]"),
+                () => Json("{\"name\":[\"output profile with this name already exists.\"]}", HttpStatusCode.BadRequest));
+
+            var result = await EnsureProfile(client);
+
+            Assert.Equal(OutputProfileOutcome.Found, result.Outcome);
+            Assert.Equal(15, result.Id);
+            Assert.Equal(new[]
+            {
+                "GET /api/core/outputprofiles/", "POST /api/core/outputprofiles/", "GET /api/core/outputprofiles/",
+            }, calls);
+        }
+
+        // -------------------------------------------------------------------------
         // Stream profiles (issue #66): what the proxy emits, not what it ingested.
         // -------------------------------------------------------------------------
 

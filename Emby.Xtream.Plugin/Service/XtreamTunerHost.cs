@@ -44,6 +44,12 @@ namespace Emby.Xtream.Plugin.Service
         // put ~3s on the first tune. Absent key means "profile says nothing", not "passthrough".
         private volatile Dictionary<int, string> _streamProfileCodecs = new Dictionary<int, string>();
         private volatile Dictionary<int, string> _channelUuidMap = new Dictionary<int, string>();
+
+        // Id of the "video first" Dispatcharr output profile (issue #108), resolved on the channel
+        // refresh; 0 when the setting is off or no usable profile exists. The last outcome is kept
+        // so a server that cannot give one is logged once, not on every refresh.
+        private volatile int _videoFirstProfileId;
+        private OutputProfileOutcome? _videoFirstLastOutcome;
         private volatile Dictionary<int, string> _tvgIdMap = new Dictionary<int, string>();
         private volatile Dictionary<int, string> _stationIdMap = new Dictionary<int, string>();
         private volatile Dictionary<int, double> _channelNumberMap = new Dictionary<int, double>();
@@ -387,6 +393,8 @@ namespace Emby.Xtream.Plugin.Service
                 {
                     Logger.Warn("Failed to fetch Dispatcharr channel data: {0}", ex.Message);
                 }
+
+                await ResolveVideoFirstProfileAsync(config, cancellationToken).ConfigureAwait(false);
             }
 
             var channelsTask = channelsFetch();
@@ -903,6 +911,7 @@ namespace Emby.Xtream.Plugin.Service
             _streamStats = new Dictionary<int, StreamStatsInfo>();
             _streamProfileCodecs = new Dictionary<int, string>();
             _channelUuidMap = new Dictionary<int, string>();
+            _videoFirstProfileId = 0;
             _tvgIdMap = new Dictionary<int, string>();
             _stationIdMap = new Dictionary<int, string>();
             _channelNumberMap = new Dictionary<int, double>();
@@ -1315,7 +1324,11 @@ namespace Emby.Xtream.Plugin.Service
 
         private (string Url, bool IsDispatcharr) BuildStreamUrl(PluginConfiguration config, int streamId)
         {
-            var result = ResolveStreamUrl(config, streamId, _channelUuidMap);
+            // Only reads the id the last channel refresh resolved: looking it up here would put
+            // Dispatcharr requests in front of playback (BUG-007). Until a refresh has run, the
+            // stream plays without the profile, as it did before the setting existed.
+            var result = ResolveStreamUrl(config, streamId, _channelUuidMap,
+                config.DispatcharrVideoFirst ? _videoFirstProfileId : 0);
             switch (result.Route)
             {
                 case StreamRoute.DispatcharrProxy:
@@ -1366,19 +1379,30 @@ namespace Emby.Xtream.Plugin.Service
         /// stream (no probing, profile codec wins), since both URLs run through Dispatcharr's proxy
         /// code (ADR-001, ADR-022). The Xtream URL is always <c>.ts</c>, matching the proxy URL.
         /// </summary>
+        /// <param name="outputProfileId">
+        /// Dispatcharr output profile to ask for on either Dispatcharr URL (issue #108, ADR-024).
+        /// Both URLs end up in the same Dispatcharr view, which reads <c>output_profile</c>. Null
+        /// or zero asks for none. Never added to a provider URL.
+        /// </param>
         internal static StreamUrlResult ResolveStreamUrl(
-            PluginConfiguration config, int streamId, IReadOnlyDictionary<int, string> uuidMap)
+            PluginConfiguration config, int streamId, IReadOnlyDictionary<int, string> uuidMap,
+            int? outputProfileId = null)
         {
             var result = new StreamUrlResult();
             if (config.EnableDispatcharr && !string.IsNullOrEmpty(config.DispatcharrUrl))
             {
                 if (uuidMap.TryGetValue(streamId, out var uuid))
                 {
+                    var profile = outputProfileId > 0
+                        ? "output_profile=" + outputProfileId.Value.ToString(CultureInfo.InvariantCulture)
+                        : null;
+
                     if (string.Equals(config.DispatcharrStreamEndpoint, "xtream", StringComparison.OrdinalIgnoreCase))
                     {
                         if (IsSameServer(config.BaseUrl, config.DispatcharrUrl))
                         {
-                            result.Url = BuildXtreamUrl(config, streamId, "ts");
+                            result.Url = BuildXtreamUrl(config, streamId, "ts")
+                                + (profile != null ? "?" + profile : string.Empty);
                             result.Route = StreamRoute.DispatcharrXtream;
                             return result;
                         }
@@ -1391,7 +1415,8 @@ namespace Emby.Xtream.Plugin.Service
                     // response as MPEG-TS, so ask for that explicitly. Older versions ignore it.
                     result.Url = string.Format(CultureInfo.InvariantCulture,
                         "{0}/proxy/ts/stream/{1}?output_format=mpegts",
-                        config.DispatcharrUrl.TrimEnd('/'), uuid);
+                        config.DispatcharrUrl.TrimEnd('/'), uuid)
+                        + (profile != null ? "&" + profile : string.Empty);
                     result.Route = StreamRoute.DispatcharrProxy;
                     return result;
                 }
@@ -1430,6 +1455,63 @@ namespace Emby.Xtream.Plugin.Service
                 && string.Equals(ua.Host, ub.Host, StringComparison.OrdinalIgnoreCase)
                 && ua.Port == ub.Port
                 && string.Equals(ua.AbsolutePath.TrimEnd('/'), ub.AbsolutePath.TrimEnd('/'), StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Finds or creates the "video first" output profile and stores its id for
+        /// <see cref="BuildStreamUrl"/>. Runs on the channel refresh only. Every failure leaves the
+        /// id at 0, which plays streams exactly as without the setting.
+        /// </summary>
+        private async Task ResolveVideoFirstProfileAsync(PluginConfiguration config, CancellationToken cancellationToken)
+        {
+            if (!config.DispatcharrVideoFirst)
+            {
+                _videoFirstProfileId = 0;
+                _videoFirstLastOutcome = null;
+                return;
+            }
+
+            var result = await _dispatcharrClient.EnsureOutputProfileAsync(
+                config.DispatcharrUrl, VideoFirstOutputProfile.Name, VideoFirstOutputProfile.Command,
+                VideoFirstOutputProfile.Parameters, cancellationToken).ConfigureAwait(false);
+
+            _videoFirstProfileId = result.Id ?? 0;
+
+            var changed = _videoFirstLastOutcome != result.Outcome;
+            _videoFirstLastOutcome = result.Outcome;
+            switch (result.Outcome)
+            {
+                case OutputProfileOutcome.Created:
+                    Logger.Info("Created Dispatcharr output profile \"{0}\" (id {1}): channels now play with video first",
+                        VideoFirstOutputProfile.Name, result.Id);
+                    break;
+                case OutputProfileOutcome.Found:
+                    if (changed)
+                        Logger.Info("Using Dispatcharr output profile \"{0}\" (id {1}): channels play with video first",
+                            VideoFirstOutputProfile.Name, result.Id);
+                    break;
+                case OutputProfileOutcome.Inactive:
+                    if (changed)
+                        Logger.Warn("Dispatcharr output profile \"{0}\" is switched off in Dispatcharr. " +
+                            "Channels play without it until it is switched on.", VideoFirstOutputProfile.Name);
+                    break;
+                case OutputProfileOutcome.Unsupported:
+                    if (changed)
+                        Logger.Warn("Dispatcharr has no output profiles (needs 0.28 or newer), so channels " +
+                            "cannot be sent with video first. Channels play as before.");
+                    break;
+                case OutputProfileOutcome.Forbidden:
+                    if (changed)
+                        Logger.Warn("The Dispatcharr account may not create output profiles. Ask an admin to " +
+                            "create one named \"{0}\" with command \"{1}\" and parameters \"{2}\". Channels play " +
+                            "without it until then.", VideoFirstOutputProfile.Name, VideoFirstOutputProfile.Command,
+                            VideoFirstOutputProfile.Parameters);
+                    break;
+                default:
+                    Logger.Warn("Could not set up the Dispatcharr output profile \"{0}\": {1}. Channels play without it.",
+                        VideoFirstOutputProfile.Name, result.Detail);
+                    break;
+            }
         }
 
         private sealed class DispatcharrData
