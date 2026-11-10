@@ -151,6 +151,16 @@ All three delete paths go through this — orphan cleanup, per-item exclusion, a
 
 Both sync methods compute their delta watermark from the **unfiltered** catalogue — if the newest title happens to be excluded, the watermark must still advance past it or every later sync re-processes everything after it. Re-ticking a title needs no watermark reset: both smart-skip paths already guard on the folder existing. See [ADR-012](docs/decisions/012-per-item-content-exclusion.md).
 
+### Episode versions come from Dispatcharr's own API, two requests per series
+
+With *One version per Dispatcharr provider* on, the series sync asks Dispatcharr's REST API (not
+its Xtream output, which lists each episode once) for the providers of every episode: one request
+to find the Dispatcharr series from any episode id, one for all its episodes. Never one request per
+episode. The first file keeps the episode's usual name and Dispatcharr's own pick of provider;
+renaming it would delete and recreate a file per episode and trip the orphan safety limit. On a
+failed lookup, the version files on disk count as written. See
+[ADR-025](docs/decisions/025-episode-versions-per-dispatcharr-provider.md).
+
 ### Absence of provider data is never evidence of deletion
 
 Orphan cleanup works by difference, so it is only correct when the run saw the whole catalogue. A per-category request that fails must not flatten into an empty list: that is indistinguishable from an empty category, and one failing category among many stays well under `OrphanSafetyThreshold`, so the ratio guard never fires. `CatalogueFetchResult<T>` carries `FailedCategoryCount` and gates cleanup on it.

@@ -120,6 +120,7 @@ When a new version is out, the plugin settings show an update banner. Click **Up
 - **Stream URL → Xtream server** plays channels through Dispatcharr's Xtream URL instead, so Dispatcharr shows which user is watching.
 - Codec, resolution and bitrate come from Dispatcharr's stream stats (for example filled by [Streamflow](https://github.com/krinkuto11/streamflow)), so channels start without a probe. The video codec follows the channel's stream profile, and can be overridden.
 - Movies that Dispatcharr has from more than one provider get one version per provider.
+- **One version per Dispatcharr provider** (Series tab) does the same for episodes, so you can pick, say, a regional dub or a version without Dolby Vision. Extra versions are named after the provider's account in Dispatcharr.
 - **Send video as the first track** makes Dispatcharr put video before audio on every channel, so Emby can transcode channels whose source carries audio first. See Troubleshooting.
 
 ### Dashboard and settings

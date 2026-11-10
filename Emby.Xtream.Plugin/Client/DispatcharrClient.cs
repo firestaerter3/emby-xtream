@@ -368,6 +368,39 @@ namespace Emby.Xtream.Plugin.Client
                    ?? new List<DispatcharrVodProvider>();
         }
 
+        /// <summary>
+        /// Returns every episode of the Dispatcharr series that <paramref name="xtreamEpisodeId"/>
+        /// belongs to, keyed by episode id, with the providers that have each one (issue #111).
+        /// The id is the one Dispatcharr's Xtream output gives an episode, which is its own
+        /// episode id. Two requests, both answered from Dispatcharr's database, never from a
+        /// provider. Returns null when Dispatcharr does not know the episode or there is no login.
+        /// </summary>
+        public async Task<Dictionary<int, DispatcharrSeriesEpisode>> GetSeriesEpisodeProvidersAsync(
+            string baseUrl, int xtreamEpisodeId, CancellationToken cancellationToken)
+        {
+            var episodeJson = await GetAuthenticatedAsync(
+                string.Format(CultureInfo.InvariantCulture, "{0}/api/vod/episodes/{1}/", baseUrl, xtreamEpisodeId),
+                baseUrl, cancellationToken).ConfigureAwait(false);
+            if (episodeJson == null) return null;
+            var episode = JsonSerializer.Deserialize<DispatcharrEpisodeDetail>(episodeJson, JsonOptions);
+            if (episode?.Series == null || episode.Series.Id <= 0) return null;
+
+            var listJson = await GetAuthenticatedAsync(
+                string.Format(CultureInfo.InvariantCulture, "{0}/api/vod/series/{1}/episodes/", baseUrl, episode.Series.Id),
+                baseUrl, cancellationToken).ConfigureAwait(false);
+            if (listJson == null) return null;
+            var list = JsonSerializer.Deserialize<List<DispatcharrSeriesEpisode>>(listJson, JsonOptions)
+                       ?? new List<DispatcharrSeriesEpisode>();
+
+            var result = new Dictionary<int, DispatcharrSeriesEpisode>();
+            foreach (var item in list)
+            {
+                if (item != null) result[item.Id] = item;
+            }
+
+            return result;
+        }
+
         public async Task<bool> TestConnectionAsync(string baseUrl, CancellationToken cancellationToken)
         {
             try

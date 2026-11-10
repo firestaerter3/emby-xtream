@@ -491,6 +491,7 @@ function (BaseView, loading) {
             view.querySelector('.selDispatcharrCodecSource').value = config.DispatcharrVideoCodecSource || 'auto';
             view.querySelector('.selDispatcharrStreamEndpoint').value = config.DispatcharrStreamEndpoint || 'proxy';
             view.querySelector('.chkDispatcharrVideoFirst').checked = !!config.DispatcharrVideoFirst;
+            view.querySelector('.chkDispatcharrEpisodeVersions').checked = !!config.DispatcharrEpisodeVersions;
             updateStreamEndpointWarning(view);
             view.querySelector('.chkDeclareDvbSubtitles').checked = !!config.DeclareDvbSubtitles;
 
@@ -627,6 +628,7 @@ function (BaseView, loading) {
             config.DispatcharrVideoCodecSource = view.querySelector('.selDispatcharrCodecSource').value;
             config.DispatcharrStreamEndpoint = view.querySelector('.selDispatcharrStreamEndpoint').value;
             config.DispatcharrVideoFirst = view.querySelector('.chkDispatcharrVideoFirst').checked;
+            config.DispatcharrEpisodeVersions = view.querySelector('.chkDispatcharrEpisodeVersions').checked;
             config.DeclareDvbSubtitles = view.querySelector('.chkDeclareDvbSubtitles').checked;
             config.SelectedDispatcharrProfileIds = getSelectedDispatcharrProfileIds(instance);
 

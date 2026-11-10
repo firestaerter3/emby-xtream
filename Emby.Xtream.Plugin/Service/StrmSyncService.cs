@@ -835,19 +835,28 @@ namespace Emby.Xtream.Plugin.Service
                 var lastSeriesTs = config.LastSeriesSyncTimestamp;
                 long maxSeriesTs = lastSeriesTs;
 
-                // Auto-reset delta state when folder naming flags change (stale folder paths would break pre-fetch skip)
+                // Auto-reset delta state when folder naming flags change (stale folder paths would break pre-fetch skip).
+                // The episode versions setting too: unchanged series are skipped before their episodes
+                // are read, so without a full pass the setting would only reach series the provider touches.
                 if (config.EnableSeriesIdFolderNaming != config.LastKnownEnableSeriesIdFolderNaming
-                    || config.EnableSeriesMetadataLookup != config.LastKnownEnableSeriesMetadataLookup)
+                    || config.EnableSeriesMetadataLookup != config.LastKnownEnableSeriesMetadataLookup
+                    || config.DispatcharrEpisodeVersions != config.LastKnownDispatcharrEpisodeVersions)
                 {
                     if (lastSeriesTs > 0)
-                        _logger.Info("Series folder naming flags changed — forcing full re-sync");
+                        _logger.Info("Series folder naming or episode version settings changed, forcing full re-sync");
                     lastSeriesTs = 0;
                     maxSeriesTs = 0;
                     config.SeriesEpisodeHashesJson = string.Empty;
                 }
                 config.LastKnownEnableSeriesIdFolderNaming = config.EnableSeriesIdFolderNaming;
                 config.LastKnownEnableSeriesMetadataLookup = config.EnableSeriesMetadataLookup;
+                config.LastKnownDispatcharrEpisodeVersions = config.DispatcharrEpisodeVersions;
                 saveConfig?.Invoke();
+
+                // Null unless the setting is on and Dispatcharr is configured (issue #111).
+                var episodeVersionClient = config.DispatcharrEpisodeVersions
+                    ? CreateDispatcharrVodClient(config)
+                    : null;
 
                 // Excluded series never enter the loop below, so fold their timestamps in here —
                 // otherwise the watermark stalls behind an excluded-but-recent title.
@@ -1171,6 +1180,37 @@ namespace Emby.Xtream.Plugin.Service
                             }
                         }
 
+                        // One Dispatcharr lookup per written series, never per episode (issue #111).
+                        // On failure the episodes get their single file as before, and the version
+                        // files already on disk count as in use so cleanup does not remove them over
+                        // a hiccup (the same reasoning as a failed detail fetch, ADR-018).
+                        Dictionary<int, DispatcharrSeriesEpisode> dispatcharrEpisodes = null;
+                        if (episodeVersionClient != null)
+                        {
+                            var firstEpisode = detail.Episodes.Values
+                                .Where(list => list != null)
+                                .SelectMany(list => list)
+                                .FirstOrDefault(e => e != null && e.Id > 0);
+                            if (firstEpisode != null)
+                            {
+                                try
+                                {
+                                    dispatcharrEpisodes = await episodeVersionClient.GetSeriesEpisodeProvidersAsync(
+                                        config.DispatcharrUrl, firstEpisode.Id, cancellationToken).ConfigureAwait(false);
+                                }
+                                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                                {
+                                    throw;
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.Warn("Dispatcharr episode versions lookup failed for series '{0}': {1}", series.Name, ex.Message);
+                                    if (Directory.Exists(seriesDir))
+                                        RecordStrms(Directory.GetFiles(seriesDir, "*.strm", SearchOption.AllDirectories), writtenPaths);
+                                }
+                            }
+                        }
+
                         foreach (var seasonEntry in detail.Episodes)
                         {
                             // The episodes map is keyed by season. Some providers only put the
@@ -1217,28 +1257,50 @@ namespace Emby.Xtream.Plugin.Service
 
                                 var streamUrl = XtreamUrls.Stream(config, "series", episode.Id, ext);
 
-                                // Skip write if file content is already up to date (avoids Emby library re-scan)
-                                var fileExists = File.Exists(strmPath);
-                                if (!fileExists || File.ReadAllText(strmPath) != streamUrl)
+                                // One file per Dispatcharr provider when there is more than one
+                                // (issue #111); otherwise the single Xtream URL, as always. The first
+                                // version keeps the episode's usual file name.
+                                var entries = new List<Tuple<string, string>>();
+                                DispatcharrSeriesEpisode dispatcharrEpisode;
+                                if (dispatcharrEpisodes != null
+                                    && dispatcharrEpisodes.TryGetValue(episode.Id, out dispatcharrEpisode))
                                 {
-                                    Directory.CreateDirectory(seasonDir);
-                                    File.WriteAllText(strmPath, streamUrl);
-
-                                    if (!fileExists)
+                                    foreach (var version in EpisodeVersions.Build(dispatcharrEpisode, config.DispatcharrUrl))
                                     {
-                                        Interlocked.Increment(ref _episodeProgress.Added);
+                                        entries.Add(Tuple.Create(
+                                            Path.Combine(seasonDir, EpisodeVersions.FileName(fileName, version.Label)),
+                                            version.Url));
                                     }
                                 }
-                                else
-                                {
-                                    Interlocked.Increment(ref _episodeProgress.Skipped);
-                                }
 
-                                Interlocked.Increment(ref _episodeProgress.Total);
+                                if (entries.Count == 0)
+                                    entries.Add(Tuple.Create(strmPath, streamUrl));
 
-                                lock (writtenPaths)
+                                foreach (var entry in entries)
                                 {
-                                    writtenPaths.Add(strmPath);
+                                    // Skip write if file content is already up to date (avoids Emby library re-scan)
+                                    var fileExists = File.Exists(entry.Item1);
+                                    if (!fileExists || File.ReadAllText(entry.Item1) != entry.Item2)
+                                    {
+                                        Directory.CreateDirectory(seasonDir);
+                                        File.WriteAllText(entry.Item1, entry.Item2);
+
+                                        if (!fileExists)
+                                        {
+                                            Interlocked.Increment(ref _episodeProgress.Added);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        Interlocked.Increment(ref _episodeProgress.Skipped);
+                                    }
+
+                                    Interlocked.Increment(ref _episodeProgress.Total);
+
+                                    lock (writtenPaths)
+                                    {
+                                        writtenPaths.Add(entry.Item1);
+                                    }
                                 }
                             }
                         }

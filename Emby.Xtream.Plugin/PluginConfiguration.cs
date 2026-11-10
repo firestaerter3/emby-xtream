@@ -90,6 +90,15 @@ namespace Emby.Xtream.Plugin
         /// an admin account the first time unless someone creates the profile by hand. See ADR-024.
         /// </summary>
         public bool DispatcharrVideoFirst { get; set; }
+
+        /// <summary>
+        /// Series tab, "One version per Dispatcharr provider" (issue #111). When Dispatcharr has an
+        /// episode from more than one provider, the series sync writes one <c>.strm</c> per provider,
+        /// as it already does for movies, so Emby offers them as versions. The extra files are named
+        /// after the provider's account in Dispatcharr. Off by default: it adds files to existing
+        /// libraries. Changing it re-syncs every series once. See ADR-025.
+        /// </summary>
+        public bool DispatcharrEpisodeVersions { get; set; }
         public int[] SelectedDispatcharrProfileIds { get; set; } = new int[0];
         public string CachedDispatcharrProfiles { get; set; } = string.Empty;
 
@@ -184,6 +193,7 @@ namespace Emby.Xtream.Plugin
         // A change triggers automatic full re-sync so the pre-fetch skip can't match stale paths.
         public bool LastKnownEnableSeriesIdFolderNaming { get; set; }
         public bool LastKnownEnableSeriesMetadataLookup { get; set; }
+        public bool LastKnownDispatcharrEpisodeVersions { get; set; }
     }
 
     public enum EpgSourceMode
