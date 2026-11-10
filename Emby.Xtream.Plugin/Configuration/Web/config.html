@@ -853,6 +853,21 @@
 
                 <div class="seriesSettings">
                 <div class="verticalSection">
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input class="chkDispatcharrEpisodeVersions" type="checkbox" is="emby-checkbox" />
+                            <span>One version per Dispatcharr provider</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Needs Dispatcharr. When Dispatcharr has an episode from more than one provider, each
+                            provider becomes a version you can pick in Emby, as with movies. The extra versions are
+                            named after the provider's account in Dispatcharr, for example
+                            <i>Show - S01E01 - Title - UK</i>. The first one keeps its usual name and plays what it
+                            played before. Changing this setting syncs every series once more.
+                        </div>
+                    </div>
+                </div>
+                <div class="verticalSection">
                         <select class="selSeriesFolderMode" style="display:none;">
                             <option value="single">Single Folder</option>
                             <option value="custom">Multiple Folders</option>
