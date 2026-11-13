@@ -137,6 +137,22 @@ namespace Emby.Xtream.Plugin.Service
         // Internal so tests can set it to zero.
         internal int SeriesDetailRetryDelayMs = 1000;
 
+        /// <summary>
+        /// Waits before each new try of a <c>get_series_info</c> request the provider refused with
+        /// 403 or 429 (issue #111). Some providers refuse about half of these requests at random,
+        /// whatever the spacing, and answer the same request a few seconds later. Settable for tests.
+        /// </summary>
+        internal int[] SeriesDetailRefusedRetryDelaysMs = { 1000, 2000, 3000, 5000, 8000 };
+
+        /// <summary>
+        /// After this many series in a row stay refused through every try, stop retrying until one
+        /// succeeds. A provider that refuses everything (a blocked account) would otherwise add the
+        /// whole wait to every series in the library.
+        /// </summary>
+        internal const int RefusedSeriesBeforeRetriesStop = 5;
+
+        private int _seriesRefusedInARow;
+
         // Single-flight gates. Each sync replaces its progress object wholesale and shares a
         // written-path set, so two overlapping runs of the same kind corrupt each other's state.
         // Movies and series are gated separately because they touch different roots and are
@@ -708,6 +724,7 @@ namespace Emby.Xtream.Plugin.Service
         {
             ApplyUserAgentToSharedClient();
             CheckAndUpgradeNamingVersion(config, saveConfig);
+            Interlocked.Exchange(ref _seriesRefusedInARow, 0);
             _seriesProgress = new SyncProgress { IsRunning = true, Phase = "Starting series sync" };
             _episodeProgress = new SyncProgress { IsRunning = true };
             // Series that failed last time are processed again whatever their LastModified says.
@@ -838,9 +855,13 @@ namespace Emby.Xtream.Plugin.Service
                 // Auto-reset delta state when folder naming flags change (stale folder paths would break pre-fetch skip).
                 // The episode versions setting too: unchanged series are skipped before their episodes
                 // are read, so without a full pass the setting would only reach series the provider touches.
+                // Tracked as "versions can be written", not just the tick box: ticked before Dispatcharr
+                // is set up, the full pass writes plain files, and setting up Dispatcharr later must
+                // trigger another one.
+                var episodeVersionsActive = EpisodeVersionsActive(config);
                 if (config.EnableSeriesIdFolderNaming != config.LastKnownEnableSeriesIdFolderNaming
                     || config.EnableSeriesMetadataLookup != config.LastKnownEnableSeriesMetadataLookup
-                    || config.DispatcharrEpisodeVersions != config.LastKnownDispatcharrEpisodeVersions)
+                    || episodeVersionsActive != config.LastKnownDispatcharrEpisodeVersions)
                 {
                     if (lastSeriesTs > 0)
                         _logger.Info("Series folder naming or episode version settings changed, forcing full re-sync");
@@ -850,13 +871,11 @@ namespace Emby.Xtream.Plugin.Service
                 }
                 config.LastKnownEnableSeriesIdFolderNaming = config.EnableSeriesIdFolderNaming;
                 config.LastKnownEnableSeriesMetadataLookup = config.EnableSeriesMetadataLookup;
-                config.LastKnownDispatcharrEpisodeVersions = config.DispatcharrEpisodeVersions;
+                config.LastKnownDispatcharrEpisodeVersions = episodeVersionsActive;
                 saveConfig?.Invoke();
 
                 // Null unless the setting is on and Dispatcharr is configured (issue #111).
-                var episodeVersionClient = config.DispatcharrEpisodeVersions
-                    ? CreateDispatcharrVodClient(config)
-                    : null;
+                var episodeVersionClient = episodeVersionsActive ? CreateDispatcharrVodClient(config) : null;
 
                 // Excluded series never enter the loop below, so fold their timestamps in here —
                 // otherwise the watermark stalls behind an excluded-but-recent title.
@@ -1193,10 +1212,15 @@ namespace Emby.Xtream.Plugin.Service
                                 .FirstOrDefault(e => e != null && e.Id > 0);
                             if (firstEpisode != null)
                             {
+                                string lookupFailure = null;
                                 try
                                 {
                                     dispatcharrEpisodes = await episodeVersionClient.GetSeriesEpisodeProvidersAsync(
                                         config.DispatcharrUrl, firstEpisode.Id, cancellationToken).ConfigureAwait(false);
+                                    // No answer (no login, episode or series unknown) is a failed lookup
+                                    // too, not "this series has no versions".
+                                    if (dispatcharrEpisodes == null)
+                                        lookupFailure = "Dispatcharr returned no episode data";
                                 }
                                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                                 {
@@ -1204,7 +1228,12 @@ namespace Emby.Xtream.Plugin.Service
                                 }
                                 catch (Exception ex)
                                 {
-                                    _logger.Warn("Dispatcharr episode versions lookup failed for series '{0}': {1}", series.Name, ex.Message);
+                                    lookupFailure = ex.Message;
+                                }
+
+                                if (lookupFailure != null)
+                                {
+                                    _logger.Warn("Dispatcharr episode versions lookup failed for series '{0}': {1}", series.Name, lookupFailure);
                                     if (Directory.Exists(seriesDir))
                                         RecordStrms(Directory.GetFiles(seriesDir, "*.strm", SearchOption.AllDirectories), writtenPaths);
                                 }
@@ -1511,6 +1540,12 @@ namespace Emby.Xtream.Plugin.Service
             client.Configure(config.DispatcharrUser, config.DispatcharrPass);
             return client;
         }
+
+        /// <summary>True when the series sync can write episode versions: the setting is on and Dispatcharr is set up.</summary>
+        internal static bool EpisodeVersionsActive(PluginConfiguration config)
+            => config.DispatcharrEpisodeVersions
+               && config.EnableDispatcharr
+               && !string.IsNullOrEmpty(config.DispatcharrUrl);
 
         private enum MovieWriteOutcome { InvalidName, NoFolder, Skipped, Written }
 
@@ -2340,7 +2375,7 @@ namespace Emby.Xtream.Plugin.Service
         {
             var url = XtreamUrls.PlayerApi(config, "get_series_info", "series_id", seriesId);
 
-            var detail = await GetSeriesDetailAsync(url).ConfigureAwait(false);
+            var detail = await GetSeriesDetailAsync(url, seriesId, cancellationToken).ConfigureAwait(false);
             if (HasEpisodes(detail))
             {
                 return detail;
@@ -2357,7 +2392,7 @@ namespace Emby.Xtream.Plugin.Service
                 await Task.Delay(SeriesDetailRetryDelayMs, cancellationToken).ConfigureAwait(false);
             }
 
-            var retried = await GetSeriesDetailAsync(url).ConfigureAwait(false);
+            var retried = await GetSeriesDetailAsync(url, seriesId, cancellationToken).ConfigureAwait(false);
             if (HasEpisodes(retried))
             {
                 _logger.Info("Series {0} returned episodes on retry after an empty answer", seriesId);
@@ -2366,10 +2401,44 @@ namespace Emby.Xtream.Plugin.Service
             return retried;
         }
 
-        private async Task<SeriesDetailInfo> GetSeriesDetailAsync(string url)
+        private async Task<SeriesDetailInfo> GetSeriesDetailAsync(string url, int seriesId, CancellationToken cancellationToken)
         {
-            var json = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
-            return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
+            var delays = SeriesDetailRefusedRetryDelaysMs ?? new int[0];
+            for (int attempt = 0; ; attempt++)
+            {
+                using (var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false))
+                {
+                    var status = (int)response.StatusCode;
+                    var refused = status == 403 || status == 429;
+                    if (refused
+                        && attempt < delays.Length
+                        && Volatile.Read(ref _seriesRefusedInARow) < RefusedSeriesBeforeRetriesStop)
+                    {
+                        _logger.Debug("Series {0}: provider answered {1}, trying again in {2} ms (try {3} of {4})",
+                            seriesId, status, delays[attempt], attempt + 2, delays.Length + 1);
+                        if (delays[attempt] > 0)
+                            await Task.Delay(delays[attempt], cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    if (refused)
+                    {
+                        if (Interlocked.Increment(ref _seriesRefusedInARow) == RefusedSeriesBeforeRetriesStop)
+                            _logger.Warn("Provider refused {0} series in a row after every retry; not retrying refused requests until one succeeds",
+                                RefusedSeriesBeforeRetriesStop);
+                    }
+                    else if (response.IsSuccessStatusCode)
+                    {
+                        if (attempt > 0)
+                            _logger.Info("Series {0} answered on try {1} after the provider refused it", seriesId, attempt + 1);
+                        Interlocked.Exchange(ref _seriesRefusedInARow, 0);
+                    }
+
+                    response.EnsureSuccessStatusCode();
+                    var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    return STJ.JsonSerializer.Deserialize<SeriesDetailInfo>(json, JsonOptions);
+                }
+            }
         }
 
         private static bool HasEpisodes(SeriesDetailInfo detail)
