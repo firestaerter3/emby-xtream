@@ -137,6 +137,50 @@ namespace Emby.Xtream.Plugin.Tests
             Assert.True(File.Exists(UkFile), "A failed lookup must not let cleanup remove the other versions");
         }
 
+        [Fact]
+        public async Task LookupReturnsNothing_KeepsVersionsAlreadyOnDisk()
+        {
+            RegisterSeries(lastModified: "2000");
+            RegisterDispatcharr(TwoProviders);
+            var config = VersionsConfig();
+            config.CleanupOrphans = true;
+            var svc = Service();
+            await svc.SyncSeriesAsync(config, None, SaveConfig);
+            Assert.True(File.Exists(UkFile));
+
+            // Dispatcharr answers, but without a series: GetSeriesEpisodeProvidersAsync returns null.
+            RegisterSeries(lastModified: "3000");
+            Handler.RespondWith("/api/accounts/token/", "{\"access\":\"tok\",\"refresh\":\"ref\"}");
+            Handler.RespondWith("api/vod/episodes/101/", "{\"id\":101,\"uuid\":\"ep-uuid\",\"series\":null}");
+            await svc.SyncSeriesAsync(config, None, SaveConfig);
+
+            Assert.Equal("http://fake-xtream/series/user/pass/101.mp4", File.ReadAllText(MainFile));
+            Assert.True(File.Exists(UkFile), "No answer from Dispatcharr must not let cleanup remove the other versions");
+        }
+
+        [Fact]
+        public async Task TickedBeforeDispatcharrWasSetUp_SettingItUpLaterStillWritesVersions()
+        {
+            // First run: box ticked, Dispatcharr not configured yet, so plain files only.
+            RegisterSeries(times: 2);
+            var config = DefaultConfig();
+            config.SmartSkipExisting = true;
+            config.DispatcharrEpisodeVersions = true;
+            var svc = Service();
+            await svc.SyncSeriesAsync(config, None, SaveConfig);
+            Assert.False(File.Exists(UkFile));
+
+            // Dispatcharr set up afterwards; the provider has not touched the series.
+            RegisterDispatcharr(TwoProviders);
+            config.EnableDispatcharr = true;
+            config.DispatcharrUrl = Dispatcharr;
+            config.DispatcharrUser = "admin";
+            config.DispatcharrPass = "secret";
+            await svc.SyncSeriesAsync(config, None, SaveConfig);
+
+            Assert.True(File.Exists(UkFile));
+        }
+
         // ----- EpisodeVersions.Build -----
 
         private static DispatcharrEpisodeProvider P(int id, string stream, string name, int? priority = null) =>

@@ -54,9 +54,13 @@ old file stays behind as a third version.
   usual file name, so it plays what it played before; the others add ` - {account name}`.
 - An episode with one provider keeps its single Xtream URL, unchanged.
 - If the lookup fails, episodes get their single file and the version files already on disk are
-  counted as in use, so a Dispatcharr hiccup does not make cleanup delete them (ADR-018).
-- Changing the setting forces a full series pass, like the folder naming settings do. Otherwise
-  series the provider has not touched are skipped before their episodes are read.
+  counted as in use, so a Dispatcharr hiccup does not make cleanup delete them (ADR-018). No
+  answer at all (no login, episode or series unknown) counts as a failure too; in v1.4.115 only an
+  exception did, so cleanup could remove version files when Dispatcharr returned nothing.
+- Changing whether versions can be written forces a full series pass, like the folder naming
+  settings do. Otherwise series the provider has not touched are skipped before their episodes are
+  read. What is tracked is the setting *and* Dispatcharr being set up: ticked before Dispatcharr is
+  configured, the first pass writes plain files, and configuring Dispatcharr later needs another.
 
 ## Consequences
 

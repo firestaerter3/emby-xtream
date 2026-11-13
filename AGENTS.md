@@ -161,6 +161,15 @@ renaming it would delete and recreate a file per episode and trip the orphan saf
 failed lookup, the version files on disk count as written. See
 [ADR-025](docs/decisions/025-episode-versions-per-dispatcharr-provider.md).
 
+### `get_series_info` is retried on 403 and 429
+
+Some providers refuse about half of `get_series_info` requests at random with 403, whatever the
+spacing, and answer the same request seconds later (measured by the reporter of #111: slowing down
+did not help, retrying did). `GetSeriesDetailAsync` tries again after 1, 2, 3, 5 and 8 s. After 5
+series in a row stay refused through every try it stops retrying until one succeeds, so a blocked
+account does not add 19 s to every series. Other errors are not retried there; the empty-episode
+retry in `FetchSeriesDetailAsync` is a separate case.
+
 ### Absence of provider data is never evidence of deletion
 
 Orphan cleanup works by difference, so it is only correct when the run saw the whole catalogue. A per-category request that fails must not flatten into an empty list: that is indistinguishable from an empty category, and one failing category among many stays well under `OrphanSafetyThreshold`, so the ratio guard never fires. `CatalogueFetchResult<T>` carries `FailedCategoryCount` and gates cleanup on it.
