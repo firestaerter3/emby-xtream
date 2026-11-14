@@ -161,7 +161,10 @@ namespace Emby.Xtream.Plugin.Service
                 return result;
             }
 
-            if (!Version.TryParse(NormalizeVersion(versionStr), out latest))
+            // Beta tags carry a suffix ("v1.4.116-beta"), which Version cannot read. Before this,
+            // every beta failed to parse and the beta channel showed the installed version as the
+            // latest (issue #108). Compare on the numbers only; LatestVersion keeps the suffix.
+            if (!Version.TryParse(NormalizeVersion(StripPreReleaseSuffix(versionStr)), out latest))
             {
                 result.Error = "Could not parse release tag: " + tagName;
                 return result;
@@ -169,6 +172,14 @@ namespace Emby.Xtream.Plugin.Service
 
             result.UpdateAvailable = latest > current;
             return result;
+        }
+
+        /// <summary><c>1.4.116-beta</c> → <c>1.4.116</c>; also drops build metadata (<c>+abc</c>).</summary>
+        internal static string StripPreReleaseSuffix(string version)
+        {
+            if (string.IsNullOrEmpty(version)) return version;
+            var cut = version.IndexOfAny(new[] { '-', '+' });
+            return cut > 0 ? version.Substring(0, cut) : version;
         }
 
         private static string NormalizeVersion(string version)
