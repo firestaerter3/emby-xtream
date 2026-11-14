@@ -253,6 +253,14 @@ it drifted when this was left for later: by v1.4.112 it listed a folder mode tha
 existed, the wrong default for orphan cleanup and the wrong .NET SDK. Describe settings by the
 label the config page shows, and keep defaults out of the README unless a user has to know them.
 
+### Release tags carry no suffix
+
+Tag a beta `vX.Y.Z`, never `vX.Y.Z-beta`. The release workflow publishes every tag as a
+pre-release, and stable is the same release with the pre-release flag removed. The plugin's
+updater up to 1.4.116 read the tag as a version number and failed on any suffix, so from about
+1.4.91 to 1.4.116 no beta ever reached a user through the update banner (#108, fixed in #114).
+Users on those versions still run that updater, so a suffixed tag stays invisible to them.
+
 ### Release notes must credit bug reporters
 
 When editing or creating GitHub release notes, each bug fix entry should include the reporter in brackets:
