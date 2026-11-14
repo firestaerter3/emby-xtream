@@ -1,5 +1,6 @@
 using System;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
 
 namespace Emby.Xtream.Plugin.Service
 {
@@ -28,19 +29,41 @@ namespace Emby.Xtream.Plugin.Service
         /// again after the user clears the field restores the default rather than leaving the old
         /// header behind.
         /// </summary>
+        /// <remarks>
+        /// The sync service's client is static and shared, and every sync calls this when it starts.
+        /// <see cref="System.Net.Http.Headers.HttpHeaders"/> is not safe for concurrent writes: a movie
+        /// and a series sync starting together could corrupt the header store and fail with
+        /// "Unable to cast object of type 'List`1[String]' to type 'String'" (seen in CI on a test
+        /// that does exactly that). So writes are serialized, and skipped when the value is already
+        /// the one set, which leaves the headers untouched while requests are in flight unless the
+        /// user actually changed the setting.
+        /// </remarks>
         internal static void Apply(HttpClient client, string configuredUserAgent)
         {
             if (client == null)
                 return;
 
-            client.DefaultRequestHeaders.Remove("User-Agent");
-
             var value = string.IsNullOrWhiteSpace(configuredUserAgent)
                 ? Default
                 : configuredUserAgent.Trim();
 
-            client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", value);
+            lock (Gate)
+            {
+                var applied = Applied.GetValue(client, _ => new StrongBox<string>());
+                if (applied.Value == value)
+                    return;
+
+                client.DefaultRequestHeaders.Remove("User-Agent");
+                client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", value);
+                applied.Value = value;
+            }
         }
+
+        private static readonly object Gate = new object();
+
+        // What Apply last set on each client. Weak keys, so clients that are dropped are not kept alive.
+        private static readonly ConditionalWeakTable<HttpClient, StrongBox<string>> Applied =
+            new ConditionalWeakTable<HttpClient, StrongBox<string>>();
 
         private static string BuildDefault()
         {
