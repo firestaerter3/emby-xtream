@@ -165,5 +165,34 @@ namespace Emby.Xtream.Plugin.Tests
                 });
             }
         }
+
+        [Fact]
+        public void ManySyncsStartingAtOnce_DoNotCorruptTheSharedClient()
+        {
+            // The sync service shares one static client and applies the User-Agent at the start of
+            // every sync. Unserialized, concurrent writes broke HttpHeaders with an
+            // InvalidCastException (seen in CI).
+            using (var client = new HttpClient())
+            {
+                Parallel.For(0, 2000, new ParallelOptions { MaxDegreeOfParallelism = 8 }, i =>
+                    XtreamUserAgent.Apply(client, i % 2 == 0 ? null : "MyProviderClient/2.3"));
+
+                XtreamUserAgent.Apply(client, "MyProviderClient/2.3");
+                Assert.Equal("MyProviderClient/2.3", HeaderValue(client));
+            }
+        }
+
+        [Fact]
+        public void SameValueAgain_LeavesTheHeadersAlone()
+        {
+            using (var client = new HttpClient())
+            {
+                XtreamUserAgent.Apply(client, "MyProviderClient/2.3");
+                // A header someone added by hand would be dropped by a rewrite; it survives a no-op.
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("Extra/1.0");
+                XtreamUserAgent.Apply(client, "MyProviderClient/2.3");
+                Assert.Contains("Extra/1.0", HeaderValue(client));
+            }
+        }
     }
 }
