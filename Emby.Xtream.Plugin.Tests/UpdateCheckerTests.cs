@@ -17,6 +17,33 @@ namespace Emby.Xtream.Plugin.Tests
         }
 
         [Fact]
+        public void BetaTag_IsRead_AndOffered()
+        {
+            var result = UpdateChecker.CompareVersions("1.4.112.0", "v1.4.116-beta", "", "", "");
+            Assert.Null(result.Error);
+            Assert.True(result.UpdateAvailable);
+            Assert.Equal("1.4.116-beta", result.LatestVersion);
+        }
+
+        [Fact]
+        public void BetaTag_OfTheInstalledVersion_IsNotOffered()
+        {
+            var result = UpdateChecker.CompareVersions("1.4.116.0", "v1.4.116-beta", "", "", "");
+            Assert.Null(result.Error);
+            Assert.False(result.UpdateAvailable);
+        }
+
+        [Theory]
+        [InlineData("1.4.116-beta", "1.4.116")]
+        [InlineData("1.4.116-rc.1", "1.4.116")]
+        [InlineData("1.4.116+build5", "1.4.116")]
+        [InlineData("1.4.116", "1.4.116")]
+        public void StripPreReleaseSuffix_KeepsTheNumbers(string input, string expected)
+        {
+            Assert.Equal(expected, UpdateChecker.StripPreReleaseSuffix(input));
+        }
+
+        [Fact]
         public void SameVersionNotAvailable()
         {
             var result = UpdateChecker.CompareVersions("1.0.0", "v1.0.0", "https://github.com/release", "", "");
