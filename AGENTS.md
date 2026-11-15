@@ -182,7 +182,7 @@ The `existingStrms.Length > 10` gate on the ratio check stays. Removing it means
 
 ### The sync's delete code lives in its own file for mutation testing
 
-`RemoveExcludedContent`, `CleanupOrphans` and their helpers are in `Service/StrmSyncService.Cleanup.cs` (a partial of `StrmSyncService`). Stryker mutates that whole file; it cannot compile its changes to the rest of `StrmSyncService.cs`, and a line range into that file went stale whenever code was added above it (issue #75). `scripts/check-delete-sites.py` fails CI if a delete call of the sync service appears anywhere else. Run Stryker locally with `DOTNET_ROOT=<dotnet libexec> DOTNET_ROLL_FORWARD=Major ~/.dotnet/tools/dotnet-stryker --config-file ../stryker-config.json` from `Emby.Xtream.Plugin.Tests` (it ships as net8.0).
+`RemoveExcludedContent`, `CleanupOrphans` and their helpers are in `Service/StrmSyncService.Cleanup.cs` (a partial of `StrmSyncService`). Stryker mutates that whole file; it cannot compile its changes to the rest of `StrmSyncService.cs`, and a line range into that file went stale whenever code was added above it (issue #75). `scripts/check-delete-sites.py` fails CI if a delete call of the sync service appears anywhere else. Run Stryker locally with `DOTNET_ROOT=<dotnet libexec> DOTNET_ROLL_FORWARD=Major ~/.dotnet/tools/dotnet-stryker --config-file ../stryker-config.json` from `Emby.Xtream.Plugin.Tests`. Use Stryker 5.1 or later (`dotnet tool update -g dotnet-stryker`): 4.16 finds 0 tests when the build uses the .NET 11 SDK. Roll-forward is still needed when only a newer runtime is installed, because the tests are net10.0 and Stryker's vstest.console is net8.0.
 
 ### One sync of each kind at a time, enforced in the service
 

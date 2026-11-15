@@ -64,7 +64,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Stryker 4.16 ships as net8.0. Installing both runtimes is cleaner than
+      # Stryker 5.1 runs on net10.0 but deploys a vstest.console built for net8.0, and the
+      # tests are net10.0, so both runtimes are needed. Installing them is cleaner than
       # forcing roll-forward, and keeps the failure mode obvious if either moves.
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -73,8 +74,12 @@ jobs:
             8.0.x
             10.0.x
 
+      # Not 4.16: its vstest crashes in test discovery (NullReferenceException in
+      # DotnetTestHostManager.GetTestHostPath) when the build uses the .NET 11 SDK, which
+      # ubuntu-26.04 images ship from 20261111 on. The job then reports 0 tests and exits 1.
+      # No global.json pins the SDK, so a newer SDK on the image can break this again.
       - name: Install Stryker
-        run: dotnet tool install -g dotnet-stryker --version 4.16.0
+        run: dotnet tool install -g dotnet-stryker --version 5.1.0
 
       # Scoped to StrmOwnership and the delete methods of StrmSyncService. These are the
       # only paths that remove a user's files, and a test that cannot fail there is worse
