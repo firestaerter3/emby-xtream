@@ -1308,6 +1308,10 @@ namespace Emby.Xtream.Plugin.Service
             {
                 Logger.Warn("On-demand Dispatcharr data fetch failed: {0}", ex.Message);
             }
+
+            // ClearCaches and a restart drop the profile id too. Without this, a channel played
+            // before Emby asks for the channel list again goes out without the profile (#108).
+            await ResolveVideoFirstProfileAsync(config, cancellationToken).ConfigureAwait(false);
         }
 
         private bool TryResolveStreamId(TunerHostInfo tuner, ChannelInfo tunerChannel, out int streamId)
@@ -1359,9 +1363,8 @@ namespace Emby.Xtream.Plugin.Service
 
         private (string Url, bool IsDispatcharr) BuildStreamUrl(PluginConfiguration config, int streamId)
         {
-            // Only reads the id the last channel refresh resolved: looking it up here would put
-            // Dispatcharr requests in front of playback (BUG-007). Until a refresh has run, the
-            // stream plays without the profile, as it did before the setting existed.
+            // Only reads the id the last channel refresh or on-demand load resolved: looking it up
+            // here would put Dispatcharr requests in front of every playback (BUG-007).
             var result = ResolveStreamUrl(config, streamId, _channelUuidMap,
                 config.DispatcharrVideoFirst ? _videoFirstProfileId : 0);
             switch (result.Route)
