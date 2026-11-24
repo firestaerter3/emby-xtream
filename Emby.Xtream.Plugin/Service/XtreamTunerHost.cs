@@ -1303,6 +1303,12 @@ namespace Emby.Xtream.Plugin.Service
                 _dispatcharrDataLoaded = true;
                 Logger.Info("Loaded {0} UUIDs and {1} stream stats from Dispatcharr on-demand",
                     data.UuidMap.Count, data.Stats.Count);
+
+                // ClearCaches and a restart drop the profile id too. Without this, a channel played
+                // before Emby asks for the channel list again goes out without the profile (#108).
+                // Only after a successful load: while Dispatcharr is down this method runs again on
+                // every play, and a second failing request would make each of them slower.
+                await ResolveVideoFirstProfileAsync(config, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1359,9 +1365,8 @@ namespace Emby.Xtream.Plugin.Service
 
         private (string Url, bool IsDispatcharr) BuildStreamUrl(PluginConfiguration config, int streamId)
         {
-            // Only reads the id the last channel refresh resolved: looking it up here would put
-            // Dispatcharr requests in front of playback (BUG-007). Until a refresh has run, the
-            // stream plays without the profile, as it did before the setting existed.
+            // Only reads the id the last channel refresh or on-demand load resolved: looking it up
+            // here would put Dispatcharr requests in front of every playback (BUG-007).
             var result = ResolveStreamUrl(config, streamId, _channelUuidMap,
                 config.DispatcharrVideoFirst ? _videoFirstProfileId : 0);
             switch (result.Route)

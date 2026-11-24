@@ -75,8 +75,10 @@ the Xtream URL) end up in the same view (`stream_ts`), which reads that paramete
   for it.
 - The id is kept in memory and added to the stream URL (`&output_profile=` on the proxy URL,
   `?output_profile=` on the Xtream URL). Playback only reads the stored id; it never calls
-  Dispatcharr, so nothing is added in front of a tune (BUG-007). Until a refresh has resolved an
-  id, channels play without it, as before.
+  Dispatcharr, so nothing is added in front of a tune (BUG-007). The one exception is the
+  on-demand load that runs when a channel plays after a restart or **Refresh Channel & Guide
+  Cache**, before Emby has asked for the channel list: it resolves the id along with the channel
+  data, once. Without that, those plays went out without the profile (#108 follow-up).
 - A profile with the name is used whoever created it, so an admin can create it by hand for an
   account that may not. One that is switched off in Dispatcharr is left alone.
 - The lookup never retries: a 404 (no output profiles, older Dispatcharr) or a 403 (account may
