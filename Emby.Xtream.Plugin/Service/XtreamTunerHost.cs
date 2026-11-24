@@ -1303,15 +1303,17 @@ namespace Emby.Xtream.Plugin.Service
                 _dispatcharrDataLoaded = true;
                 Logger.Info("Loaded {0} UUIDs and {1} stream stats from Dispatcharr on-demand",
                     data.UuidMap.Count, data.Stats.Count);
+
+                // ClearCaches and a restart drop the profile id too. Without this, a channel played
+                // before Emby asks for the channel list again goes out without the profile (#108).
+                // Only after a successful load: while Dispatcharr is down this method runs again on
+                // every play, and a second failing request would make each of them slower.
+                await ResolveVideoFirstProfileAsync(config, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 Logger.Warn("On-demand Dispatcharr data fetch failed: {0}", ex.Message);
             }
-
-            // ClearCaches and a restart drop the profile id too. Without this, a channel played
-            // before Emby asks for the channel list again goes out without the profile (#108).
-            await ResolveVideoFirstProfileAsync(config, cancellationToken).ConfigureAwait(false);
         }
 
         private bool TryResolveStreamId(TunerHostInfo tuner, ChannelInfo tunerChannel, out int streamId)
